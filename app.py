@@ -9,7 +9,14 @@ from functools import wraps
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'vitaflow-hospital-angicos-2024')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///hospital_almoxarifado.db')
+# Configuração do banco de dados
+database_url = os.environ.get('DATABASE_URL')
+if database_url and database_url.startswith('postgres://'):
+    # Render.com usa postgres:// mas SQLAlchemy precisa de postgresql://
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///hospital_almoxarifado.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Configurações para upload de arquivos
@@ -529,7 +536,18 @@ def toggle_usuario(id):
     
     return redirect(url_for('usuarios'))
 
+@app.route('/test')
+def test_route():
+    return "VitaFlow está funcionando! Acesse /login para fazer login."
+
 @app.route('/')
+def index():
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    else:
+        return redirect(url_for('login'))
+
+@app.route('/dashboard')
 @login_required
 def dashboard():
     # Estatísticas gerais
