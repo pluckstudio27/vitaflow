@@ -1354,9 +1354,95 @@ def relatorio_recebimentos():
     recebimentos = RecebimentoPedido.query.order_by(RecebimentoPedido.data_recebimento.desc()).all()
     return render_template('relatorio_recebimentos.html', recebimentos=recebimentos)
 
-if __name__ == '__main__':
+def inicializar_sistema():
+    """Inicializa o banco de dados e cria usuários padrão se necessário"""
     with app.app_context():
+        # Criar todas as tabelas
         db.create_all()
+        
+        # Verificar se já existem usuários
+        if User.query.count() == 0:
+            print("Criando usuários padrão...")
+            
+            usuarios_padrao = [
+                {
+                    'username': 'admin',
+                    'email': 'admin@hospital-angicos.gov.br',
+                    'nome_completo': 'Administrador do Sistema',
+                    'cargo': 'admin',
+                    'setor': 'administracao',
+                    'password': 'admin123'
+                },
+                {
+                    'username': 'enfermeiro1',
+                    'email': 'enfermeiro@hospital-angicos.gov.br',
+                    'nome_completo': 'Maria Silva Santos',
+                    'cargo': 'tecnico',
+                    'setor': 'enfermagem',
+                    'password': 'enf123'
+                },
+                {
+                    'username': 'farmaceutico1',
+                    'email': 'farmaceutico@hospital-angicos.gov.br',
+                    'nome_completo': 'João Carlos Oliveira',
+                    'cargo': 'tecnico',
+                    'setor': 'farmacia',
+                    'password': 'farm123'
+                },
+                {
+                    'username': 'secretaria1',
+                    'email': 'secretaria@hospital-angicos.gov.br',
+                    'nome_completo': 'Ana Paula Costa',
+                    'cargo': 'secretaria',
+                    'setor': 'administracao',
+                    'password': 'sec123'
+                },
+                {
+                    'username': 'operador1',
+                    'email': 'operador@hospital-angicos.gov.br',
+                    'nome_completo': 'Carlos Eduardo Lima',
+                    'cargo': 'operador',
+                    'setor': 'almoxarifado',
+                    'password': 'op123'
+                }
+            ]
+            
+            for user_data in usuarios_padrao:
+                user = User(
+                    username=user_data['username'],
+                    email=user_data['email'],
+                    nome_completo=user_data['nome_completo'],
+                    cargo=user_data['cargo'],
+                    setor=user_data['setor']
+                )
+                user.set_password(user_data['password'])
+                db.session.add(user)
+                print(f"✓ Usuário criado: {user_data['nome_completo']} ({user_data['username']})")
+            
+            db.session.commit()
+            
+            print("\n=== CREDENCIAIS DE ACESSO ===")
+            print("Administrador:")
+            print("  Usuário: admin")
+            print("  Senha: admin123")
+            print("\nEnfermeiro (Técnico):")
+            print("  Usuário: enfermeiro1")
+            print("  Senha: enf123")
+            print("\nFarmacêutico (Técnico):")
+            print("  Usuário: farmaceutico1")
+            print("  Senha: farm123")
+            print("\nSecretária:")
+            print("  Usuário: secretaria1")
+            print("  Senha: sec123")
+            print("\nOperador:")
+            print("  Usuário: operador1")
+            print("  Senha: op123")
+            print("\n⚠️  IMPORTANTE: Altere as senhas padrão após o primeiro login!")
+        else:
+            print(f"Sistema já inicializado com {User.query.count()} usuários.")
+
+if __name__ == '__main__':
+    inicializar_sistema()
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') == 'development'
     app.run(debug=debug, host='0.0.0.0', port=port)
