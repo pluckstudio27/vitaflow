@@ -8,8 +8,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'vitaflow-hospital-angicos-2024'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hospital_almoxarifado.db'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'vitaflow-hospital-angicos-2024')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///hospital_almoxarifado.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Configurações para upload de arquivos
@@ -1357,4 +1357,6 @@ def relatorio_recebimentos():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    app.run(debug=debug, host='0.0.0.0', port=port)
