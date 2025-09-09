@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Conferir Recebimento{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h4 class="mb-0">
+                        <i class="fas fa-search"></i> Conferir Recebimento
+                    </h4>
+                    <small>Protocolo: {{ recebimento.protocolo_recebimento }}</small>
+                </div>
+                <div class="card-body">
+                    <!-- Informações do Recebimento -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card bg-light mb-3">
+                                <div class="card-header">
+                                    <strong>Dados da Nota Fiscal</strong>
+                                </div>
+                                <div class="card-body">
+                                    <strong>Número NF:</strong> {{ recebimento.numero_nota_fiscal }}<br>
+                                    <strong>Fornecedor:</strong> {{ recebimento.fornecedor }}<br>
+                                    <strong>Data NF:</strong> {{ recebimento.data_nota_fiscal.strftime('%d/%m/%Y') }}<br>
+                                    <strong>Valor Total:</strong> R$ {{ "%.2f"|format(recebimento.valor_total) }}<br>
+                                    <strong>Data Recebimento:</strong> {{ recebimento.data_recebimento.strftime('%d/%m/%Y %H:%M') }}<br>
+                                    <strong>Responsável Recebimento:</strong> {{ recebimento.responsavel_recebimento }}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card bg-light mb-3">
+                                <div class="card-header">
+                                    <strong>Dados da Solicitação Original</strong>
+                                </div>
+                                <div class="card-body">
+                                    <strong>Protocolo:</strong> {{ recebimento.solicitacao.protocolo }}<br>
+                                    <strong>Setor:</strong> {{ recebimento.solicitacao.setor }}<br>
+                                    <strong>Solicitante:</strong> {{ recebimento.solicitacao.solicitante }}<br>
+                                    <strong>Autorizado por:</strong> {{ recebimento.solicitacao.responsavel_tecnico }}<br>
+                                    <strong>Validado por:</strong> {{ recebimento.solicitacao.secretaria_validador }}<br>
+                                    <strong>Data Necessária:</strong> {{ recebimento.solicitacao.data_necessidade.strftime('%d/%m/%Y') }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Itens Recebidos -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <strong>Itens Recebidos</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Item</th>
+                                            <th>Qtd. Solicitada</th>
+                                            <th>Qtd. Recebida</th>
+                                            <th>Valor Unitário</th>
+                                            <th>Valor Total</th>
+                                            <th>Lote</th>
+                                            <th>Validade</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in recebimento.itens %}
+                                        <tr>
+                                            <td>{{ item.item_nome }}</td>
+                                            <td>{{ item.quantidade_solicitada }}</td>
+                                            <td>
+                                                {{ item.quantidade_recebida }}
+                                                {% if item.quantidade_recebida != item.quantidade_solicitada %}
+                                                    {% if item.quantidade_recebida < item.quantidade_solicitada %}
+                                                        <span class="badge bg-warning ms-1">Parcial</span>
+                                                    {% else %}
+                                                        <span class="badge bg-info ms-1">Excedente</span>
+                                                    {% endif %}
+                                                {% else %}
+                                                    <span class="badge bg-success ms-1">Completo</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>R$ {{ "%.2f"|format(item.valor_unitario) }}</td>
+                                            <td>R$ {{ "%.2f"|format(item.quantidade_recebida * item.valor_unitario) }}</td>
+                                            <td>{{ item.lote or '-' }}</td>
+                                            <td>{{ item.data_validade.strftime('%d/%m/%Y') if item.data_validade else '-' }}</td>
+                                            <td>
+                                                {% if item.quantidade_recebida == item.quantidade_solicitada %}
+                                                    <span class="badge bg-success">Conforme</span>
+                                                {% elif item.quantidade_recebida < item.quantidade_solicitada %}
+                                                    <span class="badge bg-warning">Divergência</span>
+                                                {% else %}
+                                                    <span class="badge bg-info">Excesso</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% if item.observacoes_item %}
+                                        <tr>
+                                            <td colspan="8" class="text-muted">
+                                                <small><strong>Obs:</strong> {{ item.observacoes_item }}</small>
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Observações do Recebimento -->
+                    {% if recebimento.observacoes %}
+                    <div class="alert alert-info">
+                        <strong>Observações do Recebimento:</strong><br>
+                        {{ recebimento.observacoes }}
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Checklist de Conferência -->
+                    <div class="card mb-3">
+                        <div class="card-header bg-secondary text-white">
+                            <strong>Checklist de Conferência</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="check1">
+                                        <label class="form-check-label" for="check1">
+                                            Nota fiscal confere com o pedido
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="check2">
+                                        <label class="form-check-label" for="check2">
+                                            Quantidades estão corretas
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="check3">
+                                        <label class="form-check-label" for="check3">
+                                            Itens estão em bom estado
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="check4">
+                                        <label class="form-check-label" for="check4">
+                                            Validades estão adequadas
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="check5">
+                                        <label class="form-check-label" for="check5">
+                                            Embalagens estão íntegras
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="check6">
+                                        <label class="form-check-label" for="check6">
+                                            Documentação está completa
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Formulários de Ação -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card border-success">
+                                <div class="card-header bg-success text-white">
+                                    <strong>Aprovar Recebimento</strong>
+                                </div>
+                                <div class="card-body">
+                                    <form method="POST">
+                                        <input type="hidden" name="acao" value="aprovar">
+                                        <div class="mb-3">
+                                            <label class="form-label">Responsável pela Conferência <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" name="responsavel_conferencia" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Observações da Conferência</label>
+                                            <textarea class="form-control" name="observacoes_conferencia" rows="2" placeholder="Observações sobre a conferência..."></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-success w-100" id="btnAprovar" disabled>
+                                            <i class="fas fa-check"></i> Aprovar e Atualizar Estoque
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card border-danger">
+                                <div class="card-header bg-danger text-white">
+                                    <strong>Rejeitar Recebimento</strong>
+                                </div>
+                                <div class="card-body">
+                                    <form method="POST">
+                                        <input type="hidden" name="acao" value="rejeitar">
+                                        <div class="mb-3">
+                                            <label class="form-label">Responsável pela Conferência <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" name="responsavel_conferencia" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Motivo da Rejeição <span class="text-danger">*</span></label>
+                                            <textarea class="form-control" name="observacoes_conferencia" rows="2" required placeholder="Informe o motivo da rejeição..."></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-danger w-100">
+                                            <i class="fas fa-times"></i> Rejeitar Recebimento
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <a href="{{ url_for('painel_recebimento') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Voltar ao Painel
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Habilitar botão de aprovar apenas quando todos os checks estiverem marcados
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = document.querySelectorAll('.form-check-input');
+    const btnAprovar = document.getElementById('btnAprovar');
+    
+    function verificarChecks() {
+        const todosChecados = Array.from(checkboxes).every(checkbox => checkbox.checked);
+        btnAprovar.disabled = !todosChecados;
+    }
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', verificarChecks);
+    });
+});
+</script>
+{% endblock %}

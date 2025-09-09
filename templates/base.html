@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VitaFlow - Hospital Municipal de Angicos{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="fas fa-hospital"></i> VitaFlow - Hospital Municipal de Angicos
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                            <i class="fas fa-tachometer-alt"></i> Dashboard
+                        </a>
+                    </li>
+                    {% if session.cargo != 'usuario' %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownEstoque" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-boxes"></i> Estoque
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('listar_itens') }}"><i class="fas fa-list"></i> Listar Itens</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('adicionar_item') }}"><i class="fas fa-plus"></i> Adicionar Item</a></li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                    {% if session.cargo != 'usuario' %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownMovimentacao" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-exchange-alt"></i> Movimentação
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('transferir_item') }}"><i class="fas fa-exchange-alt"></i> Transferir Itens</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('saida_item') }}"><i class="fas fa-sign-out-alt"></i> Registrar Saída</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('relatorio_movimentacoes') }}"><i class="fas fa-chart-line"></i> Relatórios</a></li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownPlanejamento" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-shopping-cart"></i> Planejamento
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('planejamento_compras') }}"><i class="fas fa-list-check"></i> Solicitações</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('solicitar_compra') }}"><i class="fas fa-plus-circle"></i> Nova Solicitação</a></li>
+                            {% if session.cargo != 'usuario' %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('painel_autorizacao') }}"><i class="fas fa-user-check"></i> Autorização Técnica</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('painel_validacao') }}"><i class="fas fa-user-shield"></i> Validação Secretária</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('painel_recebimento') }}"><i class="fas fa-truck"></i> Recebimento e Conferência</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('analise_consumo') }}"><i class="fas fa-chart-line"></i> Análise de Consumo</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle"></i> 
+                            {% if session.username %}
+                                {{ session.username }}
+                            {% else %}
+                                Usuário
+                            {% endif %}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            {% if session.username %}
+                                <li><h6 class="dropdown-header">Logado como: {{ session.username }}</h6></li>
+                                <li><span class="dropdown-item-text"><small>Cargo: {{ session.cargo }}</small></span></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('usuarios') }}"><i class="fas fa-users"></i> Gerenciar Usuários</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> Sair</a></li>
+                            {% else %}
+                                <li><a class="dropdown-item" href="{{ url_for('login') }}"><i class="fas fa-sign-in-alt"></i> Entrar</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-light mt-5 py-4">
+        <div class="container text-center">
+            <p class="mb-0">&copy; 2024 Hospital Municipal de Angicos - Sistema de Almoxarifado VitaFlow</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

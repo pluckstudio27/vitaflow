@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Transferir Itens - VitaFlow{% endblock %}
+
+{% block content %}
+<style>
+    .page-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem 0;
+        margin: -1.5rem -15px 2rem -15px;
+        border-radius: 0 0 50px 50px;
+    }
+    .card {
+        border: none;
+        box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        border-radius: 15px;
+    }
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 25px;
+        padding: 10px 30px;
+    }
+    .btn-secondary {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        border: none;
+        border-radius: 25px;
+        padding: 10px 30px;
+    }
+    .form-control, .form-select {
+        border-radius: 10px;
+        border: 2px solid #e9ecef;
+        padding: 12px 15px;
+    }
+    .form-control:focus, .form-select:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    }
+</style>
+
+<!-- Page Header -->
+<div class="page-header">
+    <div class="container text-center">
+        <h1><i class="fas fa-exchange-alt me-3"></i>Transferir Itens</h1>
+        <p class="lead mb-0">Almoxarifado → Farmácia</p>
+    </div>
+</div>
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-exchange-alt me-2"></i>Formulário de Transferência</h5>
+                </div>
+                <div class="card-body p-4">
+                    {% if itens %}
+                        <form method="POST">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="item_id" class="form-label"><i class="fas fa-box me-1"></i>Item</label>
+                                    <select class="form-select" id="item_id" name="item_id" required onchange="updateItemInfo()">
+                                        <option value="">Selecione um item...</option>
+                                        {% for item in itens %}
+                                            <option value="{{ item.id }}" 
+                                                    data-quantidade="{{ item.quantidade }}"
+                                                    data-nome="{{ item.nome }}"
+                                                    data-setor="{{ item.setor }}"
+                                                    data-lote="{{ item.lote or 'N/A' }}">
+                                                {{ item.nome }} - {{ item.setor }} ({{ item.quantidade }} unidades)
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="quantidade" class="form-label"><i class="fas fa-sort-numeric-up me-1"></i>Quantidade</label>
+                                    <input type="number" class="form-control" id="quantidade" name="quantidade" min="1" required>
+                                    <div class="form-text">Disponível: <span id="quantidade-disponivel">0</span> unidades</div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="responsavel" class="form-label"><i class="fas fa-user me-1"></i>Responsável</label>
+                                    <input type="text" class="form-control" id="responsavel" name="responsavel" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="motivo" class="form-label"><i class="fas fa-comment me-1"></i>Motivo</label>
+                                    <input type="text" class="form-control" id="motivo" name="motivo" placeholder="Ex: Reposição de estoque">
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="observacoes" class="form-label"><i class="fas fa-sticky-note me-1"></i>Observações</label>
+                                <textarea class="form-control" id="observacoes" name="observacoes" rows="3" placeholder="Observações adicionais (opcional)"></textarea>
+                            </div>
+                            
+                            <!-- Info do Item Selecionado -->
+                            <div id="item-info" class="alert alert-info" style="display: none;">
+                                <h6><i class="fas fa-info-circle me-2"></i>Informações do Item</h6>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <strong>Nome:</strong> <span id="info-nome">-</span>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <strong>Setor:</strong> <span id="info-setor">-</span>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <strong>Lote:</strong> <span id="info-lote">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary me-md-2">
+                                    <i class="fas fa-arrow-left me-1"></i>Voltar
+                                </a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-exchange-alt me-1"></i>Transferir
+                                </button>
+                            </div>
+                        </form>
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">Nenhum item disponível no almoxarifado</h5>
+                            <p class="text-muted">Adicione itens ao almoxarifado para poder transferi-los.</p>
+                            <a href="{{ url_for('adicionar_item') }}" class="btn btn-primary">
+                                <i class="fas fa-plus me-1"></i>Adicionar Item
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function updateItemInfo() {
+        const select = document.getElementById('item_id');
+        const option = select.options[select.selectedIndex];
+        const quantidadeInput = document.getElementById('quantidade');
+        const infoDiv = document.getElementById('item-info');
+        
+        if (option.value) {
+            const quantidade = option.dataset.quantidade;
+            const nome = option.dataset.nome;
+            const setor = option.dataset.setor;
+            const lote = option.dataset.lote;
+            
+            document.getElementById('quantidade-disponivel').textContent = quantidade;
+            document.getElementById('info-nome').textContent = nome;
+            document.getElementById('info-setor').textContent = setor;
+            document.getElementById('info-lote').textContent = lote;
+            
+            quantidadeInput.max = quantidade;
+            infoDiv.style.display = 'block';
+        } else {
+            document.getElementById('quantidade-disponivel').textContent = '0';
+            quantidadeInput.max = '';
+            infoDiv.style.display = 'none';
+        }
+    }
+</script>
+
+{% endblock %}

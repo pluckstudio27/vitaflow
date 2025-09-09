@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}Relatório de Movimentações - VitaFlow{% endblock %}
+
+{% block content %}
+<style>
+    .page-header {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        padding: 2rem 0;
+        margin-bottom: 2rem;
+        border-radius: 0 0 50px 50px;
+    }
+    .badge-transferencia {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .badge-saida {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    .table-hover tbody tr:hover {
+        background-color: rgba(102, 126, 234, 0.1);
+    }
+    .movimentacao-card {
+        border-left: 4px solid;
+        margin-bottom: 1rem;
+    }
+    .movimentacao-transferencia {
+        border-left-color: #667eea;
+    }
+    .movimentacao-saida {
+        border-left-color: #f5576c;
+    }
+    .timeline-item {
+        position: relative;
+        padding-left: 2rem;
+        margin-bottom: 1.5rem;
+    }
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0.5rem;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #667eea;
+    }
+    .timeline-item.saida::before {
+        background: #f5576c;
+    }
+    .filter-section {
+        background: #f8f9fa;
+        border-radius: 15px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+</style>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('relatorio_movimentacoes') }}"><i class="fas fa-chart-line me-1"></i>Relatórios</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container text-center">
+            <h1><i class="fas fa-chart-line me-3"></i>Relatório de Movimentações</h1>
+            <p class="lead mb-0">Histórico completo de transferências e saídas</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Filtros -->
+        <div class="filter-section">
+            <div class="row align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label"><i class="fas fa-filter me-1"></i>Tipo</label>
+                    <select class="form-select" id="filtro-tipo">
+                        <option value="">Todos</option>
+                        <option value="transferencia">Transferências</option>
+                        <option value="saida">Saídas</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label"><i class="fas fa-calendar me-1"></i>Data Inicial</label>
+                    <input type="date" class="form-control" id="filtro-data-inicio">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label"><i class="fas fa-calendar me-1"></i>Data Final</label>
+                    <input type="date" class="form-control" id="filtro-data-fim">
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100" onclick="aplicarFiltros()">
+                        <i class="fas fa-search me-1"></i>Filtrar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estatísticas Rápidas -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-exchange-alt fa-2x text-primary mb-2"></i>
+                        <h5 class="card-title">Total de Transferências</h5>
+                        <h3 class="text-primary" id="total-transferencias">{{ movimentacoes|selectattr('tipo', 'equalto', 'transferencia')|list|length }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-sign-out-alt fa-2x text-danger mb-2"></i>
+                        <h5 class="card-title">Total de Saídas</h5>
+                        <h3 class="text-danger" id="total-saidas">{{ movimentacoes|selectattr('tipo', 'equalto', 'saida')|list|length }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-chart-bar fa-2x text-success mb-2"></i>
+                        <h5 class="card-title">Total de Movimentações</h5>
+                        <h3 class="text-success" id="total-movimentacoes">{{ movimentacoes|length }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista de Movimentações -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-list me-2"></i>Histórico de Movimentações</h5>
+            </div>
+            <div class="card-body">
+                {% if movimentacoes %}
+                    <div id="movimentacoes-lista">
+                        {% for mov in movimentacoes %}
+                            <div class="timeline-item {{ mov.tipo }}" data-tipo="{{ mov.tipo }}" data-data="{{ mov.data_movimentacao.strftime('%Y-%m-%d') }}">
+                                <div class="card movimentacao-card movimentacao-{{ mov.tipo }}">
+                                    <div class="card-body">
+                                        <div class="row align-items-center">
+                                            <div class="col-md-2">
+                                                <span class="badge badge-{{ mov.tipo }} fs-6">
+                                                    {% if mov.tipo == 'transferencia' %}
+                                                        <i class="fas fa-exchange-alt me-1"></i>Transferência
+                                                    {% else %}
+                                                        <i class="fas fa-sign-out-alt me-1"></i>Saída
+                                                    {% endif %}
+                                                </span>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <h6 class="mb-1">{{ mov.item.nome if mov.item else 'Item não encontrado' }}</h6>
+                                                <small class="text-muted">{{ mov.item.setor if mov.item else '-' }}</small>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <strong>{{ mov.quantidade }}</strong> unidades
+                                            </div>
+                                            <div class="col-md-2">
+                                                <div class="text-center">
+                                                    <i class="fas fa-arrow-right text-muted"></i><br>
+                                                    <small class="text-muted">{{ mov.origem }} → {{ mov.destino }}</small>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-calendar me-1"></i>{{ mov.data_movimentacao.strftime('%d/%m/%Y') }}<br>
+                                                    <i class="fas fa-clock me-1"></i>{{ mov.data_movimentacao.strftime('%H:%M') }}
+                                                </small>
+                                            </div>
+                                            <div class="col-md-1">
+                                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#detalhes-{{ mov.id }}">
+                                                    <i class="fas fa-eye"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Detalhes Expandidos -->
+                                        <div class="collapse mt-3" id="detalhes-{{ mov.id }}">
+                                            <div class="border-top pt-3">
+                                                <div class="row">
+                                                    <div class="col-md-4">
+                                                        <strong>Responsável:</strong><br>
+                                                        <span class="text-muted">{{ mov.responsavel or 'Não informado' }}</span>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <strong>Motivo:</strong><br>
+                                                        <span class="text-muted">{{ mov.motivo or 'Não informado' }}</span>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <strong>Lote:</strong><br>
+                                                        <span class="text-muted">{{ mov.item.lote if mov.item and mov.item.lote else 'N/A' }}</span>
+                                                    </div>
+                                                </div>
+                                                {% if mov.observacoes %}
+                                                    <div class="row mt-2">
+                                                        <div class="col-12">
+                                                            <strong>Observações:</strong><br>
+                                                            <span class="text-muted">{{ mov.observacoes }}</span>
+                                                        </div>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-chart-line fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">Nenhuma movimentação registrada</h5>
+                        <p class="text-muted">Comece fazendo transferências ou registrando saídas.</p>
+                        <div class="d-flex gap-2 justify-content-center">
+                            <a href="{{ url_for('transferir_item') }}" class="btn btn-primary">
+                                <i class="fas fa-exchange-alt me-1"></i>Transferir Itens
+                            </a>
+                            <a href="{{ url_for('saida_item') }}" class="btn btn-outline-primary">
+                                <i class="fas fa-sign-out-alt me-1"></i>Registrar Saída
+                            </a>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function aplicarFiltros() {
+            const tipo = document.getElementById('filtro-tipo').value;
+            const dataInicio = document.getElementById('filtro-data-inicio').value;
+            const dataFim = document.getElementById('filtro-data-fim').value;
+            
+            const items = document.querySelectorAll('.timeline-item');
+            let totalTransferencias = 0;
+            let totalSaidas = 0;
+            let totalMovimentacoes = 0;
+            
+            items.forEach(item => {
+                const itemTipo = item.dataset.tipo;
+                const itemData = item.dataset.data;
+                
+                let mostrar = true;
+                
+                // Filtro por tipo
+                if (tipo && itemTipo !== tipo) {
+                    mostrar = false;
+                }
+                
+                // Filtro por data
+                if (dataInicio && itemData < dataInicio) {
+                    mostrar = false;
+                }
+                if (dataFim && itemData > dataFim) {
+                    mostrar = false;
+                }
+                
+                if (mostrar) {
+                    item.style.display = 'block';
+                    totalMovimentacoes++;
+                    if (itemTipo === 'transferencia') {
+                        totalTransferencias++;
+                    } else if (itemTipo === 'saida') {
+                        totalSaidas++;
+                    }
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+            
+            // Atualizar contadores
+            document.getElementById('total-transferencias').textContent = totalTransferencias;
+            document.getElementById('total-saidas').textContent = totalSaidas;
+            document.getElementById('total-movimentacoes').textContent = totalMovimentacoes;
+        }
+        
+        // Definir data de hoje como padrão para data fim
+        document.getElementById('filtro-data-fim').value = new Date().toISOString().split('T')[0];
+    </script>
+
+{% endblock %}

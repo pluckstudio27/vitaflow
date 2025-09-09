@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block title %}Relatório de Recebimentos{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-chart-bar"></i> Relatório de Recebimentos
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <!-- Filtros -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <strong>Filtros</strong>
+                        </div>
+                        <div class="card-body">
+                            <form method="GET" class="row g-3">
+                                <div class="col-md-3">
+                                    <label class="form-label">Data Início</label>
+                                    <input type="date" class="form-control" name="data_inicio" value="{{ request.args.get('data_inicio', '') }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Data Fim</label>
+                                    <input type="date" class="form-control" name="data_fim" value="{{ request.args.get('data_fim', '') }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Status</label>
+                                    <select class="form-select" name="status">
+                                        <option value="">Todos</option>
+                                        <option value="pendente" {{ 'selected' if request.args.get('status') == 'pendente' }}>Pendente</option>
+                                        <option value="conferido" {{ 'selected' if request.args.get('status') == 'conferido' }}>Conferido</option>
+                                        <option value="divergencia" {{ 'selected' if request.args.get('status') == 'divergencia' }}>Divergência</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Fornecedor</label>
+                                    <input type="text" class="form-control" name="fornecedor" value="{{ request.args.get('fornecedor', '') }}" placeholder="Nome do fornecedor">
+                                </div>
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-filter"></i> Filtrar
+                                    </button>
+                                    <a href="{{ url_for('relatorio_recebimentos') }}" class="btn btn-secondary">
+                                        <i class="fas fa-times"></i> Limpar
+                                    </a>
+                                    <button type="button" class="btn btn-success" onclick="exportarExcel()">
+                                        <i class="fas fa-file-excel"></i> Exportar Excel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <!-- Resumo Estatístico -->
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card bg-primary text-white">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6>Total Recebimentos</h6>
+                                            <h3>{{ recebimentos|length }}</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-boxes fa-2x"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-success text-white">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6>Aprovados</h6>
+                                            <h3>{{ recebimentos|selectattr('status', 'equalto', 'aprovado')|list|length }}</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-check-circle fa-2x"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-warning text-dark">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6>Pendentes</h6>
+                                            <h3>{{ recebimentos|selectattr('status_conferencia', 'equalto', 'pendente')|list|length }}</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-clock fa-2x"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-danger text-white">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6>Rejeitados</h6>
+                                            <h3>{{ recebimentos|selectattr('status', 'equalto', 'rejeitado')|list|length }}</h3>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-times-circle fa-2x"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Valor Total -->
+                    {% set valor_total = recebimentos|sum(attribute='valor_total') %}
+                    <div class="alert alert-info">
+                        <strong>Valor Total dos Recebimentos:</strong> R$ {{ "%.2f"|format(valor_total) }}
+                    </div>
+                    
+                    <!-- Tabela de Recebimentos -->
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover" id="tabelaRecebimentos">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Protocolo</th>
+                                    <th>Data Recebimento</th>
+                                    <th>Fornecedor</th>
+                                    <th>Nota Fiscal</th>
+                                    <th>Valor Total</th>
+                                    <th>Responsável</th>
+                                    <th>Status</th>
+                                    <th>Conferido por</th>
+                                    <th>Data Conferência</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for recebimento in recebimentos %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ recebimento.protocolo_recebimento }}</strong><br>
+                                        <small class="text-muted">Sol: {{ recebimento.solicitacao.protocolo }}</small>
+                                    </td>
+                                    <td>{{ recebimento.data_recebimento.strftime('%d/%m/%Y %H:%M') }}</td>
+                                    <td>{{ recebimento.fornecedor }}</td>
+                                    <td>
+                                        {{ recebimento.numero_nota_fiscal }}<br>
+                                        <small class="text-muted">{{ recebimento.data_nota_fiscal.strftime('%d/%m/%Y') }}</small>
+                                    </td>
+                                    <td>R$ {{ "%.2f"|format(recebimento.valor_total) }}</td>
+                                    <td>{{ recebimento.responsavel_recebimento }}</td>
+                                    <td>
+                                        {% if recebimento.status_conferencia == 'pendente' %}
+                                            <span class="badge bg-warning">Pendente</span>
+                                        {% elif recebimento.status_conferencia == 'conferido' %}
+                                            <span class="badge bg-success">Conferido</span>
+                                        {% elif recebimento.status_conferencia == 'divergencia' %}
+                                            <span class="badge bg-danger">Divergência</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ recebimento.responsavel_conferencia or '-' }}</td>
+                                    <td>{{ recebimento.data_conferencia.strftime('%d/%m/%Y %H:%M') if recebimento.data_conferencia else '-' }}</td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button type="button" class="btn btn-info" onclick="verDetalhes('{{ recebimento.id }}')">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            {% if recebimento.status_conferencia == 'pendente' %}
+                                            <a href="{{ url_for('conferir_recebimento', id=recebimento.id) }}" class="btn btn-warning">
+                                                <i class="fas fa-search"></i>
+                                            </a>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    {% if not recebimentos %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">Nenhum recebimento encontrado</h5>
+                        <p class="text-muted">Ajuste os filtros ou verifique se há recebimentos cadastrados.</p>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="mt-3">
+                        <a href="{{ url_for('painel_recebimento') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Voltar ao Painel
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Detalhes -->
+<div class="modal fade" id="modalDetalhes" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Detalhes do Recebimento</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="conteudoDetalhes">
+                <!-- Conteúdo carregado via AJAX -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function verDetalhes(recebimentoId) {
+    // Simular carregamento de detalhes
+    document.getElementById('conteudoDetalhes').innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Carregando...</div>';
+    
+    // Aqui você implementaria uma chamada AJAX para buscar os detalhes
+    // Por enquanto, vamos mostrar uma mensagem
+    setTimeout(() => {
+        document.getElementById('conteudoDetalhes').innerHTML = `
+            <div class="alert alert-info">
+                <strong>Funcionalidade em desenvolvimento</strong><br>
+                Os detalhes do recebimento ID ${recebimentoId} serão exibidos aqui.
+            </div>
+        `;
+    }, 1000);
+    
+    new bootstrap.Modal(document.getElementById('modalDetalhes')).show();
+}
+
+function exportarExcel() {
+    // Implementar exportação para Excel
+    alert('Funcionalidade de exportação em desenvolvimento');
+}
+
+// DataTable para melhor navegação
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof $ !== 'undefined' && $.fn.DataTable) {
+        $('#tabelaRecebimentos').DataTable({
+            "language": {
+                "url": "//cdn.datatables.net/plug-ins/1.11.5/i18n/pt-BR.json"
+            },
+            "pageLength": 25,
+            "order": [[1, "desc"]], // Ordenar por data decrescente
+            "columnDefs": [
+                { "orderable": false, "targets": [9] } // Desabilitar ordenação na coluna de ações
+            ]
+        });
+    }
+});
+</script>
+{% endblock %}

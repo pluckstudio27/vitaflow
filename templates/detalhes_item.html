@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+
+{% block title %}Detalhes do Item - VitaFlow{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-info-circle"></i> Detalhes do Item
+            </h1>
+            <div>
+                <a href="{{ url_for('editar_item', id=item.id) }}" class="btn btn-warning me-2">
+                    <i class="fas fa-edit"></i> Editar
+                </a>
+                <a href="{{ url_for('listar_itens') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Voltar à Lista
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Informações Principais -->
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-tag"></i> {{ item.nome }}
+                </h5>
+                <div>
+                    {% if item.data_vencimento %}
+                        {% set dias_restantes = (item.data_vencimento - hoje).days %}
+                        {% if dias_restantes < 0 %}
+                            <span class="badge bg-danger fs-6">Vencido há {{ -dias_restantes }} dias</span>
+                        {% elif dias_restantes <= 7 %}
+                            <span class="badge bg-danger fs-6">Vence em {{ dias_restantes }} dias</span>
+                        {% elif dias_restantes <= 30 %}
+                            <span class="badge bg-warning fs-6">Vence em {{ dias_restantes }} dias</span>
+                        {% else %}
+                            <span class="badge bg-success fs-6">Válido por {{ dias_restantes }} dias</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="badge bg-secondary fs-6">Sem data de vencimento</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                {% if item.foto %}
+                    <div class="row mb-4">
+                        <div class="col-md-12 text-center">
+                            <img src="{{ url_for('uploaded_file', filename=item.foto) }}" 
+                                 alt="Foto do {{ item.nome }}" 
+                                 class="img-fluid rounded shadow" 
+                                 style="max-width: 300px; max-height: 300px; object-fit: cover;">
+                            <p class="small text-muted mt-2">Foto do item</p>
+                        </div>
+                    </div>
+                {% endif %}
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-building"></i> Setor
+                        </label>
+                        <div class="h6">
+                            <span class="badge bg-primary">
+                                {% if item.setor == 'enfermagem' %}Enfermagem
+                                {% elif item.setor == 'farmacia' %}Farmácia
+                                {% elif item.setor == 'laboratorio' %}Laboratório
+                                {% elif item.setor == 'centro_cirurgico' %}Centro Cirúrgico
+                                {% else %}{{ item.setor.title() }}
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-map-marker-alt"></i> Localização
+                        </label>
+                        <div class="h6">
+                            <span class="badge bg-{{ 'info' if item.localizacao == 'almoxarifado' else 'success' }}">
+                                {{ item.localizacao.title() }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-sort-numeric-up"></i> Quantidade em Estoque
+                        </label>
+                        <div class="h4 text-primary">
+                            {{ item.quantidade }}
+                            {% if item.quantidade <= 5 %}
+                                <span class="badge bg-warning ms-2">Estoque Baixo</span>
+                            {% elif item.quantidade == 0 %}
+                                <span class="badge bg-danger ms-2">Sem Estoque</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        {% if item.preco_unitario %}
+                            <label class="form-label text-muted">
+                                <i class="fas fa-dollar-sign"></i> Valor
+                            </label>
+                            <div class="h6">
+                                <strong>Unitário:</strong> R$ {{ "%.2f"|format(item.preco_unitario) }}<br>
+                                <strong>Total:</strong> <span class="text-success">R$ {{ "%.2f"|format(item.preco_unitario * item.quantidade) }}</span>
+                            </div>
+                        {% else %}
+                            <label class="form-label text-muted">
+                                <i class="fas fa-dollar-sign"></i> Preço
+                            </label>
+                            <div class="text-muted">Não informado</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-calendar-alt"></i> Data de Compra
+                        </label>
+                        <div class="h6">{{ item.data_compra.strftime('%d/%m/%Y') }}</div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-calendar-times"></i> Data de Vencimento
+                        </label>
+                        <div class="h6">
+                            {% if item.data_vencimento %}
+                                {{ item.data_vencimento.strftime('%d/%m/%Y') }}
+                            {% else %}
+                                <span class="text-muted">Não definida</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if item.lote or item.fornecedor %}
+                <hr>
+                <div class="row">
+                    {% if item.lote %}
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-barcode"></i> Lote
+                        </label>
+                        <div class="h6">{{ item.lote }}</div>
+                    </div>
+                    {% endif %}
+                    {% if item.fornecedor %}
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-truck"></i> Fornecedor
+                        </label>
+                        <div class="h6">{{ item.fornecedor }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if item.descricao %}
+                <hr>
+                <div class="row">
+                    <div class="col-12">
+                        <label class="form-label text-muted">
+                            <i class="fas fa-align-left"></i> Descrição
+                        </label>
+                        <div class="border rounded p-3 bg-light">
+                            {{ item.descricao }}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Painel de Ações e Informações -->
+    <div class="col-lg-4">
+        <!-- Ações Rápidas -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-tools"></i> Ações
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('editar_item', id=item.id) }}" class="btn btn-warning">
+                        <i class="fas fa-edit"></i> Editar Item
+                    </a>
+                    <button type="button" class="btn btn-info" onclick="window.print()">
+                        <i class="fas fa-print"></i> Imprimir Detalhes
+                    </button>
+                    <a href="{{ url_for('excluir_item', id=item.id) }}" 
+                       class="btn btn-danger btn-delete" 
+                       data-item-name="{{ item.nome }}">
+                        <i class="fas fa-trash"></i> Excluir Item
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status do Item -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-chart-pie"></i> Status
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <small class="text-muted">Estoque</small>
+                        <small class="fw-bold">{{ item.quantidade }}</small>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        {% if item.quantidade == 0 %}
+                            <div class="progress-bar bg-danger" style="width: 100%"></div>
+                        {% elif item.quantidade <= 5 %}
+                            <div class="progress-bar bg-warning" style="width: 30%"></div>
+                        {% elif item.quantidade <= 20 %}
+                            <div class="progress-bar bg-info" style="width: 60%"></div>
+                        {% else %}
+                            <div class="progress-bar bg-success" style="width: 100%"></div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if item.data_vencimento %}
+                <div class="mb-3">
+                    {% set dias_restantes = (item.data_vencimento - hoje).days %}
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <small class="text-muted">Validade</small>
+                        <small class="fw-bold">{{ dias_restantes }} dias</small>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        {% if dias_restantes < 0 %}
+                            <div class="progress-bar bg-danger" style="width: 100%"></div>
+                        {% elif dias_restantes <= 7 %}
+                            <div class="progress-bar bg-danger" style="width: 20%"></div>
+                        {% elif dias_restantes <= 30 %}
+                            <div class="progress-bar bg-warning" style="width: 50%"></div>
+                        {% else %}
+                            <div class="progress-bar bg-success" style="width: 100%"></div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="text-center mt-3">
+                    {% if item.quantidade == 0 %}
+                        <span class="badge bg-danger">Sem Estoque</span>
+                    {% elif item.quantidade <= 5 %}
+                        <span class="badge bg-warning">Estoque Baixo</span>
+                    {% else %}
+                        <span class="badge bg-success">Estoque OK</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Informações de Sistema -->
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-history"></i> Histórico
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <small class="text-muted d-block">Criado em:</small>
+                    <strong>{{ item.created_at.strftime('%d/%m/%Y às %H:%M') }}</strong>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted d-block">Última atualização:</small>
+                    <strong>{{ item.updated_at.strftime('%d/%m/%Y às %H:%M') }}</strong>
+                </div>
+                <div>
+                    <small class="text-muted d-block">ID do Item:</small>
+                    <code>#{{ item.id }}</code>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alertas de Status -->
+{% if item.quantidade <= 5 %}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="alert alert-warning" role="alert">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>Atenção!</strong> Este item está com estoque baixo ({{ item.quantidade }} unidades).
+            Considere fazer uma nova compra.
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if item.data_vencimento %}
+    {% set dias_restantes = (item.data_vencimento - hoje).days %}
+    {% if dias_restantes < 0 %}
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="alert alert-danger" role="alert">
+                <i class="fas fa-times-circle"></i>
+                <strong>Item Vencido!</strong> Este item venceu há {{ -dias_restantes }} dias.
+                Não deve ser utilizado e precisa ser descartado adequadamente.
+            </div>
+        </div>
+    </div>
+    {% elif dias_restantes <= 7 %}
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="alert alert-danger" role="alert">
+                <i class="fas fa-clock"></i>
+                <strong>Vencimento Iminente!</strong> Este item vence em {{ dias_restantes }} dias.
+                Use com prioridade ou considere o descarte.
+            </div>
+        </div>
+    </div>
+    {% elif dias_restantes <= 30 %}
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="alert alert-warning" role="alert">
+                <i class="fas fa-calendar-exclamation"></i>
+                <strong>Atenção ao Vencimento!</strong> Este item vence em {{ dias_restantes }} dias.
+                Planeje o uso para evitar desperdício.
+            </div>
+        </div>
+    </div>
+    {% endif %}
+{% endif %}
+
+<style>
+@media print {
+    .btn, .card-header, .alert {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    
+    .btn {
+        display: none !important;
+    }
+    
+    .card {
+        border: 1px solid #000 !important;
+        margin-bottom: 20px;
+    }
+}
+</style>
+{% endblock %}

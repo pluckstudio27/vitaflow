@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Item - VitaFlow{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-edit"></i> Editar Item: {{ item.nome }}
+            </h1>
+            <div>
+                <a href="{{ url_for('detalhes_item', id=item.id) }}" class="btn btn-info me-2">
+                    <i class="fas fa-eye"></i> Ver Detalhes
+                </a>
+                <a href="{{ url_for('listar_itens') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Voltar à Lista
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle"></i> Informações do Item
+                </h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="item-form" class="needs-validation" novalidate enctype="multipart/form-data">
+                    <div class="row">
+                        <!-- Nome do Item -->
+                        <div class="col-md-6 mb-3">
+                            <label for="nome" class="form-label">
+                                <i class="fas fa-tag"></i> Nome do Item *
+                            </label>
+                            <input type="text" class="form-control" id="nome" name="nome" required 
+                                   value="{{ item.nome }}" placeholder="Ex: Seringa 10ml">
+                            <div class="invalid-feedback">
+                                Por favor, informe o nome do item.
+                            </div>
+                        </div>
+
+                        <!-- Setor -->
+                        <div class="col-md-6 mb-3">
+                            <label for="setor" class="form-label">
+                                <i class="fas fa-building"></i> Setor *
+                            </label>
+                            <select class="form-select" id="setor" name="setor" required>
+                                <option value="">Selecione o setor</option>
+                                <option value="enfermagem" {{ 'selected' if item.setor == 'enfermagem' }}>
+                                    Enfermagem
+                                </option>
+                                <option value="farmacia" {{ 'selected' if item.setor == 'farmacia' }}>
+                                    Farmácia
+                                </option>
+                                <option value="laboratorio" {{ 'selected' if item.setor == 'laboratorio' }}>
+                                    Laboratório
+                                </option>
+                                <option value="centro_cirurgico" {{ 'selected' if item.setor == 'centro_cirurgico' }}>
+                                    Centro Cirúrgico
+                                </option>
+                            </select>
+                            <div class="invalid-feedback">
+                                Por favor, selecione o setor.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Localização -->
+                        <div class="col-md-6 mb-3">
+                            <label for="localizacao" class="form-label">
+                                <i class="fas fa-map-marker-alt"></i> Localização *
+                            </label>
+                            <select class="form-select" id="localizacao" name="localizacao" required>
+                                <option value="">Selecione a localização</option>
+                                <option value="almoxarifado" {{ 'selected' if item.localizacao == 'almoxarifado' }}>
+                                    Almoxarifado
+                                </option>
+                                <option value="farmacia" {{ 'selected' if item.localizacao == 'farmacia' }}>
+                                    Farmácia
+                                </option>
+                            </select>
+                            <div class="invalid-feedback">
+                                Por favor, selecione a localização.
+                            </div>
+                        </div>
+
+                        <!-- Quantidade -->
+                        <div class="col-md-6 mb-3">
+                            <label for="quantidade" class="form-label">
+                                <i class="fas fa-sort-numeric-up"></i> Quantidade *
+                            </label>
+                            <input type="number" class="form-control" id="quantidade" name="quantidade" 
+                                   min="0" step="1" required value="{{ item.quantidade }}" placeholder="Ex: 100">
+                            <div class="invalid-feedback">
+                                Por favor, informe a quantidade (número positivo).
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Data de Compra -->
+                        <div class="col-md-6 mb-3">
+                            <label for="data_compra" class="form-label">
+                                <i class="fas fa-calendar-alt"></i> Data de Compra *
+                            </label>
+                            <input type="date" class="form-control" id="data_compra" name="data_compra" required
+                                   value="{{ item.data_compra.strftime('%Y-%m-%d') }}">
+                            <div class="invalid-feedback">
+                                Por favor, informe a data de compra.
+                            </div>
+                        </div>
+
+                        <!-- Data de Vencimento -->
+                        <div class="col-md-6 mb-3">
+                            <label for="data_vencimento" class="form-label">
+                                <i class="fas fa-calendar-times"></i> Data de Vencimento
+                            </label>
+                            <input type="date" class="form-control" id="data_vencimento" name="data_vencimento"
+                                   value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento }}">
+                            <small class="form-text text-muted">
+                                Deixe em branco se o item não possui data de vencimento.
+                            </small>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Preço Unitário -->
+                        <div class="col-md-6 mb-3">
+                            <label for="preco_unitario" class="form-label">
+                                <i class="fas fa-dollar-sign"></i> Preço Unitário (R$)
+                            </label>
+                            <input type="number" class="form-control" id="preco_unitario" name="preco_unitario" 
+                                   min="0" step="0.01" value="{{ item.preco_unitario if item.preco_unitario }}" 
+                                   placeholder="Ex: 2.50">
+                            <small class="form-text text-muted">
+                                Valor em reais (opcional).
+                            </small>
+                        </div>
+
+                        <!-- Lote -->
+                        <div class="col-md-6 mb-3">
+                            <label for="lote" class="form-label">
+                                <i class="fas fa-barcode"></i> Lote
+                            </label>
+                            <input type="text" class="form-control" id="lote" name="lote" 
+                                   value="{{ item.lote if item.lote }}" placeholder="Ex: LT2024001">
+                            <small class="form-text text-muted">
+                                Número do lote (opcional).
+                            </small>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Fornecedor -->
+                        <div class="col-md-12 mb-3">
+                            <label for="fornecedor" class="form-label">
+                                <i class="fas fa-truck"></i> Fornecedor
+                            </label>
+                            <input type="text" class="form-control" id="fornecedor" name="fornecedor" 
+                                   value="{{ item.fornecedor if item.fornecedor }}" 
+                                   placeholder="Ex: Distribuidora Médica ABC Ltda">
+                            <small class="form-text text-muted">
+                                Nome do fornecedor (opcional).
+                            </small>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Foto do Item -->
+                        <div class="col-md-12 mb-3">
+                            <label for="foto" class="form-label">
+                                <i class="fas fa-camera"></i> Foto do Item
+                            </label>
+                            {% if item.foto %}
+                                <div class="mb-2">
+                                    <img src="{{ url_for('uploaded_file', filename=item.foto) }}" 
+                                         alt="Foto do {{ item.nome }}" 
+                                         class="img-thumbnail" 
+                                         style="max-width: 200px; max-height: 200px;">
+                                    <p class="small text-muted mt-1">Foto atual do item</p>
+                                </div>
+                            {% endif %}
+                            <input type="file" class="form-control" id="foto" name="foto" 
+                                   accept="image/png,image/jpg,image/jpeg,image/gif">
+                            <small class="form-text text-muted">
+                                {% if item.foto %}
+                                    Selecione uma nova foto para substituir a atual. 
+                                {% endif %}
+                                Formatos aceitos: PNG, JPG, JPEG, GIF. Tamanho máximo: 16MB.
+                            </small>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Descrição -->
+                        <div class="col-md-12 mb-3">
+                            <label for="descricao" class="form-label">
+                                <i class="fas fa-align-left"></i> Descrição
+                            </label>
+                            <textarea class="form-control" id="descricao" name="descricao" rows="3" 
+                                      maxlength="500" placeholder="Descrição detalhada do item (opcional)">{{ item.descricao if item.descricao }}</textarea>
+                            <div class="d-flex justify-content-between">
+                                <small class="form-text text-muted">
+                                    Informações adicionais sobre o item.
+                                </small>
+                                <small id="desc-counter" class="text-muted">500 caracteres restantes</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Informações de Auditoria -->
+                    <div class="alert alert-light border">
+                        <h6><i class="fas fa-history"></i> Histórico</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <small class="text-muted">
+                                    <strong>Criado em:</strong> {{ item.created_at.strftime('%d/%m/%Y às %H:%M') }}
+                                </small>
+                            </div>
+                            <div class="col-md-6">
+                                <small class="text-muted">
+                                    <strong>Última atualização:</strong> {{ item.updated_at.strftime('%d/%m/%Y às %H:%M') }}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botões de Ação -->
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <a href="{{ url_for('listar_itens') }}" class="btn btn-secondary">
+                                        <i class="fas fa-times"></i> Cancelar
+                                    </a>
+                                    <a href="{{ url_for('excluir_item', id=item.id) }}" 
+                                       class="btn btn-danger ms-2 btn-delete" 
+                                       data-item-name="{{ item.nome }}">
+                                        <i class="fas fa-trash"></i> Excluir Item
+                                    </a>
+                                </div>
+                                <div>
+                                    <button type="reset" class="btn btn-outline-warning me-2">
+                                        <i class="fas fa-undo"></i> Restaurar Valores
+                                    </button>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save"></i> Salvar Alterações
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status do Item -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-chart-line"></i> Status Atual do Item
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 mb-1">{{ item.quantidade }}</div>
+                            <small class="text-muted">Quantidade em Estoque</small>
+                            {% if item.quantidade <= 5 %}
+                                <br><span class="badge bg-warning mt-1">Estoque Baixo</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h6 mb-1">
+                                <span class="badge bg-{{ 'primary' if item.localizacao == 'almoxarifado' else 'success' }}">
+                                    {{ item.localizacao.title() }}
+                                </span>
+                            </div>
+                            <small class="text-muted">Localização</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            {% if item.data_vencimento %}
+                                {% set dias_restantes = (item.data_vencimento - hoje).days %}
+                                <div class="h6 mb-1">
+                                    {% if dias_restantes < 0 %}
+                                        <span class="badge bg-danger">Vencido</span>
+                                    {% elif dias_restantes <= 7 %}
+                                        <span class="badge bg-danger">{{ dias_restantes }} dias</span>
+                                    {% elif dias_restantes <= 30 %}
+                                        <span class="badge bg-warning">{{ dias_restantes }} dias</span>
+                                    {% else %}
+                                        <span class="badge bg-success">{{ dias_restantes }} dias</span>
+                                    {% endif %}
+                                </div>
+                                <small class="text-muted">Para Vencimento</small>
+                            {% else %}
+                                <div class="h6 mb-1">
+                                    <span class="badge bg-secondary">Não definido</span>
+                                </div>
+                                <small class="text-muted">Data de Vencimento</small>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            {% if item.preco_unitario %}
+                                <div class="h6 mb-1">R$ {{ "%.2f"|format(item.preco_unitario) }}</div>
+                                <small class="text-muted">Preço Unitário</small>
+                                <br><small class="text-info">Total: R$ {{ "%.2f"|format(item.preco_unitario * item.quantidade) }}</small>
+                            {% else %}
+                                <div class="h6 mb-1">
+                                    <span class="text-muted">Não informado</span>
+                                </div>
+                                <small class="text-muted">Preço Unitário</small>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Definir data máxima como hoje para data de compra
+document.getElementById('data_compra').max = new Date().toISOString().split('T')[0];
+
+// Validação adicional no envio do formulário
+document.getElementById('item-form').addEventListener('submit', function(e) {
+    const dataCompra = new Date(document.getElementById('data_compra').value);
+    const dataVencimento = document.getElementById('data_vencimento').value;
+    
+    if (dataVencimento) {
+        const dataVenc = new Date(dataVencimento);
+        if (dataVenc <= dataCompra) {
+            e.preventDefault();
+            showAlert('A data de vencimento deve ser posterior à data de compra!', 'danger');
+            return false;
+        }
+    }
+    
+    const quantidade = parseInt(document.getElementById('quantidade').value);
+    if (quantidade < 0) {
+        e.preventDefault();
+        showAlert('A quantidade deve ser um número positivo!', 'danger');
+        return false;
+    }
+});
+</script>
+{% endblock %}

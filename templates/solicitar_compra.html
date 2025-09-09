@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Solicitar Compra - VitaFlow{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-plus-circle"></i> Nova Solicitação de Compra</h2>
+                <a href="{{ url_for('planejamento_compras') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Voltar
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-form"></i> Dados da Solicitação</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" id="formSolicitacao">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="setor" class="form-label">Setor <span class="text-danger">*</span></label>
+                                <select class="form-select" id="setor" name="setor" required>
+                                    <option value="">Selecione o setor</option>
+                                    <option value="enfermagem">Enfermagem</option>
+                                    <option value="farmacia">Farmácia</option>
+                                    <option value="laboratorio">Laboratório</option>
+                                    <option value="centro_cirurgico">Centro Cirúrgico</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="prioridade" class="form-label">Prioridade <span class="text-danger">*</span></label>
+                                <select class="form-select" id="prioridade" name="prioridade" required>
+                                    <option value="">Selecione a prioridade</option>
+                                    <option value="urgente">Urgente</option>
+                                    <option value="alta">Alta</option>
+                                    <option value="media">Média</option>
+                                    <option value="baixa">Baixa</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label for="item_nome" class="form-label">Nome do Item <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="item_nome" name="item_nome" 
+                                       placeholder="Ex: Luvas descartáveis, Seringa 10ml, etc." required>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="quantidade_solicitada" class="form-label">Quantidade <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="quantidade_solicitada" 
+                                       name="quantidade_solicitada" min="1" required>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="descricao" class="form-label">Descrição do Item</label>
+                            <textarea class="form-control" id="descricao" name="descricao" rows="2" 
+                                      placeholder="Descrição detalhada do item (marca, modelo, especificações, etc.)"></textarea>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="data_necessidade" class="form-label">Data Necessária <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" id="data_necessidade" name="data_necessidade" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="solicitante" class="form-label">Solicitante <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="solicitante" name="solicitante" 
+                                       placeholder="Nome do responsável pela solicitação" required>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="cargo_solicitante" class="form-label">Cargo do Solicitante</label>
+                                <select class="form-select" id="cargo_solicitante" name="cargo_solicitante">
+                                    <option value="">Selecione o cargo</option>
+                                    <option value="auxiliar_enfermagem">Auxiliar de Enfermagem</option>
+                                    <option value="tecnico_enfermagem">Técnico de Enfermagem</option>
+                                    <option value="enfermeiro">Enfermeiro</option>
+                                    <option value="farmaceutico">Farmacêutico</option>
+                                    <option value="tecnico_farmacia">Técnico em Farmácia</option>
+                                    <option value="nutricionista">Nutricionista</option>
+                                    <option value="tecnico_laboratorio">Técnico de Laboratório</option>
+                                    <option value="biomedico">Biomédico</option>
+                                    <option value="medico">Médico</option>
+                                    <option value="administrativo">Administrativo</option>
+                                    <option value="outro">Outro</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <div class="alert alert-info mb-0">
+                                    <small><i class="fas fa-info-circle"></i> <strong>Fluxo de Aprovação:</strong><br>
+                                    1. Autorização do responsável técnico<br>
+                                    2. Validação pela secretária<br>
+                                    3. Aprovação final</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="justificativa" class="form-label">Justificativa</label>
+                            <textarea class="form-control" id="justificativa" name="justificativa" rows="3" 
+                                      placeholder="Justifique a necessidade desta compra (opcional)"></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="observacoes" class="form-label">Observações</label>
+                            <textarea class="form-control" id="observacoes" name="observacoes" rows="2" 
+                                      placeholder="Observações adicionais (opcional)"></textarea>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="{{ url_for('planejamento_compras') }}" class="btn btn-secondary me-md-2">
+                                <i class="fas fa-times"></i> Cancelar
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Criar Solicitação
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Definir data mínima como hoje
+document.addEventListener('DOMContentLoaded', function() {
+    const dataInput = document.getElementById('data_necessidade');
+    const hoje = new Date().toISOString().split('T')[0];
+    dataInput.min = hoje;
+    
+    // Validação do formulário
+    document.getElementById('formSolicitacao').addEventListener('submit', function(e) {
+        const prioridade = document.getElementById('prioridade').value;
+        const dataNecessidade = new Date(document.getElementById('data_necessidade').value);
+        const hoje = new Date();
+        
+        // Se for urgente, verificar se a data é muito distante
+        if (prioridade === 'urgente') {
+            const diasDiferenca = (dataNecessidade - hoje) / (1000 * 60 * 60 * 24);
+            if (diasDiferenca > 7) {
+                if (!confirm('Você marcou como URGENTE mas a data necessária é em mais de 7 dias. Deseja continuar?')) {
+                    e.preventDefault();
+                    return;
+                }
+            }
+        }
+    });
+    
+    // Atualizar cor do select de prioridade
+    document.getElementById('prioridade').addEventListener('change', function() {
+        const select = this;
+        select.className = 'form-select';
+        
+        switch(this.value) {
+            case 'urgente':
+                select.classList.add('border-danger');
+                break;
+            case 'alta':
+                select.classList.add('border-warning');
+                break;
+            case 'media':
+                select.classList.add('border-info');
+                break;
+            default:
+                select.classList.add('border-secondary');
+        }
+    });
+});
+</script>
+{% endblock %}

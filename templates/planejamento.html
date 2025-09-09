@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Planejamento de Compras - VitaFlow{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-shopping-cart"></i> Planejamento de Compras</h2>
+                <div>
+                    <a href="{{ url_for('solicitar_compra') }}" class="btn btn-primary me-2">
+                        <i class="fas fa-plus"></i> Nova Solicitação
+                    </a>
+                    <a href="{{ url_for('analise_consumo') }}" class="btn btn-info">
+                        <i class="fas fa-chart-line"></i> Análise de Consumo
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Estatísticas por Setor -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Enfermagem</h6>
+                            <h4>{{ estatisticas_setor.enfermagem.total }}</h4>
+                            <small>{{ estatisticas_setor.enfermagem.urgentes }} urgentes</small>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-user-nurse fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Farmácia</h6>
+                            <h4>{{ estatisticas_setor.farmacia.total }}</h4>
+                            <small>{{ estatisticas_setor.farmacia.urgentes }} urgentes</small>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-pills fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Laboratório</h6>
+                            <h4>{{ estatisticas_setor.laboratorio.total }}</h4>
+                            <small>{{ estatisticas_setor.laboratorio.urgentes }} urgentes</small>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-flask fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-danger text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Centro Cirúrgico</h6>
+                            <h4>{{ estatisticas_setor.centro_cirurgico.total }}</h4>
+                            <small>{{ estatisticas_setor.centro_cirurgico.urgentes }} urgentes</small>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-procedures fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lista de Solicitações -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-list"></i> Solicitações Pendentes</h5>
+                </div>
+                <div class="card-body">
+                    {% if solicitacoes %}
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Setor</th>
+                                    <th>Quantidade</th>
+                                    <th>Prioridade</th>
+                                    <th>Data Necessária</th>
+                                    <th>Solicitante</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for solicitacao in solicitacoes %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ solicitacao.item_nome }}</strong>
+                                        {% if solicitacao.descricao %}
+                                        <br><small class="text-muted">{{ solicitacao.descricao }}</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">{{ solicitacao.setor.title() }}</span>
+                                    </td>
+                                    <td>{{ solicitacao.quantidade_solicitada }}</td>
+                                    <td>
+                                        {% if solicitacao.prioridade == 'urgente' %}
+                                        <span class="badge bg-danger">Urgente</span>
+                                        {% elif solicitacao.prioridade == 'alta' %}
+                                        <span class="badge bg-warning">Alta</span>
+                                        {% elif solicitacao.prioridade == 'media' %}
+                                        <span class="badge bg-info">Média</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">Baixa</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ solicitacao.data_necessidade.strftime('%d/%m/%Y') }}</td>
+                                    <td>{{ solicitacao.solicitante }}</td>
+                                    <td>
+                                        <div class="btn-group" role="group">
+                                            <form method="POST" action="{{ url_for('aprovar_solicitacao', id=solicitacao.id) }}" class="d-inline">
+                                                <button type="submit" class="btn btn-sm btn-success" 
+                                                        onclick="return confirm('Aprovar esta solicitação?')">
+                                                    <i class="fas fa-check"></i>
+                                                </button>
+                                            </form>
+                                            <form method="POST" action="{{ url_for('rejeitar_solicitacao', id=solicitacao.id) }}" class="d-inline">
+                                                <button type="submit" class="btn btn-sm btn-danger" 
+                                                        onclick="return confirm('Rejeitar esta solicitação?')">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4">
+                        <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">Nenhuma solicitação pendente</h5>
+                        <p class="text-muted">Todas as solicitações foram processadas ou não há solicitações no momento.</p>
+                        <a href="{{ url_for('solicitar_compra') }}" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Criar Nova Solicitação
+                        </a>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
