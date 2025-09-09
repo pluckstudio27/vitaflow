@@ -481,6 +481,48 @@ footer p {
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
 }
 
+/* Correção para Modais - Evitar piscar */
+.modal {
+    z-index: 1055 !important;
+}
+
+.modal-backdrop {
+    z-index: 1050 !important;
+}
+
+.modal-dialog {
+    pointer-events: auto;
+    position: relative;
+    z-index: 1056;
+}
+
+.modal-content {
+    pointer-events: auto;
+    position: relative;
+    background-color: #fff;
+    border: 1px solid rgba(0,0,0,.2);
+    border-radius: 16px;
+    box-shadow: 0 10px 25px rgba(0,0,0,.15);
+    outline: 0;
+}
+
+/* Evitar conflitos de hover em botões dentro de modais */
+.modal .btn {
+    pointer-events: auto;
+    position: relative;
+    z-index: 1;
+}
+
+.modal .btn:hover {
+    transform: none;
+    box-shadow: 0 4px 8px rgba(0,0,0,.1);
+}
+
+/* Estabilizar tooltips em modais */
+.modal [data-bs-toggle="tooltip"] {
+    pointer-events: auto;
+}
+
 /* Layout Responsivo */
 @media (max-width: 768px) {
     .dashboard-grid {

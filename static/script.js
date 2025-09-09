@@ -2,10 +2,17 @@
 
 // Inicialização quando o DOM estiver carregado
 document.addEventListener('DOMContentLoaded', function() {
-    // Inicializar tooltips do Bootstrap
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    // Inicializar tooltips do Bootstrap (exceto em modais)
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]:not(.modal [data-bs-toggle="tooltip"])'));
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // Desabilitar tooltips em elementos dentro de modais para evitar conflitos
+    var modalTooltips = document.querySelectorAll('.modal [data-bs-toggle="tooltip"]');
+    modalTooltips.forEach(function(element) {
+        element.removeAttribute('data-bs-toggle');
+        element.removeAttribute('title');
     });
 
     // Auto-hide alerts após 5 segundos
