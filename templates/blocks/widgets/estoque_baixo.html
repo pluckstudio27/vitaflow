@@ -1,0 +1,90 @@
+<!-- Widget de Estoque Baixo -->
+<div class="card h-100">
+    <div class="card-header bg-warning text-dark">
+        <h6 class="card-title mb-0">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            Estoque Baixo
+        </h6>
+    </div>
+    <div class="card-body">
+        <div id="estoque-baixo-content">
+            <div class="text-center">
+                <div class="spinner-border spinner-border-sm text-warning" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2 mb-0 text-muted">Carregando...</p>
+            </div>
+        </div>
+    </div>
+    <div class="card-footer bg-light">
+        <a href="{{ url_for('main.estoque') }}" class="btn btn-sm btn-outline-warning">
+            <i class="fas fa-eye me-1"></i>
+            Ver Estoque Completo
+        </a>
+    </div>
+</div>
+
+<script>
+// Carrega produtos com estoque baixo
+function loadEstoqueBaixo() {
+    fetch('/api/dashboard/estoque-baixo')
+        .then(response => response.json())
+        .then(data => {
+            const content = document.getElementById('estoque-baixo-content');
+            
+            if (data.success && data.produtos && data.produtos.length > 0) {
+                let html = '<div class="list-group list-group-flush">';
+                
+                data.produtos.slice(0, 5).forEach(produto => {
+                    const percentage = produto.estoque_atual / produto.estoque_minimo * 100;
+                    let badgeClass = 'bg-danger';
+                    if (percentage > 50) badgeClass = 'bg-warning';
+                    
+                    html += `
+                        <div class="list-group-item px-0 py-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">${produto.nome}</h6>
+                                    <small class="text-muted">${produto.local || 'N/A'}</small>
+                                </div>
+                                <span class="badge ${badgeClass}">${produto.estoque_atual}</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 4px;">
+                                <div class="progress-bar bg-warning" style="width: ${Math.min(percentage, 100)}%"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                
+                if (data.produtos.length > 5) {
+                    html += `<p class="text-center mt-2 mb-0 text-muted">
+                        <small>E mais ${data.produtos.length - 5} produtos...</small>
+                    </p>`;
+                }
+                
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = `
+                    <div class="text-center text-success">
+                        <i class="fas fa-check-circle fa-2x mb-2"></i>
+                        <p class="mb-0">Nenhum produto com estoque baixo!</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar estoque baixo:', error);
+            document.getElementById('estoque-baixo-content').innerHTML = `
+                <div class="text-center text-danger">
+                    <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
+                    <p class="mb-0">Erro ao carregar dados</p>
+                </div>
+            `;
+        });
+}
+
+// Carrega ao inicializar
+document.addEventListener('DOMContentLoaded', loadEstoqueBaixo);
+</script>

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Relatórios - Almoxarifado SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-chart-bar mr-2"></i>
+                        Relatórios do Sistema
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 offset-md-3">
+                            <div class="card bg-primary">
+                                <div class="card-body">
+                                    <h5 class="card-title text-white">Relatório de Estoque</h5>
+                                    <p class="card-text text-white">Visualize o status atual do estoque</p>
+                                    <a href="#" class="btn btn-light">Gerar Relatório</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

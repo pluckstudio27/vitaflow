@@ -1,0 +1,196 @@
+<!-- Widgets Personalizáveis para Dashboard -->
+
+<!-- Widget: Estatísticas Gerais (Todos os usuários) -->
+{% macro stats_widget_general() %}
+<div class="col-lg-3 col-md-6 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-body text-center">
+            <div class="text-primary mb-3">
+                <i class="fas fa-boxes fa-2x"></i>
+            </div>
+            <h5 class="card-title">Produtos Ativos</h5>
+            <h3 class="text-primary mb-0" id="total-produtos">-</h3>
+            <small class="text-muted">No seu escopo</small>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+<!-- Widget: Estoque Baixo (Responsáveis por estoque) -->
+{% macro estoque_baixo_widget() %}
+{% if is_super_admin or is_admin_central or is_gerente_almox or is_resp_sub_almox %}
+<div class="col-lg-3 col-md-6 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-body text-center">
+            <div class="text-warning mb-3">
+                <i class="fas fa-exclamation-triangle fa-2x"></i>
+            </div>
+            <h5 class="card-title">Estoque Baixo</h5>
+            <h3 class="text-warning mb-0" id="estoque-baixo">-</h3>
+            <small class="text-muted">Produtos em alerta</small>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+<!-- Widget: Movimentações Recentes (Baseado no nível) -->
+{% macro movimentacoes_widget() %}
+<div class="col-lg-6 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-transparent">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-exchange-alt me-2"></i>Movimentações Recentes
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Produto</th>
+                            <th>Tipo</th>
+                            <th>Quantidade</th>
+                            {% if is_super_admin or is_admin_central or is_gerente_almox %}
+                            <th>Local</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody id="movimentacoes-recentes">
+                        <tr>
+                            <td colspan="{% if is_super_admin or is_admin_central or is_gerente_almox %}5{% else %}4{% endif %}" class="text-center text-muted">
+                                Carregando...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+<!-- Widget: Gestão de Usuários (Apenas administradores) -->
+{% macro usuarios_widget() %}
+{% if is_super_admin or is_admin_central %}
+<div class="col-lg-6 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-transparent">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-users me-2"></i>Usuários por Nível
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="row text-center">
+                <div class="col-6 mb-3">
+                    <div class="border-end">
+                        <h4 class="text-primary mb-1" id="total-admins">-</h4>
+                        <small class="text-muted">Administradores</small>
+                    </div>
+                </div>
+                <div class="col-6 mb-3">
+                    <h4 class="text-success mb-1" id="total-operadores">-</h4>
+                    <small class="text-muted">Operadores</small>
+                </div>
+            </div>
+            <div class="d-grid">
+                <a href="{{ url_for('main.users') }}" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-user-plus me-1"></i>Gerenciar Usuários
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+<!-- Widget: Hierarquia do Usuário -->
+{% macro hierarquia_widget() %}
+<div class="col-lg-6 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-transparent">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-sitemap me-2"></i>Seu Escopo de Acesso
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="hierarchy-path">
+                {% if user.central_id %}
+                <div class="d-flex align-items-center mb-2">
+                    <i class="fas fa-building text-primary me-2"></i>
+                    <span><strong>Central:</strong> {{ user.central.nome if user.central else 'N/A' }}</span>
+                </div>
+                {% endif %}
+                {% if user.almoxarifado_id %}
+                <div class="d-flex align-items-center mb-2">
+                    <i class="fas fa-warehouse text-success me-2"></i>
+                    <span><strong>Almoxarifado:</strong> {{ user.almoxarifado.nome if user.almoxarifado else 'N/A' }}</span>
+                </div>
+                {% endif %}
+                {% if user.sub_almoxarifado_id %}
+                <div class="d-flex align-items-center mb-2">
+                    <i class="fas fa-boxes text-info me-2"></i>
+                    <span><strong>Sub-Almoxarifado:</strong> {{ user.sub_almoxarifado.nome if user.sub_almoxarifado else 'N/A' }}</span>
+                </div>
+                {% endif %}
+                {% if user.setor_id %}
+                <div class="d-flex align-items-center mb-2">
+                    <i class="fas fa-layer-group text-warning me-2"></i>
+                    <span><strong>Setor:</strong> {{ user.setor.nome if user.setor else 'N/A' }}</span>
+                </div>
+                {% endif %}
+            </div>
+            <div class="mt-3">
+                <span class="badge bg-primary">{{ scope_name }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+<!-- Widget: Ações Rápidas (Baseado no nível) -->
+{% macro acoes_rapidas_widget() %}
+<div class="col-lg-6 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-transparent">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-bolt me-2"></i>Ações Rápidas
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="d-grid gap-2">
+                {% if is_super_admin or is_admin_central or is_gerente_almox %}
+                <a href="{{ url_for('main.produtos') }}" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-plus me-1"></i>Novo Produto
+                </a>
+                {% endif %}
+                {% if is_super_admin or is_admin_central or is_gerente_almox or is_resp_sub_almox or is_operador_setor %}
+                <a href="{{ url_for('main.movimentacoes') }}" class="btn btn-outline-success btn-sm">
+                    <i class="fas fa-exchange-alt me-1"></i>Nova Movimentação
+                </a>
+                {% endif %}
+                {% if is_super_admin or is_admin_central %}
+                <a href="{{ url_for('main.users') }}" class="btn btn-outline-info btn-sm">
+                    <i class="fas fa-user-plus me-1"></i>Novo Usuário
+                </a>
+                {% endif %}
+                <a href="{{ url_for('main.estoque') }}" class="btn btn-outline-warning btn-sm">
+                    <i class="fas fa-search me-1"></i>Consultar Estoque
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{# Macro principal para renderizar layout do dashboard personalizado #}
+{% macro render_dashboard_layout() %}
+<div class="row">
+    {% for widget in dashboard_widgets %}
+    <div class="col-{{ widget.size }} mb-4">
+        {% include widget.template %}
+    </div>
+    {% endfor %}
+</div>
+{% endmacro %}

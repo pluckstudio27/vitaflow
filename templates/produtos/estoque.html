@@ -1,0 +1,551 @@
+{% extends "base.html" %}
+
+{% block title %}Estoque por Hierarquia - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-sitemap"></i> Estoque por Hierarquia</h2>
+                <div>
+                    <button class="btn btn-outline-primary me-2" onclick="atualizarDados()">
+                        <i class="fas fa-sync-alt"></i> Atualizar
+                    </button>
+                    <a href="{{ url_for('main.produtos') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left"></i> Voltar
+                    </a>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <label for="filtroProduto" class="form-label">Produto</label>
+                                    <input type="text" class="form-control" id="filtroProduto" 
+                                           placeholder="Buscar por código ou nome...">
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="filtroTipo" class="form-label">Tipo de Local</label>
+                                    <select class="form-select" id="filtroTipo">
+                                        <option value="">Todos</option>
+                                        <option value="central">Central</option>
+                                        <option value="almoxarifado">Almoxarifado</option>
+                                        <option value="subalmoxarifado">Sub-almoxarifado</option>
+                                        <option value="setor">Setor</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="filtroStatus" class="form-label">Status</label>
+                                    <select class="form-select" id="filtroStatus">
+                                        <option value="">Todos</option>
+                                        <option value="disponivel">Disponível</option>
+                                        <option value="baixo">Estoque Baixo</option>
+                                        <option value="zerado">Zerado</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="filtroLocal" class="form-label">Local</label>
+                                    <select class="form-select" id="filtroLocal">
+                                        <option value="">Todos os locais</option>
+                                        <!-- Será preenchido dinamicamente -->
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-grid">
+                                        <button class="btn btn-primary" onclick="aplicarFiltros()">
+                                            <i class="fas fa-filter"></i> Filtrar
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo Geral -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body text-center">
+                            <h3 id="totalProdutos">-</h3>
+                            <p class="mb-0">Produtos Diferentes</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body text-center">
+                            <h3 id="totalLocais">-</h3>
+                            <p class="mb-0">Locais com Estoque</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body text-center">
+                            <h3 id="estoquesBaixos">-</h3>
+                            <p class="mb-0">Estoques Baixos</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-danger text-white">
+                        <div class="card-body text-center">
+                            <h3 id="estoquesZerados">-</h3>
+                            <p class="mb-0">Estoques Zerados</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabela de Estoque -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="fas fa-table"></i> Estoque Detalhado</h5>
+                            <div>
+                                <button class="btn btn-sm btn-outline-success" onclick="exportarExcel()">
+                                    <i class="fas fa-file-excel"></i> Exportar
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="tabelaEstoque">
+                                <div class="text-center py-4">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Carregando estoque...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Detalhes -->
+<div class="modal fade" id="detalhesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-info-circle"></i> Detalhes do Estoque
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detalhesConteudo">
+                <!-- Conteúdo será carregado dinamicamente -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>
+                <button type="button" class="btn btn-primary" id="verProdutoBtn">
+                    <i class="fas fa-eye"></i> Ver Produto
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let dadosEstoque = [];
+let dadosFiltrados = [];
+
+// Carregar dados iniciais
+function carregarDados() {
+    Promise.all([
+        fetch('/api/estoque/hierarquia').then(r => r.json()),
+        fetch('/api/hierarquia/locais').then(r => r.json())
+    ])
+    .then(([estoque, locais]) => {
+        dadosEstoque = estoque;
+        dadosFiltrados = [...dadosEstoque];
+        
+        preencherFiltroLocais(locais);
+        atualizarResumo();
+        renderizarTabela();
+    })
+    .catch(error => {
+        console.error('Erro ao carregar dados:', error);
+        document.getElementById('tabelaEstoque').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle"></i> Erro ao carregar dados do estoque
+            </div>
+        `;
+    });
+}
+
+// Preencher filtro de locais
+function preencherFiltroLocais(locais) {
+    const select = document.getElementById('filtroLocal');
+    select.innerHTML = '<option value="">Todos os locais</option>';
+    
+    // Agrupar por tipo
+    const grupos = {
+        central: [],
+        almoxarifado: [],
+        subalmoxarifado: [],
+        setor: []
+    };
+    
+    locais.forEach(local => {
+        if (grupos[local.tipo]) {
+            grupos[local.tipo].push(local);
+        }
+    });
+    
+    // Adicionar opções agrupadas
+    Object.keys(grupos).forEach(tipo => {
+        if (grupos[tipo].length > 0) {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+            
+            grupos[tipo].forEach(local => {
+                const option = document.createElement('option');
+                option.value = local.id;
+                option.textContent = local.nome;
+                optgroup.appendChild(option);
+            });
+            
+            select.appendChild(optgroup);
+        }
+    });
+}
+
+// Aplicar filtros
+function aplicarFiltros() {
+    const filtroProduto = document.getElementById('filtroProduto').value.toLowerCase();
+    const filtroTipo = document.getElementById('filtroTipo').value;
+    const filtroStatus = document.getElementById('filtroStatus').value;
+    const filtroLocal = document.getElementById('filtroLocal').value;
+    
+    dadosFiltrados = dadosEstoque.filter(item => {
+        // Filtro por produto
+        if (filtroProduto && 
+            !item.produto_nome.toLowerCase().includes(filtroProduto) &&
+            !item.produto_codigo.toLowerCase().includes(filtroProduto)) {
+            return false;
+        }
+        
+        // Filtro por tipo
+        if (filtroTipo && item.local_tipo?.toLowerCase() !== filtroTipo) {
+            return false;
+        }
+        
+        // Filtro por local
+        if (filtroLocal && item.local_id != filtroLocal) {
+            return false;
+        }
+        
+        // Filtro por status
+        if (filtroStatus) {
+            const quantidade = parseFloat(item.quantidade_disponivel || 0);
+            switch (filtroStatus) {
+                case 'disponivel':
+                    if (quantidade <= 0) return false;
+                    break;
+                case 'baixo':
+                    // Considerar baixo se menor que 10% do estoque inicial ou menor que 5 unidades
+                    const inicial = parseFloat(item.quantidade_inicial || 0);
+                    if (quantidade > Math.max(inicial * 0.1, 5)) return false;
+                    break;
+                case 'zerado':
+                    if (quantidade > 0) return false;
+                    break;
+            }
+        }
+        
+        return true;
+    });
+    
+    atualizarResumo();
+    renderizarTabela();
+}
+
+// Atualizar resumo
+function atualizarResumo() {
+    const produtosUnicos = new Set(dadosFiltrados.map(item => item.produto_id)).size;
+    const locaisUnicos = new Set(dadosFiltrados.map(item => item.local_id)).size;
+    
+    let estoquesBaixos = 0;
+    let estoquesZerados = 0;
+    
+    dadosFiltrados.forEach(item => {
+        const quantidade = parseFloat(item.quantidade_disponivel || 0);
+        const inicial = parseFloat(item.quantidade_inicial || 0);
+        
+        if (quantidade <= 0) {
+            estoquesZerados++;
+        } else if (quantidade <= Math.max(inicial * 0.1, 5)) {
+            estoquesBaixos++;
+        }
+    });
+    
+    document.getElementById('totalProdutos').textContent = produtosUnicos;
+    document.getElementById('totalLocais').textContent = locaisUnicos;
+    document.getElementById('estoquesBaixos').textContent = estoquesBaixos;
+    document.getElementById('estoquesZerados').textContent = estoquesZerados;
+}
+
+// Renderizar tabela
+function renderizarTabela() {
+    const container = document.getElementById('tabelaEstoque');
+    
+    if (dadosFiltrados.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info text-center">
+                <i class="fas fa-info-circle"></i> Nenhum item encontrado com os filtros aplicados
+            </div>
+        `;
+        return;
+    }
+    
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Produto</th>
+                        <th>Local</th>
+                        <th>Tipo</th>
+                        <th>Quantidade Total</th>
+                        <th>Disponível</th>
+                        <th>Status</th>
+                        <th>Última Atualização</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    dadosFiltrados.forEach(item => {
+        const quantidade = parseFloat(item.quantidade_disponivel || 0);
+        const total = parseFloat(item.quantidade || 0);
+        const inicial = parseFloat(item.quantidade_inicial || 0);
+        
+        // Determinar status
+        let statusBadge = '<span class="badge bg-success">Normal</span>';
+        if (quantidade <= 0) {
+            statusBadge = '<span class="badge bg-danger">Zerado</span>';
+        } else if (quantidade <= Math.max(inicial * 0.1, 5)) {
+            statusBadge = '<span class="badge bg-warning">Baixo</span>';
+        }
+        
+        // Ícone do tipo
+        const tipoIcons = {
+            'central': 'fas fa-building',
+            'almoxarifado': 'fas fa-warehouse',
+            'subalmoxarifado': 'fas fa-boxes',
+            'setor': 'fas fa-users'
+        };
+        
+        html += `
+            <tr>
+                <td>
+                    <div>
+                        <strong>${item.produto_nome}</strong><br>
+                        <small class="text-muted">Código: ${item.produto_codigo}</small>
+                    </div>
+                </td>
+                <td>
+                    <i class="${tipoIcons[item.local_tipo?.toLowerCase()] || 'fas fa-map-marker-alt'}"></i>
+                    ${item.local_nome}
+                </td>
+                <td>
+                    <span class="badge bg-secondary">${item.local_tipo}</span>
+                </td>
+                <td><strong>${total.toFixed(2)}</strong></td>
+                <td class="text-success"><strong>${quantidade.toFixed(2)}</strong></td>
+                <td>${statusBadge}</td>
+                <td class="text-muted">
+                    ${item.data_atualizacao ? new Date(item.data_atualizacao).toLocaleString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit', 
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '-'}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes(${item.produto_id}, ${item.local_id})">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// Ver detalhes
+function verDetalhes(produtoId, localId) {
+    Promise.all([
+        fetch(`/api/produtos/${produtoId}`).then(r => r.json()),
+        fetch(`/api/produtos/${produtoId}/lotes?local_id=${localId}`).then(r => r.json()),
+        fetch(`/api/produtos/${produtoId}/movimentacoes?local_id=${localId}&limit=10`).then(r => r.json())
+    ])
+    .then(([produto, lotes, movimentacoes]) => {
+        let html = `
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-box"></i> Produto</h6>
+                    <p><strong>${produto.nome}</strong><br>
+                    <small>Código: ${produto.codigo} | Unidade: ${produto.unidade_medida}</small></p>
+                </div>
+                <div class="col-md-6">
+                    <h6><i class="fas fa-map-marker-alt"></i> Local</h6>
+                    <p>${dadosFiltrados.find(item => item.produto_id == produtoId && item.local_id == localId)?.local_nome}</p>
+                </div>
+            </div>
+        `;
+        
+        // Lotes
+        if (lotes.length > 0) {
+            html += `
+                <h6><i class="fas fa-calendar-alt"></i> Lotes</h6>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Lote</th>
+                                <th>Quantidade</th>
+                                <th>Vencimento</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            lotes.forEach(lote => {
+                const hoje = new Date();
+                const vencimento = new Date(lote.data_vencimento);
+                const diasVencimento = Math.ceil((vencimento - hoje) / (1000 * 60 * 60 * 24));
+                
+                let statusBadge = '<span class="badge bg-success">Válido</span>';
+                if (diasVencimento < 0) {
+                    statusBadge = '<span class="badge bg-danger">Vencido</span>';
+                } else if (diasVencimento <= 30) {
+                    statusBadge = '<span class="badge bg-warning">Próximo ao vencimento</span>';
+                }
+                
+                html += `
+                    <tr>
+                        <td>${lote.lote || '-'}</td>
+                        <td>${parseFloat(lote.quantidade_atual || 0).toFixed(2)}</td>
+                        <td>${lote.data_vencimento ? new Date(lote.data_vencimento).toLocaleDateString('pt-BR') : '-'}</td>
+                        <td>${statusBadge}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table></div>';
+        }
+        
+        // Movimentações recentes
+        if (movimentacoes.items && movimentacoes.items.length > 0) {
+            html += `
+                <h6><i class="fas fa-history"></i> Movimentações Recentes</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Tipo</th>
+                                <th>Quantidade</th>
+                                <th>Observações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            movimentacoes.items.slice(0, 5).forEach(mov => {
+                const tipoIcon = {
+                    'entrada': 'fas fa-arrow-down text-success',
+                    'saida': 'fas fa-arrow-up text-danger',
+                    'transferencia': 'fas fa-exchange-alt text-primary'
+                };
+                
+                html += `
+                    <tr>
+                        <td>${new Date(mov.data_movimentacao).toLocaleDateString('pt-BR')}</td>
+                        <td>
+                            <i class="${tipoIcon[mov.tipo_movimentacao?.toLowerCase()] || 'fas fa-question'}"></i>
+                            ${mov.tipo_movimentacao}
+                        </td>
+                        <td>${parseFloat(mov.quantidade).toFixed(2)}</td>
+                        <td class="text-muted">${mov.observacoes || '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table></div>';
+        }
+        
+        document.getElementById('detalhesConteudo').innerHTML = html;
+        document.getElementById('verProdutoBtn').onclick = () => {
+            window.location.href = `/produtos/${produtoId}`;
+        };
+        
+        const modal = new bootstrap.Modal(document.getElementById('detalhesModal'));
+        modal.show();
+    })
+    .catch(error => {
+        console.error('Erro ao carregar detalhes:', error);
+        alert('Erro ao carregar detalhes');
+    });
+}
+
+// Atualizar dados
+function atualizarDados() {
+    document.getElementById('tabelaEstoque').innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Atualizando...</span>
+            </div>
+        </div>
+    `;
+    
+    carregarDados();
+}
+
+// Exportar para Excel
+function exportarExcel() {
+    const params = new URLSearchParams({
+        produto: document.getElementById('filtroProduto').value,
+        tipo: document.getElementById('filtroTipo').value,
+        status: document.getElementById('filtroStatus').value,
+        local: document.getElementById('filtroLocal').value
+    });
+    
+    window.open(`/api/estoque/hierarquia/export?${params.toString()}`, '_blank');
+}
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    carregarDados();
+    
+    // Busca em tempo real
+    let timeoutBusca = null;
+    document.getElementById('filtroProduto').addEventListener('input', function() {
+        clearTimeout(timeoutBusca);
+        timeoutBusca = setTimeout(aplicarFiltros, 300);
+    });
+    
+    // Filtros automáticos
+    document.getElementById('filtroTipo').addEventListener('change', aplicarFiltros);
+    document.getElementById('filtroStatus').addEventListener('change', aplicarFiltros);
+    document.getElementById('filtroLocal').addEventListener('change', aplicarFiltros);
+});
+</script>
+{% endblock %}

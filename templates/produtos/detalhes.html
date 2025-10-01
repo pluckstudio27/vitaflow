@@ -1,0 +1,577 @@
+{% extends "base.html" %}
+
+{% block title %}Detalhes do Produto - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-box"></i> Detalhes do Produto</h2>
+                <div>
+                    <a href="{{ url_for('main.produtos') }}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-arrow-left"></i> Voltar
+                    </a>
+                    <button class="btn btn-primary" id="btnRecebimento">
+                        <i class="fas fa-plus-circle"></i> Registrar Recebimento
+                    </button>
+                </div>
+            </div>
+
+            <!-- Informações do Produto -->
+            <div class="row mb-4">
+                <div class="col-lg-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-info-circle"></i> Informações do Produto</h5>
+                        </div>
+                        <div class="card-body" id="produtoInfo">
+                            <div class="text-center py-4">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Carregando...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Resumo de Estoque</h5>
+                        </div>
+                        <div class="card-body" id="resumoEstoque">
+                            <div class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Carregando...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estoque por Hierarquia -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="fas fa-sitemap"></i> Estoque por Hierarquia</h5>
+                            <button class="btn btn-sm btn-outline-primary" onclick="atualizarEstoque()">
+                                <i class="fas fa-sync-alt"></i> Atualizar
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="estoqueHierarquia">
+                                <div class="text-center py-4">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Carregando estoque...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lotes e Validades -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-calendar-alt"></i> Lotes e Validades</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="lotesValidades">
+                                <div class="text-center py-4">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Carregando lotes...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Movimentações Recentes -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="fas fa-history"></i> Movimentações Recentes</h5>
+                            <div>
+                                <select class="form-select form-select-sm" id="filtroMovimentacao" style="width: auto;">
+                                    <option value="">Todas</option>
+                                    <option value="entrada">Entradas</option>
+                                    <option value="saida">Saídas</option>
+                                    <option value="transferencia">Transferências</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="movimentacoes">
+                                <div class="text-center py-4">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Carregando movimentações...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Recebimento -->
+<div class="modal fade" id="recebimentoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus-circle"></i> Registrar Recebimento
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="recebimentoForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="quantidade" class="form-label">Quantidade *</label>
+                                <input type="number" class="form-control" id="quantidade" name="quantidade" 
+                                       min="0.01" step="0.01" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="lote" class="form-label">Lote</label>
+                                <input type="text" class="form-control" id="lote" name="lote">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="data_fabricacao" class="form-label">Data de Fabricação</label>
+                                <input type="date" class="form-control" id="data_fabricacao" name="data_fabricacao">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="data_vencimento" class="form-label">Data de Vencimento</label>
+                                <input type="date" class="form-control" id="data_vencimento" name="data_vencimento">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="observacoes" class="form-label">Observações</label>
+                        <textarea class="form-control" id="observacoes" name="observacoes" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="salvarRecebimento">
+                    <i class="fas fa-save"></i> Registrar Recebimento
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let produtoId = null;
+
+// Extrair ID do produto da URL
+function obterProdutoId() {
+    const path = window.location.pathname;
+    const match = path.match(/\/produtos\/(\d+)/);
+    return match ? parseInt(match[1]) : null;
+}
+
+// Carregar dados do produto
+function carregarProduto() {
+    produtoId = obterProdutoId();
+    if (!produtoId) {
+        alert('ID do produto não encontrado');
+        return;
+    }
+    
+    fetch(`/api/produtos/${produtoId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            renderizarProduto(data);
+        })
+        .catch(error => {
+            console.error('Erro ao carregar produto:', error);
+            document.getElementById('produtoInfo').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Erro ao carregar produto: ${error.message}
+                </div>
+            `;
+        });
+}
+
+// Renderizar informações do produto
+function renderizarProduto(produto) {
+    const statusBadge = produto.ativo ? 
+        '<span class="badge bg-success">Ativo</span>' : 
+        '<span class="badge bg-danger">Inativo</span>';
+    
+    document.getElementById('produtoInfo').innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h4>${produto.nome} ${statusBadge}</h4>
+                <p class="text-muted mb-3">${produto.descricao || 'Sem descrição'}</p>
+                
+                <div class="row">
+                    <div class="col-6">
+                        <strong>Código:</strong><br>
+                        <span class="badge bg-primary">${produto.codigo}</span>
+                    </div>
+                    <div class="col-6">
+                        <strong>Unidade:</strong><br>
+                        ${produto.unidade_medida}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="row">
+                    <div class="col-6">
+                        <strong>Categoria:</strong><br>
+                        ${produto.categoria || 'Não informada'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Criado em:</strong><br>
+                        ${new Date(produto.data_criacao).toLocaleDateString('pt-BR')}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Carregar dados relacionados
+    carregarResumoEstoque();
+    carregarEstoqueHierarquia();
+    carregarLotes();
+    carregarMovimentacoes();
+}
+
+// Carregar resumo de estoque
+function carregarResumoEstoque() {
+    fetch(`/api/produtos/${produtoId}/estoque`)
+        .then(response => response.json())
+        .then(data => {
+            const resumo = data.resumo || {};
+            const total = resumo.total_disponivel || 0;
+            
+            document.getElementById('resumoEstoque').innerHTML = `
+                <div class="text-center">
+                    <div class="row">
+                        <div class="col-12 mb-3">
+                            <h3 class="text-primary">${total.toFixed(2)}</h3>
+                            <small class="text-muted">Total Disponível</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        })
+        .catch(error => {
+            console.error('Erro ao carregar resumo:', error);
+            document.getElementById('resumoEstoque').innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> Erro ao carregar resumo
+                </div>
+            `;
+        });
+}
+
+// Carregar estoque por hierarquia
+function carregarEstoqueHierarquia() {
+    fetch(`/api/produtos/${produtoId}/estoque`)
+        .then(response => response.json())
+        .then(data => {
+            const estoques = data.estoques || [];
+            if (estoques.length === 0) {
+                document.getElementById('estoqueHierarquia').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i> Nenhum estoque encontrado para este produto
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '<div class="table-responsive"><table class="table table-hover">';
+            html += `
+                <thead>
+                    <tr>
+                        <th>Local</th>
+                        <th>Tipo</th>
+                        <th>Quantidade Total</th>
+                        <th>Disponível</th>
+                        <th>Última Atualização</th>
+                    </tr>
+                </thead>
+                <tbody>
+            `;
+            
+            estoques.forEach(item => {
+                const tipoIcon = {
+                    'central': 'fas fa-building',
+                    'almoxarifado': 'fas fa-warehouse',
+                    'subalmoxarifado': 'fas fa-boxes',
+                    'setor': 'fas fa-users'
+                };
+                
+                html += `
+                    <tr>
+                        <td>
+                            <i class="${tipoIcon[item.tipo] || 'fas fa-box'}"></i>
+                            ${item.nome_local}
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">${item.tipo}</span>
+                        </td>
+                        <td><strong>${parseFloat(item.quantidade || 0).toFixed(2)}</strong></td>
+                        <td class="text-success">${parseFloat(item.quantidade_disponivel || 0).toFixed(2)}</td>
+                        <td class="text-muted">
+                            ${item.data_atualizacao ? new Date(item.data_atualizacao).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit', 
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            }) : '-'}
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table></div>';
+            document.getElementById('estoqueHierarquia').innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Erro ao carregar estoque:', error);
+            document.getElementById('estoqueHierarquia').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Erro ao carregar estoque por hierarquia
+                </div>
+            `;
+        });
+}
+
+// Carregar lotes
+function carregarLotes() {
+    fetch(`/api/produtos/${produtoId}/lotes`)
+        .then(response => response.json())
+        .then(data => {
+            const lotes = data.items || [];
+            if (lotes.length === 0) {
+                document.getElementById('lotesValidades').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i> Nenhum lote encontrado para este produto
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '<div class="table-responsive"><table class="table table-hover">';
+            html += `
+                <thead>
+                    <tr>
+                        <th>Lote</th>
+                        <th>Quantidade</th>
+                        <th>Data Fabricação</th>
+                        <th>Data Vencimento</th>
+                        <th>Status</th>
+                        <th>Observações</th>
+                    </tr>
+                </thead>
+                <tbody>
+            `;
+            
+            lotes.forEach(lote => {
+                const hoje = new Date();
+                const vencimento = new Date(lote.data_vencimento);
+                const diasVencimento = Math.ceil((vencimento - hoje) / (1000 * 60 * 60 * 24));
+                
+                let statusBadge = '<span class="badge bg-success">Válido</span>';
+                if (diasVencimento < 0) {
+                    statusBadge = '<span class="badge bg-danger">Vencido</span>';
+                } else if (diasVencimento <= 30) {
+                    statusBadge = '<span class="badge bg-warning">Próximo ao vencimento</span>';
+                }
+                
+                html += `
+                    <tr>
+                        <td><strong>${lote.numero_lote || '-'}</strong></td>
+                        <td>${parseFloat(lote.quantidade_atual || 0).toFixed(2)}</td>
+                        <td>${lote.data_fabricacao ? new Date(lote.data_fabricacao).toLocaleDateString('pt-BR') : '-'}</td>
+                        <td>${lote.data_vencimento ? new Date(lote.data_vencimento).toLocaleDateString('pt-BR') : '-'}</td>
+                        <td>${statusBadge}</td>
+                        <td class="text-muted">${lote.observacoes || '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table></div>';
+            document.getElementById('lotesValidades').innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Erro ao carregar lotes:', error);
+            document.getElementById('lotesValidades').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Erro ao carregar lotes
+                </div>
+            `;
+        });
+}
+
+// Carregar movimentações
+function carregarMovimentacoes() {
+    const filtro = document.getElementById('filtroMovimentacao').value;
+    let url = `/api/produtos/${produtoId}/movimentacoes?limit=20`;
+    if (filtro) {
+        url += `&tipo=${filtro}`;
+    }
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.items.length === 0) {
+                document.getElementById('movimentacoes').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i> Nenhuma movimentação encontrada
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '<div class="table-responsive"><table class="table table-hover">';
+            html += `
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Tipo</th>
+                        <th>Quantidade</th>
+                        <th>Local</th>
+                        <th>Usuário</th>
+                        <th>Observações</th>
+                    </tr>
+                </thead>
+                <tbody>
+            `;
+            
+            data.items.forEach(mov => {
+                const tipoIcon = {
+                    'entrada': 'fas fa-arrow-down text-success',
+                    'saida': 'fas fa-arrow-up text-danger',
+                    'transferencia': 'fas fa-exchange-alt text-primary'
+                };
+                
+                html += `
+                    <tr>
+                        <td>${new Date(mov.data_movimentacao).toLocaleDateString('pt-BR')}</td>
+                        <td>
+                            <i class="${tipoIcon[mov.tipo_movimentacao?.toLowerCase()] || 'fas fa-question'}"></i>
+                            ${mov.tipo_movimentacao}
+                        </td>
+                        <td><strong>${parseFloat(mov.quantidade).toFixed(2)}</strong></td>
+                        <td>${mov.local || '-'}</td>
+                        <td class="text-muted">${mov.usuario_responsavel || '-'}</td>
+                        <td class="text-muted">${mov.observacoes || '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table></div>';
+            document.getElementById('movimentacoes').innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Erro ao carregar movimentações:', error);
+            document.getElementById('movimentacoes').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Erro ao carregar movimentações
+                </div>
+            `;
+        });
+}
+
+// Atualizar estoque
+function atualizarEstoque() {
+    carregarResumoEstoque();
+    carregarEstoqueHierarquia();
+    carregarLotes();
+}
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    carregarProduto();
+    
+    // Botão de recebimento
+    document.getElementById('btnRecebimento').addEventListener('click', function() {
+        const modal = new bootstrap.Modal(document.getElementById('recebimentoModal'));
+        modal.show();
+    });
+    
+    // Filtro de movimentações
+    document.getElementById('filtroMovimentacao').addEventListener('change', carregarMovimentacoes);
+    
+    // Salvar recebimento
+    document.getElementById('salvarRecebimento').addEventListener('click', function() {
+        const form = document.getElementById('recebimentoForm');
+        const formData = new FormData(form);
+        
+        const data = {
+            produto_id: produtoId,
+            quantidade: parseFloat(formData.get('quantidade')),
+            lote: formData.get('lote'),
+            data_fabricacao: formData.get('data_fabricacao'),
+            data_vencimento: formData.get('data_vencimento'),
+            observacoes: formData.get('observacoes')
+        };
+        
+        if (!data.quantidade || data.quantidade <= 0) {
+            alert('Quantidade deve ser maior que zero');
+            return;
+        }
+        
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando...';
+        
+        fetch('/api/produtos/recebimento', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            alert('Recebimento registrado com sucesso!');
+            bootstrap.Modal.getInstance(document.getElementById('recebimentoModal')).hide();
+            form.reset();
+            atualizarEstoque();
+            carregarMovimentacoes();
+        })
+        .catch(error => {
+            console.error('Erro ao registrar recebimento:', error);
+            alert('Erro ao registrar recebimento: ' + error.message);
+        })
+        .finally(() => {
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-save"></i> Registrar Recebimento';
+        });
+    });
+});
+</script>
+{% endblock %}

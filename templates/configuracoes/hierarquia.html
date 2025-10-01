@@ -1,0 +1,1164 @@
+{% extends "base.html" %}
+
+{% block title %}Hierarquia - Configurações - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('main.index') }}">Início</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('main.configuracoes') }}">Configurações</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Hierarquia</li>
+        </ol>
+    </nav>
+
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-0">
+                        <i class="fas fa-sitemap me-2"></i>Gerenciamento de Hierarquia
+                    </h1>
+                    <p class="text-muted">Configure a estrutura hierárquica do sistema de almoxarifado</p>
+                </div>
+                <a href="{{ url_for('main.configuracoes') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Voltar às Configurações
+                </a>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Tabs Navigation -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="hierarchyTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="centrais-tab" data-bs-toggle="tab" data-bs-target="#centrais" type="button" role="tab" aria-controls="centrais" aria-selected="true">
+                                <i class="fas fa-building me-2"></i>Centrais
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="almoxarifados-tab" data-bs-toggle="tab" data-bs-target="#almoxarifados" type="button" role="tab" aria-controls="almoxarifados" aria-selected="false">
+                                <i class="fas fa-warehouse me-2"></i>Almoxarifados
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="sub-almoxarifados-tab" data-bs-toggle="tab" data-bs-target="#sub-almoxarifados" type="button" role="tab" aria-controls="sub-almoxarifados" aria-selected="false">
+                                <i class="fas fa-boxes me-2"></i>Sub-Almoxarifados
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="setores-tab" data-bs-toggle="tab" data-bs-target="#setores" type="button" role="tab" aria-controls="setores" aria-selected="false">
+                                <i class="fas fa-layer-group me-2"></i>Setores
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content" id="hierarchyTabsContent">
+                        <!-- Centrais Tab -->
+                        <div class="tab-pane fade show active" id="centrais" role="tabpanel" aria-labelledby="centrais-tab">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">Centrais Cadastradas</h5>
+                                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#centralModal">
+                                    <i class="fas fa-plus me-2"></i>Nova Central
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="centraisTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nome</th>
+                                            <th>Descrição</th>
+                                            <th>Status</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Dados carregados via AJAX -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Almoxarifados Tab -->
+                        <div class="tab-pane fade" id="almoxarifados" role="tabpanel" aria-labelledby="almoxarifados-tab">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">Almoxarifados Cadastrados</h5>
+                                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#almoxarifadoModal">
+                                    <i class="fas fa-plus me-2"></i>Novo Almoxarifado
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="almoxarifadosTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nome</th>
+                                            <th>Central</th>
+                                            <th>Descrição</th>
+                                            <th>Status</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Dados carregados via AJAX -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Sub-Almoxarifados Tab -->
+                        <div class="tab-pane fade" id="sub-almoxarifados" role="tabpanel" aria-labelledby="sub-almoxarifados-tab">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">Sub-Almoxarifados Cadastrados</h5>
+                                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#subAlmoxarifadoModal">
+                                    <i class="fas fa-plus me-2"></i>Novo Sub-Almoxarifado
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="subAlmoxarifadosTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nome</th>
+                                            <th>Almoxarifado</th>
+                                            <th>Central</th>
+                                            <th>Descrição</th>
+                                            <th>Status</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Dados carregados via AJAX -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Setores Tab -->
+                        <div class="tab-pane fade" id="setores" role="tabpanel" aria-labelledby="setores-tab">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">Setores Cadastrados</h5>
+                                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#setorModal">
+                                    <i class="fas fa-plus me-2"></i>Novo Setor
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="setoresTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nome</th>
+                                            <th>Sub-Almoxarifado</th>
+                                            <th>Almoxarifado</th>
+                                            <th>Central</th>
+                                            <th>Descrição</th>
+                                            <th>Status</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Dados carregados via AJAX -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modals -->
+<!-- Central Modal -->
+<div class="modal fade" id="centralModal" tabindex="-1" aria-labelledby="centralModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="centralModalLabel">Nova Central</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="centralForm">
+                <div class="modal-body">
+                    <input type="hidden" id="central-id" name="id">
+                    <div class="mb-3">
+                        <label for="central-nome" class="form-label">Nome *</label>
+                        <input type="text" class="form-control" id="central-nome" name="nome" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="central-descricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="central-descricao" name="descricao" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Almoxarifado Modal -->
+<div class="modal fade" id="almoxarifadoModal" tabindex="-1" aria-labelledby="almoxarifadoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="almoxarifadoModalLabel">Novo Almoxarifado</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="almoxarifadoForm">
+                <div class="modal-body">
+                    <input type="hidden" id="almoxarifado-id" name="id">
+                    <div class="mb-3">
+                        <label for="almoxarifado-central" class="form-label">Central *</label>
+                        <select class="form-select" id="almoxarifado-central" name="central_id" required>
+                            <option value="">Selecione uma central</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="almoxarifado-nome" class="form-label">Nome *</label>
+                        <input type="text" class="form-control" id="almoxarifado-nome" name="nome" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="almoxarifado-descricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="almoxarifado-descricao" name="descricao" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Sub-Almoxarifado Modal -->
+<div class="modal fade" id="subAlmoxarifadoModal" tabindex="-1" aria-labelledby="subAlmoxarifadoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="subAlmoxarifadoModalLabel">Novo Sub-Almoxarifado</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="subAlmoxarifadoForm">
+                <div class="modal-body">
+                    <input type="hidden" id="sub-almoxarifado-id" name="id">
+                    <div class="mb-3">
+                        <label for="sub-almoxarifado-central" class="form-label">Central *</label>
+                        <select class="form-select" id="sub-almoxarifado-central" name="central_id" required>
+                            <option value="">Selecione uma central</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="sub-almoxarifado-almoxarifado" class="form-label">Almoxarifado *</label>
+                        <select class="form-select" id="sub-almoxarifado-almoxarifado" name="almoxarifado_id" required>
+                            <option value="">Selecione um almoxarifado</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="sub-almoxarifado-nome" class="form-label">Nome *</label>
+                        <input type="text" class="form-control" id="sub-almoxarifado-nome" name="nome" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="sub-almoxarifado-descricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="sub-almoxarifado-descricao" name="descricao" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Setor Modal -->
+<div class="modal fade" id="setorModal" tabindex="-1" aria-labelledby="setorModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="setorModalLabel">Novo Setor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="setorForm">
+                <div class="modal-body">
+                    <input type="hidden" id="setor-id" name="id">
+                    <div class="mb-3">
+                        <label for="setor-central" class="form-label">Central *</label>
+                        <select class="form-select" id="setor-central" name="central_id" required>
+                            <option value="">Selecione uma central</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="setor-almoxarifado" class="form-label">Almoxarifado *</label>
+                        <select class="form-select" id="setor-almoxarifado" name="almoxarifado_id" required>
+                            <option value="">Selecione um almoxarifado</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="setor-sub-almoxarifado" class="form-label">Sub-Almoxarifado *</label>
+                        <select class="form-select" id="setor-sub-almoxarifado" name="sub_almoxarifado_id" required>
+                            <option value="">Selecione um sub-almoxarifado</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="setor-nome" class="form-label">Nome *</label>
+                        <input type="text" class="form-control" id="setor-nome" name="nome" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="setor-descricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="setor-descricao" name="descricao" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Alert Container -->
+<div id="alertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1055;"></div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    loadCentrais();
+    loadAlmoxarifados();
+    loadSubAlmoxarifados();
+    loadSetores();
+    loadCentraisSelect();
+    loadAlmoxarifadosSelect();
+    loadCentraisForSubAlmoxSelect();
+    loadCentraisForSetorSelect();
+    
+    // Event listeners para formulários
+    $('#centralForm').on('submit', handleCentralSubmit);
+    $('#almoxarifadoForm').on('submit', handleAlmoxarifadoSubmit);
+    $('#subAlmoxarifadoForm').on('submit', handleSubAlmoxarifadoSubmit);
+    $('#setorForm').on('submit', handleSetorSubmit);
+    
+    // Event listeners para filtros hierárquicos
+    $('#sub-almoxarifado-central').on('change', onSubAlmoxCentralChange);
+    $('#setor-central').on('change', onSetorCentralChange);
+    $('#setor-almoxarifado').on('change', onSetorAlmoxarifadoChange);
+    
+    // Event listeners para mudança de abas
+    $('#hierarchyTabs button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+        const target = $(e.target).attr('data-bs-target');
+        if (target === '#sub-almoxarifados') {
+            loadSubAlmoxarifados();
+            loadAlmoxarifadosSelect();
+        } else if (target === '#setores') {
+            loadSetores();
+        }
+    });
+    
+    // Event listener para modal de Sub-Almoxarifado
+    $('#subAlmoxarifadoModal').on('show.bs.modal', function (e) {
+        // Limpar formulário se não for edição
+        if (!$('#subAlmoxarifadoForm').data('edit-id')) {
+            $('#subAlmoxarifadoForm')[0].reset();
+            $('#sub-almoxarifado-almoxarifado').prop('disabled', true);
+            $('#subAlmoxarifadoModalLabel').text('Novo Sub-Almoxarifado');
+        }
+        // Carregar centrais
+        loadCentraisForSubAlmoxSelect();
+    });
+    
+    // Event listener para modal de Setor
+    $('#setorModal').on('show.bs.modal', function (e) {
+        // Limpar formulário se não for edição
+        if (!$('#setorForm').data('edit-id')) {
+            $('#setorForm')[0].reset();
+            $('#setor-almoxarifado').prop('disabled', true);
+            $('#setor-sub-almoxarifado').prop('disabled', true);
+            $('#setorModalLabel').text('Novo Setor');
+        }
+        // Carregar centrais
+        loadCentraisForSetorSelect();
+    });
+});
+
+function loadCentrais() {
+    $.get('/api/centrais?per_page=1000')
+        .done(function(response) {
+            const tbody = $('#centraisTable tbody');
+            tbody.empty();
+            
+            const data = response.items || [];
+            
+            if (data.length === 0) {
+                tbody.append(`
+                    <tr>
+                        <td colspan="5" class="text-center py-4">
+                            <i class="fas fa-building fa-2x text-muted mb-2"></i>
+                            <p class="mb-0">Nenhuma central cadastrada</p>
+                        </td>
+                    </tr>
+                `);
+                return;
+            }
+            
+            data.forEach(central => {
+                const row = `
+                    <tr>
+                        <td>${central.id}</td>
+                        <td><strong>${central.nome}</strong></td>
+                        <td>${central.descricao || '-'}</td>
+                        <td>
+                            <span class="badge bg-${central.ativo ? 'success' : 'secondary'}">
+                                ${central.ativo ? 'Ativo' : 'Inativo'}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editCentral(${central.id})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteCentral(${central.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                tbody.append(row);
+            });
+        })
+        .fail(function() {
+            $('#centraisTable tbody').html(`
+                <tr>
+                    <td colspan="5" class="text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Erro ao carregar centrais
+                    </td>
+                </tr>
+            `);
+        });
+}
+
+function loadAlmoxarifados() {
+    $.get('/api/almoxarifados?per_page=1000')
+        .done(function(response) {
+            const tbody = $('#almoxarifadosTable tbody');
+            tbody.empty();
+            
+            const data = response.items || [];
+            
+            if (data.length === 0) {
+                tbody.append(`
+                    <tr>
+                        <td colspan="6" class="text-center py-4">
+                            <i class="fas fa-warehouse fa-2x text-muted mb-2"></i>
+                            <p class="mb-0">Nenhum almoxarifado cadastrado</p>
+                        </td>
+                    </tr>
+                `);
+                return;
+            }
+            
+            data.forEach(almox => {
+                const row = `
+                    <tr>
+                        <td>${almox.id}</td>
+                        <td><strong>${almox.nome}</strong></td>
+                        <td>${almox.central_nome || '-'}</td>
+                        <td>${almox.descricao || '-'}</td>
+                        <td>
+                            <span class="badge bg-${almox.ativo ? 'success' : 'secondary'}">
+                                ${almox.ativo ? 'Ativo' : 'Inativo'}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editAlmoxarifado(${almox.id})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteAlmoxarifado(${almox.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                tbody.append(row);
+            });
+        })
+        .fail(function() {
+            $('#almoxarifadosTable tbody').html(`
+                <tr>
+                    <td colspan="6" class="text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Erro ao carregar almoxarifados
+                    </td>
+                </tr>
+            `);
+        });
+}
+
+function loadSubAlmoxarifados() {
+    $.get('/api/sub-almoxarifados?per_page=1000')
+        .done(function(response) {
+            const tbody = $('#subAlmoxarifadosTable tbody');
+            tbody.empty();
+            
+            const data = response.items || [];
+            
+            if (data.length === 0) {
+                tbody.append(`
+                    <tr>
+                        <td colspan="7" class="text-center py-4">
+                            <i class="fas fa-boxes fa-2x text-muted mb-2"></i>
+                            <p class="mb-0">Nenhum sub-almoxarifado cadastrado</p>
+                        </td>
+                    </tr>
+                `);
+                return;
+            }
+            
+            data.forEach(subAlmox => {
+                const row = `
+                    <tr>
+                        <td>${subAlmox.id}</td>
+                        <td><strong>${subAlmox.nome}</strong></td>
+                        <td>${subAlmox.almoxarifado_nome || '-'}</td>
+                        <td>${subAlmox.central_nome || '-'}</td>
+                        <td>${subAlmox.descricao || '-'}</td>
+                        <td>
+                            <span class="badge bg-${subAlmox.ativo ? 'success' : 'secondary'}">
+                                ${subAlmox.ativo ? 'Ativo' : 'Inativo'}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editSubAlmoxarifado(${subAlmox.id})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteSubAlmoxarifado(${subAlmox.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                tbody.append(row);
+            });
+        })
+        .fail(function() {
+            $('#subAlmoxarifadosTable tbody').html(`
+                <tr>
+                    <td colspan="7" class="text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Erro ao carregar sub-almoxarifados
+                    </td>
+                </tr>
+            `);
+        });
+}
+
+function loadSetores() {
+    $.get('/api/setores?per_page=1000')
+        .done(function(response) {
+            const tbody = $('#setoresTable tbody');
+            tbody.empty();
+            
+            const data = response.items || [];
+            
+            if (data.length === 0) {
+                tbody.append(`
+                    <tr>
+                        <td colspan="8" class="text-center py-4">
+                            <i class="fas fa-layer-group fa-2x text-muted mb-2"></i>
+                            <p class="mb-0">Nenhum setor cadastrado</p>
+                        </td>
+                    </tr>
+                `);
+                return;
+            }
+            
+            data.forEach(setor => {
+                const row = `
+                    <tr>
+                        <td>${setor.id}</td>
+                        <td><strong>${setor.nome}</strong></td>
+                        <td>${setor.sub_almoxarifado_nome || '-'}</td>
+                        <td>${setor.almoxarifado_nome || '-'}</td>
+                        <td>${setor.central_nome || '-'}</td>
+                        <td>${setor.descricao || '-'}</td>
+                        <td>
+                            <span class="badge bg-${setor.ativo ? 'success' : 'secondary'}">
+                                ${setor.ativo ? 'Ativo' : 'Inativo'}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editSetor(${setor.id})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteSetor(${setor.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                tbody.append(row);
+            });
+        })
+        .fail(function() {
+            $('#setoresTable tbody').html(`
+                <tr>
+                    <td colspan="8" class="text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Erro ao carregar setores
+                    </td>
+                </tr>
+            `);
+        });
+}
+
+function loadCentraisSelect() {
+    return $.get('/api/centrais?ativo=true&per_page=1000')
+        .done(function(response) {
+            const select = $('#almoxarifado-central');
+            select.find('option:not(:first)').remove();
+            
+            if (response.items && Array.isArray(response.items)) {
+                response.items.forEach(central => {
+                    select.append(`<option value="${central.id}">${central.nome}</option>`);
+                });
+            }
+        });
+}
+
+function loadAlmoxarifadosSelect() {
+    return $.get('/api/almoxarifados')
+        .done(function(response) {
+            const select = $('#sub-almoxarifado-almoxarifado');
+            select.find('option:not(:first)').remove();
+            
+            const data = response.items || [];
+            data.forEach(almox => {
+                if (almox.ativo) {
+                    select.append(`<option value="${almox.id}">${almox.nome} (${almox.central_nome})</option>`);
+                }
+            });
+        });
+}
+
+function loadCentraisForSubAlmoxSelect() {
+    const select = $('#sub-almoxarifado-central');
+    select.find('option:not(:first)').remove();
+    
+    $.get('/api/centrais')
+        .done(function(response) {
+            const data = response.items || [];
+            data.forEach(central => {
+                if (central.ativo) {
+                    select.append(`<option value="${central.id}">${central.nome}</option>`);
+                }
+            });
+        });
+}
+
+function loadCentraisForSetorSelect() {
+    const select = $('#setor-central');
+    select.find('option:not(:first)').remove();
+    
+    return $.get('/api/centrais')
+        .done(function(response) {
+            const data = response.items || [];
+            data.forEach(central => {
+                if (central.ativo) {
+                    select.append(`<option value="${central.id}">${central.nome}</option>`);
+                }
+            });
+        });
+}
+
+function onSubAlmoxCentralChange() {
+    const centralId = $('#sub-almoxarifado-central').val();
+    const almoxSelect = $('#sub-almoxarifado-almoxarifado');
+    
+    // Limpar e desabilitar select de almoxarifado
+    almoxSelect.find('option:not(:first)').remove();
+    almoxSelect.prop('disabled', !centralId);
+    
+    if (centralId) {
+        almoxSelect.find('option:first').text('Carregando...');
+        
+        // Carregar almoxarifados da central selecionada
+        $.get('/api/almoxarifados')
+            .done(function(response) {
+                almoxSelect.find('option:first').text('Selecione um almoxarifado');
+                
+                const data = response.items || [];
+                data.forEach(almox => {
+                    if (almox.ativo && almox.central_id == centralId) {
+                        almoxSelect.append(`<option value="${almox.id}">${almox.nome}</option>`);
+                    }
+                });
+            })
+            .fail(function() {
+                almoxSelect.find('option:first').text('Erro ao carregar');
+            });
+    } else {
+        almoxSelect.find('option:first').text('Primeiro selecione uma central');
+    }
+}
+
+function onSetorCentralChange() {
+    const centralId = $('#setor-central').val();
+    const almoxSelect = $('#setor-almoxarifado');
+    const subAlmoxSelect = $('#setor-sub-almoxarifado');
+    
+    // Limpar e desabilitar selects dependentes
+    almoxSelect.find('option:not(:first)').remove();
+    subAlmoxSelect.find('option:not(:first)').remove();
+    almoxSelect.prop('disabled', !centralId);
+    subAlmoxSelect.prop('disabled', true);
+    
+    if (centralId) {
+        almoxSelect.find('option:first').text('Carregando...');
+        
+        // Carregar almoxarifados da central selecionada
+        $.get('/api/almoxarifados')
+            .done(function(response) {
+                almoxSelect.find('option:first').text('Selecione um almoxarifado');
+                
+                const data = response.items || [];
+                data.forEach(almox => {
+                    if (almox.ativo && almox.central_id == centralId) {
+                        almoxSelect.append(`<option value="${almox.id}">${almox.nome}</option>`);
+                    }
+                });
+            })
+            .fail(function() {
+                almoxSelect.find('option:first').text('Erro ao carregar');
+            });
+    } else {
+        almoxSelect.find('option:first').text('Primeiro selecione uma central');
+        subAlmoxSelect.find('option:first').text('Primeiro selecione um almoxarifado');
+    }
+}
+
+function onSetorAlmoxarifadoChange() {
+    const almoxarifadoId = $('#setor-almoxarifado').val();
+    const subAlmoxSelect = $('#setor-sub-almoxarifado');
+    
+    // Limpar e desabilitar select de sub-almoxarifado
+    subAlmoxSelect.find('option:not(:first)').remove();
+    subAlmoxSelect.prop('disabled', !almoxarifadoId);
+    
+    if (almoxarifadoId) {
+        subAlmoxSelect.find('option:first').text('Carregando...');
+        
+        // Carregar sub-almoxarifados do almoxarifado selecionado
+        $.get('/api/sub-almoxarifados')
+            .done(function(response) {
+                subAlmoxSelect.find('option:first').text('Selecione um sub-almoxarifado');
+                
+                const data = response.items || [];
+                data.forEach(subAlmox => {
+                    if (subAlmox.ativo && subAlmox.almoxarifado_id == almoxarifadoId) {
+                        subAlmoxSelect.append(`<option value="${subAlmox.id}">${subAlmox.nome}</option>`);
+                    }
+                });
+            })
+            .fail(function() {
+                subAlmoxSelect.find('option:first').text('Erro ao carregar');
+            });
+    } else {
+        subAlmoxSelect.find('option:first').text('Primeiro selecione um almoxarifado');
+    }
+}
+
+function handleCentralSubmit(e) {
+    e.preventDefault();
+    
+    const editId = $('#centralForm').data('edit-id');
+    const isEdit = editId !== undefined;
+    
+    const data = {
+        nome: $('#central-nome').val(),
+        descricao: $('#central-descricao').val(),
+        ativo: true
+    };
+    
+    $.ajax({
+        url: isEdit ? `/api/centrais/${editId}` : '/api/centrais',
+        method: isEdit ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data)
+    })
+        .done(function() {
+            $('#centralModal').modal('hide');
+            $('#centralForm')[0].reset();
+            $('#centralForm').removeData('edit-id');
+            $('#centralModalLabel').text('Nova Central');
+            loadCentrais();
+            loadCentraisSelect();
+            showAlert(isEdit ? 'Central atualizada com sucesso!' : 'Central criada com sucesso!', 'success');
+        })
+        .fail(function(xhr) {
+            const error = xhr.responseJSON?.error || (isEdit ? 'Erro ao atualizar central' : 'Erro ao criar central');
+            showAlert(error, 'danger');
+        });
+}
+
+function handleAlmoxarifadoSubmit(e) {
+    e.preventDefault();
+    
+    const editId = $('#almoxarifadoForm').data('edit-id');
+    const isEdit = editId !== undefined;
+    
+    const data = {
+        central_id: parseInt($('#almoxarifado-central').val()),
+        nome: $('#almoxarifado-nome').val(),
+        descricao: $('#almoxarifado-descricao').val(),
+        ativo: true
+    };
+    
+    $.ajax({
+        url: isEdit ? `/api/almoxarifados/${editId}` : '/api/almoxarifados',
+        method: isEdit ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data)
+    })
+        .done(function() {
+            $('#almoxarifadoModal').modal('hide');
+            $('#almoxarifadoForm')[0].reset();
+            $('#almoxarifadoForm').removeData('edit-id');
+            $('#almoxarifadoModalLabel').text('Novo Almoxarifado');
+            loadAlmoxarifados();
+            showAlert(isEdit ? 'Almoxarifado atualizado com sucesso!' : 'Almoxarifado criado com sucesso!', 'success');
+        })
+        .fail(function(xhr) {
+            const error = xhr.responseJSON?.error || (isEdit ? 'Erro ao atualizar almoxarifado' : 'Erro ao criar almoxarifado');
+            showAlert(error, 'danger');
+        });
+}
+
+function handleSubAlmoxarifadoSubmit(e) {
+    e.preventDefault();
+    
+    const editId = $('#subAlmoxarifadoForm').data('edit-id');
+    const isEdit = editId !== undefined;
+    
+    const data = {
+        almoxarifado_id: parseInt($('#sub-almoxarifado-almoxarifado').val()),
+        nome: $('#sub-almoxarifado-nome').val(),
+        descricao: $('#sub-almoxarifado-descricao').val(),
+        ativo: true
+    };
+    
+    $.ajax({
+        url: isEdit ? `/api/sub-almoxarifados/${editId}` : '/api/sub-almoxarifados',
+        method: isEdit ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data)
+    })
+        .done(function() {
+            $('#subAlmoxarifadoModal').modal('hide');
+            $('#subAlmoxarifadoForm')[0].reset();
+            $('#subAlmoxarifadoForm').removeData('edit-id');
+            $('#subAlmoxarifadoModalLabel').text('Novo Sub-Almoxarifado');
+            loadSubAlmoxarifados();
+            showAlert(isEdit ? 'Sub-Almoxarifado atualizado com sucesso!' : 'Sub-Almoxarifado criado com sucesso!', 'success');
+        })
+        .fail(function(xhr) {
+            const error = xhr.responseJSON?.error || (isEdit ? 'Erro ao atualizar sub-almoxarifado' : 'Erro ao criar sub-almoxarifado');
+            showAlert(error, 'danger');
+        });
+}
+
+function handleSetorSubmit(e) {
+    e.preventDefault();
+    
+    const editId = $('#setorForm').data('edit-id');
+    const isEdit = editId !== undefined;
+    
+    const data = {
+        sub_almoxarifado_id: parseInt($('#setor-sub-almoxarifado').val()),
+        nome: $('#setor-nome').val(),
+        descricao: $('#setor-descricao').val(),
+        ativo: true
+    };
+    
+    $.ajax({
+        url: isEdit ? `/api/setores/${editId}` : '/api/setores',
+        method: isEdit ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data)
+    })
+        .done(function() {
+            $('#setorModal').modal('hide');
+            $('#setorForm')[0].reset();
+            $('#setorForm').removeData('edit-id');
+            $('#setorModalLabel').text('Novo Setor');
+            loadSetores();
+            showAlert(isEdit ? 'Setor atualizado com sucesso!' : 'Setor criado com sucesso!', 'success');
+        })
+        .fail(function(xhr) {
+            const error = xhr.responseJSON?.error || (isEdit ? 'Erro ao atualizar setor' : 'Erro ao criar setor');
+            showAlert(error, 'danger');
+        });
+}
+
+function showAlert(message, type, duration = 5000) {
+    const alertId = 'alert-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    
+    const alert = `
+        <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    $('#alertContainer').append(alert);
+    
+    setTimeout(function() {
+        const alertElement = $(`#${alertId}`);
+        if (alertElement.length) {
+            alertElement.alert('close');
+        }
+    }, duration);
+    
+    return alertId;
+}
+
+function editCentral(id) {
+    $.get(`/api/centrais/${id}`)
+        .done(function(central) {
+            $('#central-nome').val(central.nome);
+            $('#central-descricao').val(central.descricao);
+            $('#centralModalLabel').text('Editar Central');
+            $('#centralForm').data('edit-id', id);
+            $('#centralModal').modal('show');
+        })
+        .fail(function() {
+            showAlert('Erro ao carregar dados da central', 'danger');
+        });
+}
+
+function deleteCentral(id) {
+    $.get(`/api/centrais/${id}`)
+        .done(function(central) {
+            let confirmMessage = `Tem certeza que deseja excluir a central "${central.nome}"?`;
+            
+            if (central.total_almoxarifados > 0) {
+                confirmMessage = `ATENÇÃO: A central "${central.nome}" possui ${central.total_almoxarifados} almoxarifado(s) vinculado(s).\n\n` +
+                               `Para excluir esta central, você deve primeiro:\n` +
+                               `1. Remover ou transferir todos os almoxarifados vinculados\n` +
+                               `2. Tentar a exclusão novamente\n\n` +
+                               `Deseja continuar mesmo assim? (A operação falhará se houver almoxarifados ativos)`;
+            }
+            
+            if (confirm(confirmMessage)) {
+                $.ajax({
+                    url: `/api/centrais/${id}`,
+                    method: 'DELETE'
+                })
+                .done(function() {
+                    loadCentrais();
+                    loadCentraisSelect();
+                    showAlert('Central excluída com sucesso!', 'success');
+                })
+                .fail(function(xhr) {
+                    const error = xhr.responseJSON?.error || 'Erro ao excluir central';
+                    showAlert(error, 'danger');
+                });
+            }
+        })
+        .fail(function() {
+            showAlert('Erro ao verificar dados da central', 'danger');
+        });
+}
+
+function editAlmoxarifado(id) {
+    $.get(`/api/almoxarifados/${id}`)
+        .done(function(almoxarifado) {
+            loadCentraisSelect().then(() => {
+                $('#almoxarifado-central').val(almoxarifado.central_id);
+                $('#almoxarifado-nome').val(almoxarifado.nome);
+                $('#almoxarifado-descricao').val(almoxarifado.descricao);
+                $('#almoxarifadoModalLabel').text('Editar Almoxarifado');
+                $('#almoxarifadoForm').data('edit-id', id);
+                $('#almoxarifadoModal').modal('show');
+            });
+        })
+        .fail(function() {
+            showAlert('Erro ao carregar dados do almoxarifado', 'danger');
+        });
+}
+
+function deleteAlmoxarifado(id) {
+    $.get(`/api/almoxarifados/${id}`)
+        .done(function(almox) {
+            let confirmMessage = `Tem certeza que deseja excluir o almoxarifado "${almox.nome}"?`;
+            
+            if (almox.total_sub_almoxarifados > 0) {
+                confirmMessage = `ATENÇÃO: O almoxarifado "${almox.nome}" possui ${almox.total_sub_almoxarifados} sub-almoxarifado(s) vinculado(s).\n\n` +
+                               `Para excluir este almoxarifado, você deve primeiro:\n` +
+                               `1. Remover ou transferir todos os sub-almoxarifados vinculados\n` +
+                               `2. Tentar a exclusão novamente\n\n` +
+                               `Deseja continuar mesmo assim? (A operação falhará se houver sub-almoxarifados ativos)`;
+            }
+            
+            if (confirm(confirmMessage)) {
+                $.ajax({
+                    url: `/api/almoxarifados/${id}`,
+                    method: 'DELETE'
+                })
+                .done(function() {
+                    loadAlmoxarifados();
+                    loadAlmoxarifadosSelect();
+                    showAlert('Almoxarifado excluído com sucesso!', 'success');
+                })
+                .fail(function(xhr) {
+                    const error = xhr.responseJSON?.error || 'Erro ao excluir almoxarifado';
+                    showAlert(error, 'danger');
+                });
+            }
+        })
+        .fail(function() {
+            showAlert('Erro ao verificar dados do almoxarifado', 'danger');
+        });
+}
+
+function editSubAlmoxarifado(id) {
+    $.get(`/api/sub-almoxarifados/${id}`)
+        .done(function(subAlmox) {
+            loadCentraisForSubAlmoxSelect();
+            setTimeout(() => {
+                $('#sub-almoxarifado-central').val(subAlmox.central_id);
+                onSubAlmoxCentralChange();
+                setTimeout(() => {
+                    $('#sub-almoxarifado-almoxarifado').val(subAlmox.almoxarifado_id);
+                    $('#sub-almoxarifado-nome').val(subAlmox.nome);
+                    $('#sub-almoxarifado-descricao').val(subAlmox.descricao);
+                    $('#subAlmoxarifadoModalLabel').text('Editar Sub-Almoxarifado');
+                    $('#subAlmoxarifadoForm').data('edit-id', id);
+                    $('#subAlmoxarifadoModal').modal('show');
+                }, 300);
+            }, 300);
+        })
+        .fail(function() {
+            showAlert('Erro ao carregar dados do sub-almoxarifado', 'danger');
+        });
+}
+
+function deleteSubAlmoxarifado(id) {
+    $.get(`/api/sub-almoxarifados/${id}`)
+        .done(function(subAlmox) {
+            const confirmMessage = `Tem certeza que deseja excluir o sub-almoxarifado "${subAlmox.nome}"?\n\n` +
+                                 `NOTA: Sub-almoxarifados podem ser excluídos independentemente de vínculos, ` +
+                                 `pois não possuem restrições de integridade referencial.`;
+            
+            if (confirm(confirmMessage)) {
+                $.ajax({
+                    url: `/api/sub-almoxarifados/${id}`,
+                    method: 'DELETE'
+                })
+                .done(function() {
+                    loadSubAlmoxarifados();
+                    showAlert('Sub-Almoxarifado excluído com sucesso!', 'success');
+                })
+                .fail(function(xhr) {
+                    const error = xhr.responseJSON?.error || 'Erro ao excluir sub-almoxarifado';
+                    showAlert(error, 'danger');
+                });
+            }
+        })
+        .fail(function() {
+            if (confirm('Tem certeza que deseja excluir este sub-almoxarifado?')) {
+                $.ajax({
+                    url: `/api/sub-almoxarifados/${id}`,
+                    method: 'DELETE'
+                })
+                .done(function() {
+                    loadSubAlmoxarifados();
+                    showAlert('Sub-Almoxarifado excluído com sucesso!', 'success');
+                })
+                .fail(function(xhr) {
+                    const error = xhr.responseJSON?.error || 'Erro ao excluir sub-almoxarifado';
+                    showAlert(error, 'danger');
+                });
+            }
+        });
+}
+
+function editSetor(id) {
+    $.get(`/api/setores/${id}`)
+        .done(function(setor) {
+            loadCentraisForSetorSelect().then(() => {
+                $('#setor-central').val(setor.central_id);
+                onSetorCentralChange();
+                setTimeout(() => {
+                    $('#setor-almoxarifado').val(setor.almoxarifado_id);
+                    onSetorAlmoxarifadoChange();
+                    setTimeout(() => {
+                        $('#setor-sub-almoxarifado').val(setor.sub_almoxarifado_id);
+                        $('#setor-nome').val(setor.nome);
+                        $('#setor-descricao').val(setor.descricao);
+                        $('#setorModalLabel').text('Editar Setor');
+                        $('#setorForm').data('edit-id', id);
+                        $('#setorModal').modal('show');
+                    }, 300);
+                }, 300);
+            });
+        })
+        .fail(function() {
+            showAlert('Erro ao carregar dados do setor', 'danger');
+        });
+}
+
+function deleteSetor(id) {
+    $.get(`/api/setores/${id}`)
+        .done(function(setor) {
+            const confirmMessage = `Tem certeza que deseja excluir o setor "${setor.nome}"?\n\n` +
+                                 `NOTA: Setores podem ser excluídos independentemente de vínculos, ` +
+                                 `pois não possuem restrições de integridade referencial.`;
+            
+            if (confirm(confirmMessage)) {
+                $.ajax({
+                    url: `/api/setores/${id}`,
+                    method: 'DELETE'
+                })
+                .done(function() {
+                    loadSetores();
+                    showAlert('Setor excluído com sucesso!', 'success');
+                })
+                .fail(function(xhr) {
+                    const error = xhr.responseJSON?.error || 'Erro ao excluir setor';
+                    showAlert(error, 'danger');
+                });
+            }
+        })
+        .fail(function() {
+            if (confirm('Tem certeza que deseja excluir este setor?')) {
+                $.ajax({
+                    url: `/api/setores/${id}`,
+                    method: 'DELETE'
+                })
+                .done(function() {
+                    loadSetores();
+                    showAlert('Setor excluído com sucesso!', 'success');
+                })
+                .fail(function(xhr) {
+                    const error = xhr.responseJSON?.error || 'Erro ao excluir setor';
+                    showAlert(error, 'danger');
+                });
+            }
+        });
+}
+</script>
+{% endblock %}

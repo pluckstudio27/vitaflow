@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+
+{% block title %}Cadastro de Produto - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-plus-circle"></i> Cadastro de Produto</h2>
+                <a href="{{ url_for('main.produtos') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left"></i> Voltar
+                </a>
+            </div>
+
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card">
+                        <div class="card-body">
+                            <form id="produtoForm">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="central_id" class="form-label">Central *</label>
+                                            <select class="form-select" id="central_id" name="central_id" required>
+                                                <option value="">Selecione uma Central</option>
+                                            </select>
+                                            <div class="invalid-feedback">
+                                                Por favor, selecione a Central responsável pelo produto.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="codigo" class="form-label">Código *</label>
+                                            <div class="input-group">
+                                                <input type="text" class="form-control" id="codigo" name="codigo" readonly>
+                                                <button class="btn btn-outline-secondary" type="button" id="gerarCodigo">
+                                                    <i class="fas fa-sync-alt"></i> Gerar
+                                                </button>
+                                            </div>
+                                            <div class="invalid-feedback">
+                                                Por favor, gere o código do produto.
+                                            </div>
+                                            <small class="form-text text-muted">Código gerado automaticamente</small>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div class="mb-3">
+                                            <label for="nome" class="form-label">Nome *</label>
+                                            <input type="text" class="form-control" id="nome" name="nome" required>
+                                            <div class="invalid-feedback">
+                                                Por favor, informe o nome do produto.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="descricao" class="form-label">Descrição</label>
+                                    <textarea class="form-control" id="descricao" name="descricao" rows="3" 
+                                              placeholder="Descrição detalhada do produto..."></textarea>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="categoria" class="form-label">Categoria *</label>
+                                            <select class="form-select" id="categoria" name="categoria" required>
+                                                <option value="">Selecione uma categoria</option>
+                                                {% for categoria in categorias %}
+                                                <option value="{{ categoria.id }}">{{ categoria.nome }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="invalid-feedback">
+                                                Por favor, selecione a categoria do produto.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="unidade_medida" class="form-label">Unidade de Medida *</label>
+                                            <select class="form-select" id="unidade_medida" name="unidade_medida" required>
+                                                <option value="">Selecione uma unidade</option>
+                                                <option value="UN">Unidade (UN)</option>
+                                                <option value="CX">Caixa (CX)</option>
+                                                <option value="PC">Pacote (PC)</option>
+                                                <option value="FR">Frasco (FR)</option>
+                                                <option value="AMP">Ampola (AMP)</option>
+                                                <option value="CP">Comprimido (CP)</option>
+                                                <option value="ML">Mililitro (ML)</option>
+                                                <option value="L">Litro (L)</option>
+                                                <option value="KG">Quilograma (KG)</option>
+                                                <option value="G">Grama (G)</option>
+                                                <option value="M">Metro (M)</option>
+                                                <option value="CM">Centímetro (CM)</option>
+                                            </select>
+                                            <div class="invalid-feedback">
+                                                Por favor, selecione a unidade de medida.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">Status</label>
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" id="ativo" name="ativo" checked>
+                                                <label class="form-check-label" for="ativo">
+                                                    Produto ativo
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                    <button type="button" class="btn btn-outline-secondary me-md-2" onclick="limparFormulario()">
+                                        <i class="fas fa-eraser"></i> Limpar
+                                    </button>
+                                    <button type="submit" class="btn btn-primary" id="submitBtn">
+                                        <i class="fas fa-save"></i> Salvar Produto
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Sucesso -->
+<div class="modal fade" id="sucessoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-check-circle"></i> Produto Cadastrado
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Produto cadastrado com sucesso!</p>
+                <p><strong>Próximos passos:</strong></p>
+                <ul>
+                    <li>Registrar recebimento de estoque</li>
+                    <li>Configurar lotes e validades</li>
+                    <li>Distribuir para locais da hierarquia</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>
+                <button type="button" class="btn btn-success" id="irParaRecebimento">
+                    <i class="fas fa-plus-circle"></i> Registrar Recebimento
+                </button>
+                <a href="{{ url_for('main.produtos') }}" class="btn btn-primary">
+                    <i class="fas fa-list"></i> Ver Produtos
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let produtoIdCriado = null;
+
+// Carregar dados iniciais
+document.addEventListener('DOMContentLoaded', function() {
+    carregarCentrals();
+    document.getElementById('central_id').focus();
+});
+
+// Carregar centrais
+function carregarCentrals() {
+    fetch('/api/centrais?ativo=true&per_page=1000')
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('central_id');
+            select.innerHTML = '<option value="">Selecione uma Central</option>';
+            
+            if (data.items) {
+                data.items.forEach(central => {
+                    const option = document.createElement('option');
+                    option.value = central.id;
+                    option.textContent = central.nome;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar centrais:', error);
+        });
+}
+
+// Gerar código do produto
+document.getElementById('gerarCodigo').addEventListener('click', function() {
+    gerarCodigoProduto();
+});
+
+// Gerar código quando selecionar central
+document.getElementById('central_id').addEventListener('change', function() {
+    if (this.value) {
+        gerarCodigoProduto();
+    }
+});
+
+function gerarCodigoProduto() {
+    const centralId = document.getElementById('central_id').value;
+    const categoria = document.getElementById('categoria').value;
+    
+    if (!centralId) {
+        alert('Selecione uma Central primeiro');
+        return;
+    }
+    
+    // Mostrar loading no botão
+    const btn = document.getElementById('gerarCodigo');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    btn.disabled = true;
+    
+    fetch('/api/produtos/gerar-codigo', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            central_id: centralId,
+            categoria: categoria
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('codigo').value = data.codigo;
+        } else {
+            alert('Erro ao gerar código: ' + (data.message || 'Erro desconhecido'));
+        }
+    })
+    .catch(error => {
+        console.error('Erro:', error);
+        alert('Erro ao gerar código. Tente novamente.');
+    })
+    .finally(() => {
+        // Restaurar botão
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    });
+}
+
+// Submissão do formulário
+document.getElementById('produtoForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const data = {
+        central_id: formData.get('central_id'),
+        codigo: formData.get('codigo').trim(),
+        nome: formData.get('nome').trim(),
+        descricao: formData.get('descricao').trim(),
+        categoria: formData.get('categoria').trim(),
+        unidade_medida: formData.get('unidade_medida'),
+        ativo: formData.has('ativo')
+    };
+    
+    // Validações básicas
+    if (!data.central_id || !data.codigo || !data.nome) {
+        alert('Central, Código e Nome são obrigatórios');
+        return;
+    }
+    
+    const submitBtn = document.getElementById('submitBtn');
+    const originalText = submitBtn.innerHTML;
+    
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando...';
+    
+    fetch('/api/produtos', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        produtoIdCriado = data.id;
+        
+        // Mostrar modal de sucesso
+        const modal = new bootstrap.Modal(document.getElementById('sucessoModal'));
+        modal.show();
+        
+        // Limpar formulário
+        limparFormulario();
+    })
+    .catch(error => {
+        console.error('Erro ao cadastrar produto:', error);
+        alert('Erro ao cadastrar produto: ' + error.message);
+    })
+    .finally(() => {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    });
+});
+
+// Limpar formulário
+function limparFormulario() {
+    document.getElementById('produtoForm').reset();
+    document.getElementById('ativo').checked = true;
+    document.getElementById('codigo').value = '';
+    document.getElementById('central_id').focus();
+}
+
+// Ir para recebimento
+document.getElementById('irParaRecebimento').addEventListener('click', function() {
+    if (produtoIdCriado) {
+        window.location.href = `/produtos/${produtoIdCriado}/recebimento`;
+    }
+});
+
+// Validação em tempo real do código
+document.getElementById('codigo').addEventListener('blur', function() {
+    const codigo = this.value.trim();
+    if (codigo) {
+        // Verificar se código já existe
+        fetch(`/api/produtos?search=${encodeURIComponent(codigo)}`)
+            .then(response => response.json())
+            .then(data => {
+                const produtoExistente = data.items?.find(p => p.codigo.toLowerCase() === codigo.toLowerCase());
+                if (produtoExistente) {
+                    this.classList.add('is-invalid');
+                    if (!this.nextElementSibling || !this.nextElementSibling.classList.contains('invalid-feedback')) {
+                        const feedback = document.createElement('div');
+                        feedback.className = 'invalid-feedback';
+                        feedback.textContent = 'Este código já está em uso';
+                        this.parentNode.appendChild(feedback);
+                    }
+                } else {
+                    this.classList.remove('is-invalid');
+                    const feedback = this.parentNode.querySelector('.invalid-feedback');
+                    if (feedback) feedback.remove();
+                }
+            })
+            .catch(error => {
+                console.error('Erro ao verificar código:', error);
+            });
+    }
+});
+</script>
+{% endblock %}

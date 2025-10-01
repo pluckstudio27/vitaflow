@@ -1,0 +1,190 @@
+<!-- Blocos Reutilizáveis para Formulários e Componentes -->
+
+<!-- Bloco: Campo de Input Padrão -->
+{% macro input_field(name, label, type='text', required=false, placeholder='', value='', class='', help_text='') %}
+<div class="mb-3">
+    <label for="{{ name }}" class="form-label">
+        {{ label }}
+        {% if required %}<span class="text-danger">*</span>{% endif %}
+    </label>
+    <input type="{{ type }}" 
+           class="form-control {{ class }}" 
+           id="{{ name }}" 
+           name="{{ name }}" 
+           {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+           {% if value %}value="{{ value }}"{% endif %}
+           {% if required %}required{% endif %}>
+    {% if help_text %}
+    <div class="form-text">{{ help_text }}</div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+<!-- Bloco: Select com Opções -->
+{% macro select_field(name, label, options, required=false, selected='', class='', help_text='', onchange='') %}
+<div class="mb-3">
+    <label for="{{ name }}" class="form-label">
+        {{ label }}
+        {% if required %}<span class="text-danger">*</span>{% endif %}
+    </label>
+    <select class="form-select {{ class }}" 
+            id="{{ name }}" 
+            name="{{ name }}" 
+            {% if required %}required{% endif %}
+            {% if onchange %}onchange="{{ onchange }}"{% endif %}>
+        <option value="">Selecione...</option>
+        {% for option in options %}
+        <option value="{{ option.value }}" {% if option.value == selected %}selected{% endif %}>
+            {{ option.text }}
+        </option>
+        {% endfor %}
+    </select>
+    {% if help_text %}
+    <div class="form-text">{{ help_text }}</div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+<!-- Bloco: Botões de Ação -->
+{% macro action_buttons(save_text='Salvar', cancel_text='Cancelar', save_class='btn-primary', cancel_class='btn-secondary', show_cancel=true) %}
+<div class="d-flex justify-content-end gap-2">
+    {% if show_cancel %}
+    <button type="button" class="btn {{ cancel_class }}" data-bs-dismiss="modal">
+        <i class="fas fa-times me-1"></i>{{ cancel_text }}
+    </button>
+    {% endif %}
+    <button type="submit" class="btn {{ save_class }}">
+        <i class="fas fa-save me-1"></i>{{ save_text }}
+    </button>
+</div>
+{% endmacro %}
+
+<!-- Bloco: Modal Padrão -->
+{% macro modal_template(id, title, size='modal-lg', form_id='') %}
+<div class="modal fade" id="{{ id }}" tabindex="-1">
+    <div class="modal-dialog {{ size }}">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">{{ title }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            {% if form_id %}
+            <form id="{{ form_id }}">
+            {% endif %}
+                <div class="modal-body">
+                    {% block modal_content %}{% endblock %}
+                </div>
+                <div class="modal-footer">
+                    {% block modal_footer %}
+                    {{ action_buttons() }}
+                    {% endblock %}
+                </div>
+            {% if form_id %}
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+<!-- Bloco: Tabela com Ações -->
+{% macro data_table(id, headers, show_actions=true, action_buttons=[]) %}
+<div class="table-responsive">
+    <table class="table table-hover" id="{{ id }}">
+        <thead class="table-light">
+            <tr>
+                {% for header in headers %}
+                <th>{{ header }}</th>
+                {% endfor %}
+                {% if show_actions %}
+                <th width="120">Ações</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% block table_content %}
+            <tr>
+                <td colspan="{{ headers|length + (1 if show_actions else 0) }}" class="text-center text-muted">
+                    Carregando dados...
+                </td>
+            </tr>
+            {% endblock %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
+<!-- Bloco: Card de Estatística -->
+{% macro stat_card(title, value, icon, color='primary', subtitle='') %}
+<div class="card border-0 shadow-sm h-100">
+    <div class="card-body text-center">
+        <div class="text-{{ color }} mb-3">
+            <i class="{{ icon }} fa-2x"></i>
+        </div>
+        <h5 class="card-title">{{ title }}</h5>
+        <h3 class="text-{{ color }} mb-0">{{ value }}</h3>
+        {% if subtitle %}
+        <small class="text-muted">{{ subtitle }}</small>
+        {% endif %}
+    </div>
+</div>
+{% endmacro %}
+
+<!-- Bloco: Breadcrumb Personalizado -->
+{% macro breadcrumb(items) %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        {% for item in items %}
+        <li class="breadcrumb-item {% if loop.last %}active{% endif %}" 
+            {% if loop.last %}aria-current="page"{% endif %}>
+            {% if not loop.last and item.url %}
+            <a href="{{ item.url }}">{{ item.text }}</a>
+            {% else %}
+            {{ item.text }}
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+</nav>
+{% endmacro %}
+
+<!-- Bloco: Alert Personalizado -->
+{% macro alert_message(type='info', title='', message='', dismissible=true) %}
+<div class="alert alert-{{ type }} {% if dismissible %}alert-dismissible{% endif %} fade show" role="alert">
+    {% if title %}
+    <h6 class="alert-heading">{{ title }}</h6>
+    {% endif %}
+    {{ message }}
+    {% if dismissible %}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    {% endif %}
+</div>
+{% endmacro %}
+
+<!-- Bloco: Loading Spinner -->
+{% macro loading_spinner(text='Carregando...', size='') %}
+<div class="text-center p-4">
+    <div class="spinner-border text-primary {{ size }}" role="status">
+        <span class="visually-hidden">{{ text }}</span>
+    </div>
+    <div class="mt-2">{{ text }}</div>
+</div>
+{% endmacro %}
+
+<!-- Bloco: Empty State -->
+{% macro empty_state(icon='fas fa-inbox', title='Nenhum item encontrado', message='', action_text='', action_url='') %}
+<div class="text-center p-5">
+    <div class="text-muted mb-3">
+        <i class="{{ icon }} fa-3x"></i>
+    </div>
+    <h5 class="text-muted">{{ title }}</h5>
+    {% if message %}
+    <p class="text-muted">{{ message }}</p>
+    {% endif %}
+    {% if action_text and action_url %}
+    <a href="{{ action_url }}" class="btn btn-primary">
+        {{ action_text }}
+    </a>
+    {% endif %}
+</div>
+{% endmacro %}
