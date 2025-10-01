@@ -49,7 +49,7 @@ No painel do Render, adicionar as seguintes variáveis:
 
 ```bash
 # MongoDB
-MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/?retryWrites=true&w=majority
 MONGO_DB=almox_sms
 
 # Flask
@@ -167,18 +167,23 @@ gunicorn -w 2 -b 0.0.0.0:5000 app:app
 #### 2. Erro: "ModuleNotFoundError: No module named 'werkzeug'"
 **Solução**: ✅ **CORRIGIDO** - Adicionado `Werkzeug==2.3.7` ao `requirements.txt`
 
-#### 3. Erro de conexão MongoDB
+#### 3. Erro: "MongoDB URI options are key=value pairs"
+**Solução**: ✅ **CORRIGIDO** - Removido parâmetro `appName` do MongoDB URI
+- URI correto: `mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true&w=majority`
+- Evitar parâmetros que podem causar problemas de parsing no PyMongo
+
+#### 4. Erro de conexão MongoDB
 **Verificar**:
 - String de conexão `MONGO_URI` está correta
 - IP `0.0.0.0/0` está liberado no MongoDB Atlas
 - Usuário e senha estão corretos
 
-#### 4. Erro: "AttributeError: module 'app' has no attribute 'app'"
+#### 5. Erro: "AttributeError: module 'app' has no attribute 'app'"
 **Solução**: ✅ **CORRIGIDO** - Modificado `app.py` para incluir instância `app` no nível do módulo
 - `Procfile` atualizado para: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 - Aplicação agora funciona tanto com factory function quanto com instância direta
 
-#### 5. Aplicação não inicia
+#### 6. Aplicação não inicia
 **Verificar**:
 - `Procfile` está correto: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 - Todas as variáveis de ambiente estão configuradas
