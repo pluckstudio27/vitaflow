@@ -41,7 +41,7 @@ As seguintes modificações já foram implementadas no código:
 2. **Conectar repositório GitHub**
 3. **Criar Web Service**:
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn -w 2 -b 0.0.0.0:$PORT app:create_app()`
+   - **Start Command**: `gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 
 ### 3. Configurar Variáveis de Ambiente
 
@@ -139,7 +139,7 @@ python app.py
 
 ### Executar com Gunicorn (produção)
 ```bash
-gunicorn -w 2 -b 0.0.0.0:5000 app:create_app()
+gunicorn -w 2 -b 0.0.0.0:5000 app:app
 ```
 
 ## 🎯 Próximos Passos
@@ -173,9 +173,14 @@ gunicorn -w 2 -b 0.0.0.0:5000 app:create_app()
 - IP `0.0.0.0/0` está liberado no MongoDB Atlas
 - Usuário e senha estão corretos
 
-#### 4. Aplicação não inicia
+#### 4. Erro: "AttributeError: module 'app' has no attribute 'app'"
+**Solução**: ✅ **CORRIGIDO** - Modificado `app.py` para incluir instância `app` no nível do módulo
+- `Procfile` atualizado para: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
+- Aplicação agora funciona tanto com factory function quanto com instância direta
+
+#### 5. Aplicação não inicia
 **Verificar**:
-- `Procfile` está correto: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:create_app()`
+- `Procfile` está correto: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 - Todas as variáveis de ambiente estão configuradas
 - Build command: `pip install -r requirements.txt`
 
