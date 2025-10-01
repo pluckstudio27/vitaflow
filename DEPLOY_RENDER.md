@@ -41,7 +41,7 @@ As seguintes modificações já foram implementadas no código:
 2. **Conectar repositório GitHub**
 3. **Criar Web Service**:
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
+   - **Start Command**: `python start.py && gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 
 ### 3. Configurar Variáveis de Ambiente
 
@@ -139,7 +139,16 @@ python app.py
 
 ### Executar com Gunicorn (produção)
 ```bash
+# Com inicialização automática (recomendado)
+python start.py && gunicorn -w 2 -b 0.0.0.0:5000 app:app
+
+# Apenas Gunicorn (se banco já estiver inicializado)
 gunicorn -w 2 -b 0.0.0.0:5000 app:app
+```
+
+### Inicializar banco de dados manualmente
+```bash
+python start.py
 ```
 
 ## 🎯 Próximos Passos
@@ -183,9 +192,40 @@ gunicorn -w 2 -b 0.0.0.0:5000 app:app
 - `Procfile` atualizado para: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 - Aplicação agora funciona tanto com factory function quanto com instância direta
 
-#### 6. Aplicação não inicia
+#### 6. Erro: "Usuário ou senha inválidos" - Admin não existe após deploy
+**Solução**: ✅ **CORRIGIDO** - Adicionado script de inicialização automática
+- `Procfile` atualizado para: `web: python start.py && gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
+- Script `start.py` cria automaticamente o usuário admin no primeiro deploy
+- **Credenciais padrão**: usuário `admin`, senha `admin123`
+- ⚠️ **IMPORTANTE**: Altere a senha após o primeiro login!
+
+**Criação manual (se necessário)**:
+```bash
+# No console do Render ou localmente
+python -c "
+from app import create_app
+from models.usuario import Usuario
+from extensions import db
+
+app = create_app()
+with app.app_context():
+    admin = Usuario(
+        username='admin',
+        email='admin@almoxsms.com',
+        nome_completo='Administrador do Sistema',
+        nivel_acesso='super_admin',
+        ativo=True
+    )
+    admin.set_password('admin123')
+    db.session.add(admin)
+    db.session.commit()
+    print('Admin criado com sucesso!')
+"
+```
+
+#### 7. Aplicação não inicia
 **Verificar**:
-- `Procfile` está correto: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
+- `Procfile` está correto: `web: python start.py && gunicorn -w 2 -b 0.0.0.0:$PORT app:app`
 - Todas as variáveis de ambiente estão configuradas
 - Build command: `pip install -r requirements.txt`
 

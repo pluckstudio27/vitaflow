@@ -7,6 +7,13 @@ from blueprints.auth import auth_bp
 from blueprints.categorias_api import categorias_api_bp
 from auth import init_login_manager
 
+# Importar modelos para garantir que as tabelas sejam criadas
+from models.usuario import Usuario, LogAuditoria
+from models.hierarchy import Central, Almoxarifado, SubAlmoxarifado, Setor
+from models.categoria import CategoriaProduto
+from models.produto import Produto
+from models.usuario_categoria import UsuarioCategoria
+
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
