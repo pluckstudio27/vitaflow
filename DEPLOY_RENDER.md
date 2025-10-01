@@ -16,6 +16,8 @@ As seguintes modificações já foram implementadas no código:
 
 ### 2. Configuração para Deploy
 - ✅ Adicionado `gunicorn` ao `requirements.txt`
+- ✅ Adicionado `Flask-Login==0.6.3` ao `requirements.txt`
+- ✅ Adicionado `Werkzeug==2.3.7` ao `requirements.txt`
 - ✅ Criado `Procfile` para Render
 - ✅ Criado arquivo `.env` com configurações
 
@@ -154,6 +156,28 @@ gunicorn -w 2 -b 0.0.0.0:5000 app:create_app()
 - ✅ Configurações diferentes para desenvolvimento/produção
 - ✅ MongoDB com autenticação
 - ✅ Conexões SSL/TLS
+
+## 🔧 Troubleshooting
+
+### Problemas Comuns e Soluções
+
+#### 1. Erro: "ModuleNotFoundError: No module named 'flask_login'"
+**Solução**: ✅ **CORRIGIDO** - Adicionado `Flask-Login==0.6.3` ao `requirements.txt`
+
+#### 2. Erro: "ModuleNotFoundError: No module named 'werkzeug'"
+**Solução**: ✅ **CORRIGIDO** - Adicionado `Werkzeug==2.3.7` ao `requirements.txt`
+
+#### 3. Erro de conexão MongoDB
+**Verificar**:
+- String de conexão `MONGO_URI` está correta
+- IP `0.0.0.0/0` está liberado no MongoDB Atlas
+- Usuário e senha estão corretos
+
+#### 4. Aplicação não inicia
+**Verificar**:
+- `Procfile` está correto: `web: gunicorn -w 2 -b 0.0.0.0:$PORT app:create_app()`
+- Todas as variáveis de ambiente estão configuradas
+- Build command: `pip install -r requirements.txt`
 
 ## 📞 Suporte
 
