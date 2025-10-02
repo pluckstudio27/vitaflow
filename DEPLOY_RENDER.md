@@ -176,10 +176,42 @@ Se encontrar erro relacionado ao psycopg2:
 - ✅ **Configuração**: Produção usa apenas MongoDB (USE_MONGODB_PRIMARY=True)
 - ✅ **Compatibilidade**: Otimizado para Python 3.13 no Render
 
+### Erro "MongoDB URI options are key=value pairs"
+Se encontrar erro de formato da URI do MongoDB:
+- ✅ **Resolvido**: Validação automática de URI implementada
+- ✅ **Correção**: URIs malformadas são automaticamente corrigidas
+- ✅ **Formato**: Opções devem estar no formato `key=value` separadas por `&`
+
+#### Formato Correto da URI MongoDB:
+```bash
+# Formato básico
+mongodb://username:password@host:port/database
+
+# Com opções (formato correto)
+mongodb://user:pass@host:27017/db?authSource=admin&retryWrites=true
+
+# MongoDB Atlas (recomendado)
+mongodb+srv://user:pass@cluster.mongodb.net/database?retryWrites=true&w=majority
+```
+
+#### Exemplos de URIs que são corrigidas automaticamente:
+```bash
+# ❌ Opções sem valor
+mongodb://host:27017/db?retryWrites&ssl
+# ✅ Corrigido para:
+mongodb://host:27017/db?retryWrites=true&ssl=true
+
+# ❌ Com espaços
+mongodb://host:27017/db?  retryWrites=true  &  ssl  
+# ✅ Corrigido para:
+mongodb://host:27017/db?retryWrites=true&ssl=true
+```
+
 ### Verificação de Deploy
 1. Confirme que `FLASK_ENV=production` está configurado
 2. Verifique se `MONGO_URI` está correto e acessível
 3. Confirme que não há referências ao PostgreSQL nos logs
+4. **Novo**: Verifique se a URI do MongoDB está no formato correto
 
 ## 🎯 Próximos Passos
 
