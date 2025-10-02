@@ -252,10 +252,7 @@ def init_mongo(app):
             app.logger.info('=== RENDER DETECTADO: Aplicando configurações TLS específicas ===')
             ssl_config = {
                 'tls': True,
-                'tlsAllowInvalidCertificates': True,
-                'tlsAllowInvalidHostnames': True,
-                'tlsInsecure': True,
-                'tlsDisableOCSPEndpointCheck': True
+                'tlsInsecure': True  # Esta opção já inclui todas as outras opções de segurança relaxada
             }
             app.logger.info(f'Configurações TLS aplicadas: {ssl_config}')
         
@@ -300,10 +297,7 @@ def init_mongo(app):
                 app.logger.info('Fallback 2: Tentando com TLS mais permissivo...')
                 fallback_config = {
                     'tls': True,
-                    'tlsAllowInvalidCertificates': True,
-                    'tlsAllowInvalidHostnames': True,
-                    'tlsInsecure': True,
-                    'tlsDisableOCSPEndpointCheck': True,
+                    'tlsInsecure': True,  # Esta opção já inclui todas as outras opções de segurança relaxada
                     'directConnection': True
                 }
                 mongo_client = MongoClient(uri, serverSelectionTimeoutMS=15000, **fallback_config)
