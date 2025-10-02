@@ -376,37 +376,37 @@ def init_mongo(app):
                     app.logger.info("Índices MongoDB inicializados")
                 return
             except Exception as e5:
-                 app.logger.warning(f'Fallback 5 (sem TLS) falhou: {e5}')
-             
-             # Fallback 6: Tentar com mongodb:// em vez de mongodb+srv:// (problemas DNS no Render)
-             if 'mongodb+srv://' in uri:
-                 try:
-                     app.logger.info('Fallback 6: Tentando mongodb:// em vez de mongodb+srv://...')
-                     # Converte mongodb+srv para mongodb direto
-                     direct_uri = uri.replace('mongodb+srv://', 'mongodb://')
-                     # Remove o nome do banco da URI se estiver presente
-                     if '/' in direct_uri.split('@')[1]:
-                         parts = direct_uri.split('/')
-                         direct_uri = '/'.join(parts[:-1]) + ':27017/' + parts[-1]
-                     else:
-                         direct_uri = direct_uri.replace('@', '@').replace('.mongodb.net', '.mongodb.net:27017')
-                     
-                     app.logger.info(f'Tentando URI direta: {direct_uri[:80]}...')
-                     mongo_client = MongoClient(direct_uri, serverSelectionTimeoutMS=15000)
-                     mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                     mongo_client.admin.command('ping')
-                     app.logger.warning("MongoDB conectado com URI direta (sem SRV)")
-                     
-                     if use_primary:
-                         from models_mongo import init_mongodb
-                         init_mongodb()
-                         app.logger.info("Índices MongoDB inicializados")
-                     return
-                 except Exception as e6:
-                     app.logger.warning(f'Fallback 6 (URI direta) falhou: {e6}')
-             
-             # Se todos os fallbacks SSL falharam, continua para outros tratamentos
-             app.logger.error('Todos os fallbacks TLS falharam, tentando outras correções...')
+                app.logger.warning(f'Fallback 5 (sem TLS) falhou: {e5}')
+            
+            # Fallback 6: Tentar com mongodb:// em vez de mongodb+srv:// (problemas DNS no Render)
+            if 'mongodb+srv://' in uri:
+                try:
+                    app.logger.info('Fallback 6: Tentando mongodb:// em vez de mongodb+srv://...')
+                    # Converte mongodb+srv para mongodb direto
+                    direct_uri = uri.replace('mongodb+srv://', 'mongodb://')
+                    # Remove o nome do banco da URI se estiver presente
+                    if '/' in direct_uri.split('@')[1]:
+                        parts = direct_uri.split('/')
+                        direct_uri = '/'.join(parts[:-1]) + ':27017/' + parts[-1]
+                    else:
+                        direct_uri = direct_uri.replace('@', '@').replace('.mongodb.net', '.mongodb.net:27017')
+                    
+                    app.logger.info(f'Tentando URI direta: {direct_uri[:80]}...')
+                    mongo_client = MongoClient(direct_uri, serverSelectionTimeoutMS=15000)
+                    mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
+                    mongo_client.admin.command('ping')
+                    app.logger.warning("MongoDB conectado com URI direta (sem SRV)")
+                    
+                    if use_primary:
+                        from models_mongo import init_mongodb
+                        init_mongodb()
+                        app.logger.info("Índices MongoDB inicializados")
+                    return
+                except Exception as e6:
+                    app.logger.warning(f'Fallback 6 (URI direta) falhou: {e6}')
+            
+            # Se todos os fallbacks SSL falharam, continua para outros tratamentos
+            app.logger.error('Todos os fallbacks TLS falharam, tentando outras correções...')
         
         # Tratamento específico para InvalidURI - tenta uma última correção
         if 'InvalidURI' in str(type(e)) or 'MongoDB URI options are key=value pairs' in str(e):
