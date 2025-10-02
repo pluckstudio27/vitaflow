@@ -61,7 +61,7 @@ No painel do Render, configure as seguintes variáveis de ambiente:
 ```bash
 # Flask (OBRIGATÓRIO)
 FLASK_ENV=production
-SECRET_KEY=your-production-secret-key-here
+SECRET_KEY=ART34KALL675OIP5IU
 
 # MongoDB (OBRIGATÓRIO - URI deve incluir o nome do banco)
 MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/almox_sms?retryWrites=true&w=majority
