@@ -773,7 +773,9 @@ function removerCategoriaEspecifica(categoriaId, button) {
             alert(data.error);
         } else {
             // Remover da lista
-            button.parentElement.remove();
+            if (button && button.parentElement) {
+                button.parentElement.remove();
+            }
             
             // Reexibir opção no select
             const select = document.getElementById('categoria-adicionar');
@@ -798,7 +800,9 @@ function removerCategoriaTemporaria(categoriaId, button) {
     categoriasSelecionadas = categoriasSelecionadas.filter(c => c.id !== categoriaId);
     
     // Remover da lista visual
-    button.parentElement.remove();
+    if (button && button.parentElement) {
+        button.parentElement.remove();
+    }
     
     // Reexibir opção no select
     const select = document.getElementById('categoria-adicionar');

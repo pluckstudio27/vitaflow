@@ -1,13 +1,24 @@
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import current_user
-from models.hierarchy import Central, Almoxarifado, SubAlmoxarifado, Setor
-from models.produto import Produto, EstoqueProduto, LoteProduto, MovimentacaoProduto
-from models.usuario import Usuario
-from models.categoria import CategoriaProduto
 from extensions import db
-from auth import (require_any_level, require_manager_or_above, require_admin_or_above, 
-                  ScopeFilter)
+from auth_mongo import (require_any_level, require_manager_or_above, require_admin_or_above, 
+                        ScopeFilter)
 from config.ui_blocks import get_ui_blocks_config
+
+# Importar modelos MongoDB como primários
+try:
+    from models_mongo.estrutura import CentralMongo, AlmoxarifadoMongo, SubAlmoxarifadoMongo, SetorMongo
+    from models_mongo.produto import ProdutoMongo, EstoqueProdutoMongo, LoteProdutoMongo, MovimentacaoProdutoMongo
+    from models_mongo.usuario import UsuarioMongo
+    from models_mongo.categoria import CategoriaProdutoMongo
+    USE_MONGO = True
+except ImportError:
+    # Fallback para modelos SQLAlchemy
+    from models.hierarchy import Central, Almoxarifado, SubAlmoxarifado, Setor
+    from models.produto import Produto, EstoqueProduto, LoteProduto, MovimentacaoProduto
+    from models.usuario import Usuario
+    from models.categoria import CategoriaProduto
+    USE_MONGO = False
 
 main_bp = Blueprint('main', __name__)
 
@@ -81,11 +92,18 @@ def configuracoes():
 @require_admin_or_above
 def configuracoes_hierarquia():
     """Página de configuração da hierarquia"""
-    # Aplica filtros de escopo baseados no usuário logado
-    centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
-    almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
-    sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
-    setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
+    if USE_MONGO:
+        # Usar modelos MongoDB
+        centrais = ScopeFilter.filter_centrais_mongo(CentralMongo.find_many({'ativo': True}))
+        almoxarifados = ScopeFilter.filter_almoxarifados_mongo(AlmoxarifadoMongo.find_many({'ativo': True}))
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados_mongo(SubAlmoxarifadoMongo.find_many({'ativo': True}))
+        setores = ScopeFilter.filter_setores_mongo(SetorMongo.find_many({'ativo': True}))
+    else:
+        # Usar modelos SQLAlchemy
+        centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
+        almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
+        setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
     
     return render_template('configuracoes/hierarquia.html',
                          centrais=centrais,
@@ -99,33 +117,67 @@ def configuracoes_hierarquia():
 @require_any_level
 def produtos():
     """Página de produtos"""
-    categorias = CategoriaProduto.get_active_categories()
+    if USE_MONGO:
+        categorias = CategoriaProdutoMongo.find_ativas()
+    else:
+        categorias = CategoriaProduto.get_active_categories()
     return render_template('produtos/index.html', categorias=categorias)
 
 @main_bp.route('/produtos/cadastro')
 @require_manager_or_above
 def produtos_cadastro():
     """Página de cadastro de produtos"""
-    categorias = CategoriaProduto.get_active_categories()
+    if USE_MONGO:
+        categorias = CategoriaProdutoMongo.find_ativas()
+    else:
+        categorias = CategoriaProduto.get_active_categories()
     return render_template('produtos/cadastro.html', categorias=categorias)
 
-@main_bp.route('/produtos/<int:id>')
+@main_bp.route('/produtos/<string:id>')
 @require_any_level
 def produtos_detalhes(id):
     """Página de detalhes do produto"""
-    produto = Produto.query.get_or_404(id)
+    if USE_MONGO:
+        from bson import ObjectId
+        try:
+            produto = ProdutoMongo.find_one({'_id': ObjectId(id)})
+            if not produto:
+                from flask import abort
+                abort(404)
+        except:
+            from flask import abort
+            abort(404)
+    else:
+        produto = Produto.query.get_or_404(int(id))
     return render_template('produtos/detalhes.html', produto=produto)
 
-@main_bp.route('/produtos/<int:id>/recebimento')
+@main_bp.route('/produtos/<string:id>/recebimento')
 @require_any_level
 def produtos_recebimento(id):
     """Página de recebimento de produtos"""
-    produto = Produto.query.get_or_404(id)
-    # Aplica filtros de escopo baseados no usuário logado
-    centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
-    almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
-    sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
-    setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
+    if USE_MONGO:
+        from bson import ObjectId
+        try:
+            produto = ProdutoMongo.find_one({'_id': ObjectId(id)})
+            if not produto:
+                from flask import abort
+                abort(404)
+        except:
+            from flask import abort
+            abort(404)
+        
+        # Aplica filtros de escopo baseados no usuário logado
+        centrais = ScopeFilter.filter_centrais_mongo(CentralMongo.find_many({'ativo': True}))
+        almoxarifados = ScopeFilter.filter_almoxarifados_mongo(AlmoxarifadoMongo.find_many({'ativo': True}))
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados_mongo(SubAlmoxarifadoMongo.find_many({'ativo': True}))
+        setores = ScopeFilter.filter_setores_mongo(SetorMongo.find_many({'ativo': True}))
+    else:
+        produto = Produto.query.get_or_404(int(id))
+        # Aplica filtros de escopo baseados no usuário logado
+        centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
+        almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
+        setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
     
     return render_template('produtos/recebimento.html', 
                          produto=produto,
@@ -138,11 +190,18 @@ def produtos_recebimento(id):
 @require_any_level
 def estoque():
     """Página de consulta de estoque"""
-    # Aplica filtros de escopo baseados no usuário logado
-    centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
-    almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
-    sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
-    setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
+    if USE_MONGO:
+        # Aplica filtros de escopo baseados no usuário logado
+        centrais = ScopeFilter.filter_centrais_mongo(CentralMongo.find_many({'ativo': True}))
+        almoxarifados = ScopeFilter.filter_almoxarifados_mongo(AlmoxarifadoMongo.find_many({'ativo': True}))
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados_mongo(SubAlmoxarifadoMongo.find_many({'ativo': True}))
+        setores = ScopeFilter.filter_setores_mongo(SetorMongo.find_many({'ativo': True}))
+    else:
+        # Aplica filtros de escopo baseados no usuário logado
+        centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
+        almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
+        setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
     
     return render_template('produtos/estoque.html',
                          centrais=centrais,
@@ -154,17 +213,30 @@ def estoque():
 @require_any_level
 def movimentacoes():
     """Página de movimentações e transferências"""
-    # Aplica filtros de escopo baseados no usuário logado
-    centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
-    almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
-    sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
-    setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
-    
-    # Converter objetos para dicionários para serialização JSON
-    centrais_dict = [{'id': c.id, 'nome': c.nome} for c in centrais]
-    almoxarifados_dict = [{'id': a.id, 'nome': a.nome, 'central_id': a.central_id} for a in almoxarifados]
-    sub_almoxarifados_dict = [{'id': s.id, 'nome': s.nome, 'almoxarifado_id': s.almoxarifado_id} for s in sub_almoxarifados]
-    setores_dict = [{'id': s.id, 'nome': s.nome} for s in setores]
+    if USE_MONGO:
+        # Aplica filtros de escopo baseados no usuário logado
+        centrais = ScopeFilter.filter_centrais_mongo(CentralMongo.find_many({'ativo': True}))
+        almoxarifados = ScopeFilter.filter_almoxarifados_mongo(AlmoxarifadoMongo.find_many({'ativo': True}))
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados_mongo(SubAlmoxarifadoMongo.find_many({'ativo': True}))
+        setores = ScopeFilter.filter_setores_mongo(SetorMongo.find_many({'ativo': True}))
+        
+        # Converter objetos para dicionários para serialização JSON
+        centrais_dict = [{'id': str(c._id), 'nome': c.nome} for c in centrais]
+        almoxarifados_dict = [{'id': str(a._id), 'nome': a.nome, 'central_id': str(a.central_id)} for a in almoxarifados]
+        sub_almoxarifados_dict = [{'id': str(s._id), 'nome': s.nome, 'almoxarifado_id': str(s.almoxarifado_id)} for s in sub_almoxarifados]
+        setores_dict = [{'id': str(s._id), 'nome': s.nome} for s in setores]
+    else:
+        # Aplica filtros de escopo baseados no usuário logado
+        centrais = ScopeFilter.filter_centrais(Central.query.filter_by(ativo=True)).all()
+        almoxarifados = ScopeFilter.filter_almoxarifados(Almoxarifado.query.filter_by(ativo=True)).all()
+        sub_almoxarifados = ScopeFilter.filter_sub_almoxarifados(SubAlmoxarifado.query.filter_by(ativo=True)).all()
+        setores = ScopeFilter.filter_setores(Setor.query.filter_by(ativo=True)).all()
+        
+        # Converter objetos para dicionários para serialização JSON
+        centrais_dict = [{'id': c.id, 'nome': c.nome} for c in centrais]
+        almoxarifados_dict = [{'id': a.id, 'nome': a.nome, 'central_id': a.central_id} for a in almoxarifados]
+        sub_almoxarifados_dict = [{'id': s.id, 'nome': s.nome, 'almoxarifado_id': s.almoxarifado_id} for s in sub_almoxarifados]
+        setores_dict = [{'id': s.id, 'nome': s.nome} for s in setores]
     
     return render_template('movimentacoes/index.html',
                          centrais=centrais_dict,
@@ -178,22 +250,33 @@ def movimentacoes():
 @require_admin_or_above
 def configuracoes_usuarios():
     """Página de gerenciamento de usuários"""
-    from models.categoria import CategoriaProduto
-    
-    # Busca todos os usuários com suas hierarquias
-    usuarios = Usuario.query.options(
-        db.joinedload(Usuario.central),
-        db.joinedload(Usuario.almoxarifado).joinedload(Almoxarifado.central),
-        db.joinedload(Usuario.sub_almoxarifado).joinedload(SubAlmoxarifado.almoxarifado).joinedload(Almoxarifado.central),
-        db.joinedload(Usuario.setor).joinedload(Setor.sub_almoxarifado).joinedload(SubAlmoxarifado.almoxarifado).joinedload(Almoxarifado.central)
-    ).all()
-    
-    # Busca hierarquias para formulário de criação/edição
-    centrais = Central.query.filter_by(ativo=True).all()
-    almoxarifados = Almoxarifado.query.filter_by(ativo=True).all()
-    sub_almoxarifados = SubAlmoxarifado.query.filter_by(ativo=True).all()
-    setores = Setor.query.filter_by(ativo=True).all()
-    categorias = CategoriaProduto.query.filter_by(ativo=True).order_by(CategoriaProduto.nome).all()
+    if USE_MONGO:
+        # Busca todos os usuários
+        usuarios = UsuarioMongo.find_many({})
+        
+        # Busca hierarquias para formulário de criação/edição
+        centrais = CentralMongo.find_many({'ativo': True})
+        almoxarifados = AlmoxarifadoMongo.find_many({'ativo': True})
+        sub_almoxarifados = SubAlmoxarifadoMongo.find_many({'ativo': True})
+        setores = SetorMongo.find_many({'ativo': True})
+        categorias = CategoriaProdutoMongo.find_many({'ativo': True}, sort=[('nome', 1)])
+    else:
+        from models.categoria import CategoriaProduto
+        
+        # Busca todos os usuários com suas hierarquias
+        usuarios = Usuario.query.options(
+            db.joinedload(Usuario.central),
+            db.joinedload(Usuario.almoxarifado).joinedload(Almoxarifado.central),
+            db.joinedload(Usuario.sub_almoxarifado).joinedload(SubAlmoxarifado.almoxarifado).joinedload(Almoxarifado.central),
+            db.joinedload(Usuario.setor).joinedload(Setor.sub_almoxarifado).joinedload(SubAlmoxarifado.almoxarifado).joinedload(Almoxarifado.central)
+        ).all()
+        
+        # Busca hierarquias para formulário de criação/edição
+        centrais = Central.query.filter_by(ativo=True).all()
+        almoxarifados = Almoxarifado.query.filter_by(ativo=True).all()
+        sub_almoxarifados = SubAlmoxarifado.query.filter_by(ativo=True).all()
+        setores = Setor.query.filter_by(ativo=True).all()
+        categorias = CategoriaProduto.query.filter_by(ativo=True).order_by(CategoriaProduto.nome).all()
     
     return render_template('users/index.html',
                          usuarios=usuarios,

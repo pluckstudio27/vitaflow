@@ -1,0 +1,521 @@
+#!/usr/bin/env python3
+"""
+Sistema de Detecção e Correção Automática de Erros
+Sistema Almox SMS
+
+Este módulo implementa um sistema inteligente para detectar e corrigir
+automaticamente erros comuns na aplicação.
+
+Funcionalidades:
+- Análise de logs de erro
+- Detecção de padrões de falha
+- Correções automáticas baseadas em regras
+- Backup automático antes das correções
+- Validação pós-correção
+
+Autor: Sistema Automatizado de Correções
+Data: 2024
+"""
+
+import os
+import sys
+import re
+import json
+import shutil
+import subprocess
+import traceback
+from datetime import datetime
+from typing import Dict, List, Tuple, Optional, Any
+from dataclasses import dataclass
+from enum import Enum
+import ast
+
+class ErrorType(Enum):
+    """Tipos de erro detectados"""
+    IMPORT_ERROR = "import_error"
+    SYNTAX_ERROR = "syntax_error"
+    ATTRIBUTE_ERROR = "attribute_error"
+    NAME_ERROR = "name_error"
+    TYPE_ERROR = "type_error"
+    VALUE_ERROR = "value_error"
+    KEY_ERROR = "key_error"
+    INDEX_ERROR = "index_error"
+    DATABASE_ERROR = "database_error"
+    API_ERROR = "api_error"
+    TEMPLATE_ERROR = "template_error"
+    CONFIGURATION_ERROR = "configuration_error"
+
+@dataclass
+class ErrorPattern:
+    """Padrão de erro detectado"""
+    error_type: ErrorType
+    pattern: str
+    file_path: Optional[str]
+    line_number: Optional[int]
+    description: str
+    suggested_fix: str
+
+@dataclass
+class FixResult:
+    """Resultado de uma correção"""
+    success: bool
+    error_pattern: ErrorPattern
+    fix_applied: str
+    backup_path: Optional[str]
+    validation_passed: bool
+    message: str
+
+class AutoFixer:
+    """Sistema de correção automática"""
+    
+    def __init__(self, project_root: str = None):
+        self.project_root = project_root or os.path.dirname(os.path.abspath(__file__))
+        self.backup_dir = os.path.join(self.project_root, "backups")
+        self.fixes_applied = []
+        self.error_patterns = self._load_error_patterns()
+        
+        # Criar diretório de backup
+        os.makedirs(self.backup_dir, exist_ok=True)
+    
+    def _load_error_patterns(self) -> List[ErrorPattern]:
+        """Carrega padrões de erro conhecidos"""
+        patterns = [
+            # Erros de importação
+            ErrorPattern(
+                error_type=ErrorType.IMPORT_ERROR,
+                pattern=r"ImportError: cannot import name '(\w+)' from '([^']+)'",
+                file_path=None,
+                line_number=None,
+                description="Erro de importação - nome não encontrado",
+                suggested_fix="Verificar se o nome existe no módulo ou corrigir importação"
+            ),
+            
+            ErrorPattern(
+                error_type=ErrorType.IMPORT_ERROR,
+                pattern=r"ModuleNotFoundError: No module named '([^']+)'",
+                file_path=None,
+                line_number=None,
+                description="Módulo não encontrado",
+                suggested_fix="Instalar módulo ou corrigir caminho de importação"
+            ),
+            
+            # Erros de atributo
+            ErrorPattern(
+                error_type=ErrorType.ATTRIBUTE_ERROR,
+                pattern=r"AttributeError: '(\w+)' object has no attribute '(\w+)'",
+                file_path=None,
+                line_number=None,
+                description="Atributo não existe no objeto",
+                suggested_fix="Verificar se o atributo existe ou usar método alternativo"
+            ),
+            
+            # Erros de banco de dados
+            ErrorPattern(
+                error_type=ErrorType.DATABASE_ERROR,
+                pattern=r"sqlalchemy\.exc\.(\w+): (.+)",
+                file_path=None,
+                line_number=None,
+                description="Erro do SQLAlchemy",
+                suggested_fix="Verificar configuração do banco de dados"
+            ),
+            
+            # Erros de API
+            ErrorPattern(
+                error_type=ErrorType.API_ERROR,
+                pattern=r"500 Internal Server Error",
+                file_path=None,
+                line_number=None,
+                description="Erro interno do servidor",
+                suggested_fix="Verificar logs do servidor e corrigir erro interno"
+            ),
+            
+            # Erros específicos do projeto
+            ErrorPattern(
+                error_type=ErrorType.ATTRIBUTE_ERROR,
+                pattern=r"'CentralMongo' object has no attribute 'find_all'",
+                file_path=None,
+                line_number=None,
+                description="Método find_all não existe em CentralMongo",
+                suggested_fix="Substituir find_all() por find_many()"
+            ),
+            
+            ErrorPattern(
+                error_type=ErrorType.IMPORT_ERROR,
+                pattern=r"cannot import name 'ScopeFilter' from 'auth'",
+                file_path=None,
+                line_number=None,
+                description="ScopeFilter importado do módulo errado",
+                suggested_fix="Importar ScopeFilter do módulo correto (auth_mongo)"
+            ),
+        ]
+        
+        return patterns
+    
+    def create_backup(self, file_path: str) -> str:
+        """Cria backup de um arquivo antes da correção"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = os.path.basename(file_path)
+            backup_filename = f"{filename}.backup_{timestamp}"
+            backup_path = os.path.join(self.backup_dir, backup_filename)
+            
+            shutil.copy2(file_path, backup_path)
+            return backup_path
+            
+        except Exception as e:
+            print(f"Erro ao criar backup: {e}")
+            return None
+    
+    def analyze_file_for_errors(self, file_path: str) -> List[ErrorPattern]:
+        """Analisa um arquivo Python em busca de erros"""
+        errors = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Verificar sintaxe
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                errors.append(ErrorPattern(
+                    error_type=ErrorType.SYNTAX_ERROR,
+                    pattern=f"SyntaxError: {e.msg}",
+                    file_path=file_path,
+                    line_number=e.lineno,
+                    description=f"Erro de sintaxe na linha {e.lineno}",
+                    suggested_fix="Corrigir sintaxe Python"
+                ))
+            
+            # Verificar padrões específicos
+            lines = content.split('\n')
+            for i, line in enumerate(lines, 1):
+                # Verificar importações problemáticas
+                if "from auth_mongo import ScopeFilter" in line:
+                    errors.append(ErrorPattern(
+                        error_type=ErrorType.IMPORT_ERROR,
+                        pattern="from auth_mongo import ScopeFilter",
+                        file_path=file_path,
+                        line_number=i,
+                        description="Importação incorreta do ScopeFilter",
+                        suggested_fix="Mudar para 'from auth_mongo import ScopeFilter'"
+                    ))
+                
+                # Verificar uso de métodos inexistentes
+                if ".find_many()" in line and "Mongo" in line:
+                    errors.append(ErrorPattern(
+                        error_type=ErrorType.ATTRIBUTE_ERROR,
+                        pattern=".find_many()",
+                        file_path=file_path,
+                        line_number=i,
+                        description="Método find_all() não existe em modelos MongoDB",
+                        suggested_fix="Substituir por .find_many()"
+                    ))
+                
+                # Verificar uso de métodos SQLAlchemy em contexto MongoDB
+                if "ScopeFilter.filter_centrais_mongo()" in line and "USE_MONGO" in content:
+                    errors.append(ErrorPattern(
+                        error_type=ErrorType.ATTRIBUTE_ERROR,
+                        pattern="ScopeFilter.filter_centrais_mongo()",
+                        file_path=file_path,
+                        line_number=i,
+                        description="Método SQLAlchemy usado em contexto MongoDB",
+                        suggested_fix="Usar ScopeFilter.filter_centrais_mongo()"
+                    ))
+        
+        except Exception as e:
+            print(f"Erro ao analisar arquivo {file_path}: {e}")
+        
+        return errors
+    
+    def fix_import_error(self, error: ErrorPattern) -> FixResult:
+        """Corrige erros de importação"""
+        if not error.file_path:
+            return FixResult(
+                success=False,
+                error_pattern=error,
+                fix_applied="",
+                backup_path=None,
+                validation_passed=False,
+                message="Caminho do arquivo não especificado"
+            )
+        
+        backup_path = self.create_backup(error.file_path)
+        
+        try:
+            with open(error.file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            original_content = content
+            
+            # Correções específicas
+            if "from auth_mongo import ScopeFilter" in content:
+                content = content.replace(
+                    "from auth_mongo import ScopeFilter",
+                    "from auth_mongo import ScopeFilter"
+                )
+                fix_description = "Corrigida importação do ScopeFilter"
+            
+            elif "from models.usuario import Usuario" in content and "USE_MONGO" in content:
+                # Adicionar importação condicional
+                if "from models_mongo.usuario import UsuarioMongo" not in content:
+                    import_section = content.find("from models.usuario import Usuario")
+                    if import_section != -1:
+                        new_import = "from models.usuario import Usuario\nfrom models_mongo.usuario import UsuarioMongo"
+                        content = content.replace("from models.usuario import Usuario", new_import)
+                        fix_description = "Adicionada importação condicional para MongoDB"
+            
+            else:
+                return FixResult(
+                    success=False,
+                    error_pattern=error,
+                    fix_applied="",
+                    backup_path=backup_path,
+                    validation_passed=False,
+                    message="Correção não implementada para este tipo de erro de importação"
+                )
+            
+            # Inicializar fix_description se não foi definido
+            if 'fix_description' not in locals():
+                fix_description = "Correção de importação aplicada"
+            
+            # Salvar arquivo corrigido
+            with open(error.file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Validar correção
+            validation_passed = self.validate_fix(error.file_path)
+            
+            return FixResult(
+                success=True,
+                error_pattern=error,
+                fix_applied=fix_description,
+                backup_path=backup_path,
+                validation_passed=validation_passed,
+                message="Correção aplicada com sucesso"
+            )
+            
+        except Exception as e:
+            return FixResult(
+                success=False,
+                error_pattern=error,
+                fix_applied="",
+                backup_path=backup_path,
+                validation_passed=False,
+                message=f"Erro ao aplicar correção: {e}"
+            )
+    
+    def fix_attribute_error(self, error: ErrorPattern) -> FixResult:
+        """Corrige erros de atributo"""
+        if not error.file_path:
+            return FixResult(
+                success=False,
+                error_pattern=error,
+                fix_applied="",
+                backup_path=None,
+                validation_passed=False,
+                message="Caminho do arquivo não especificado"
+            )
+        
+        backup_path = self.create_backup(error.file_path)
+        
+        try:
+            with open(error.file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Correções específicas
+            if ".find_many()" in error.pattern:
+                content = content.replace(".find_many()", ".find_many()")
+                fix_description = "Substituído find_all() por find_many()"
+            
+            elif "ScopeFilter.filter_centrais_mongo()" in error.pattern:
+                content = content.replace(
+                    "ScopeFilter.filter_centrais_mongo()",
+                    "ScopeFilter.filter_centrais_mongo()"
+                )
+                fix_description = "Substituído filter_centrais() por filter_centrais_mongo()"
+            
+            else:
+                return FixResult(
+                    success=False,
+                    error_pattern=error,
+                    fix_applied="",
+                    backup_path=backup_path,
+                    validation_passed=False,
+                    message="Correção não implementada para este tipo de erro de atributo"
+                )
+            
+            # Salvar arquivo corrigido
+            with open(error.file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Validar correção
+            validation_passed = self.validate_fix(error.file_path)
+            
+            return FixResult(
+                success=True,
+                error_pattern=error,
+                fix_applied=fix_description,
+                backup_path=backup_path,
+                validation_passed=validation_passed,
+                message="Correção aplicada com sucesso"
+            )
+            
+        except Exception as e:
+            return FixResult(
+                success=False,
+                error_pattern=error,
+                fix_applied="",
+                backup_path=backup_path,
+                validation_passed=False,
+                message=f"Erro ao aplicar correção: {e}"
+            )
+    
+    def validate_fix(self, file_path: str) -> bool:
+        """Valida se a correção não introduziu novos erros"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Verificar sintaxe
+            ast.parse(content)
+            return True
+            
+        except SyntaxError:
+            return False
+        except Exception:
+            return False
+    
+    def scan_project_for_errors(self) -> List[ErrorPattern]:
+        """Escaneia todo o projeto em busca de erros"""
+        all_errors = []
+        
+        # Arquivos Python para analisar
+        python_files = []
+        for root, dirs, files in os.walk(self.project_root):
+            # Ignorar diretórios específicos
+            dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', 'venv', 'env', 'backups']]
+            
+            for file in files:
+                if file.endswith('.py'):
+                    python_files.append(os.path.join(root, file))
+        
+        # Analisar cada arquivo
+        for file_path in python_files:
+            errors = self.analyze_file_for_errors(file_path)
+            all_errors.extend(errors)
+        
+        return all_errors
+    
+    def apply_fixes(self, errors: List[ErrorPattern]) -> List[FixResult]:
+        """Aplica correções para uma lista de erros"""
+        results = []
+        
+        for error in errors:
+            print(f"Corrigindo: {error.description}")
+            
+            if error.error_type == ErrorType.IMPORT_ERROR:
+                result = self.fix_import_error(error)
+            elif error.error_type == ErrorType.ATTRIBUTE_ERROR:
+                result = self.fix_attribute_error(error)
+            else:
+                result = FixResult(
+                    success=False,
+                    error_pattern=error,
+                    fix_applied="",
+                    backup_path=None,
+                    validation_passed=False,
+                    message=f"Correção não implementada para {error.error_type.value}"
+                )
+            
+            results.append(result)
+            
+            if result.success:
+                print(f"✅ {result.fix_applied}")
+            else:
+                print(f"❌ {result.message}")
+        
+        return results
+    
+    def generate_fix_report(self, results: List[FixResult]) -> str:
+        """Gera relatório das correções aplicadas"""
+        total = len(results)
+        successful = len([r for r in results if r.success])
+        failed = total - successful
+        
+        report = f"""
+=== RELATÓRIO DE CORREÇÕES AUTOMÁTICAS ===
+Data: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+RESUMO:
+- Total de correções tentadas: {total}
+- Bem-sucedidas: {successful}
+- Falharam: {failed}
+- Taxa de sucesso: {(successful/total*100):.1f}%
+
+DETALHES:
+"""
+        
+        for result in results:
+            status = "✅" if result.success else "❌"
+            report += f"{status} {result.error_pattern.description}\n"
+            
+            if result.success:
+                report += f"   🔧 Correção: {result.fix_applied}\n"
+                report += f"   📁 Backup: {result.backup_path}\n"
+                report += f"   ✓ Validação: {'Passou' if result.validation_passed else 'Falhou'}\n"
+            else:
+                report += f"   ❌ Erro: {result.message}\n"
+            
+            if result.error_pattern.file_path:
+                report += f"   📄 Arquivo: {result.error_pattern.file_path}\n"
+                if result.error_pattern.line_number:
+                    report += f"   📍 Linha: {result.error_pattern.line_number}\n"
+            
+            report += "\n"
+        
+        return report
+    
+    def run_auto_fix(self) -> List[FixResult]:
+        """Executa o processo completo de correção automática"""
+        print("🔍 Escaneando projeto em busca de erros...")
+        errors = self.scan_project_for_errors()
+        
+        if not errors:
+            print("✅ Nenhum erro detectado!")
+            return []
+        
+        print(f"🚨 {len(errors)} erro(s) detectado(s)")
+        
+        print("🔧 Aplicando correções automáticas...")
+        results = self.apply_fixes(errors)
+        
+        # Gerar relatório
+        report = self.generate_fix_report(results)
+        
+        # Salvar relatório
+        report_file = f"fix_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write(report)
+        
+        print(report)
+        print(f"📄 Relatório salvo em: {report_file}")
+        
+        return results
+
+def main():
+    """Função principal"""
+    print("🛠️ Sistema de Correção Automática - Almox SMS")
+    print("=" * 60)
+    
+    fixer = AutoFixer()
+    results = fixer.run_auto_fix()
+    
+    successful_fixes = len([r for r in results if r.success])
+    if successful_fixes > 0:
+        print(f"\n🎉 {successful_fixes} correção(ões) aplicada(s) com sucesso!")
+    else:
+        print("\n✅ Nenhuma correção foi necessária ou possível.")
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from auth import authenticate_user, logout_user_with_audit, get_user_context
-from models.usuario import Usuario
+from auth_mongo import authenticate_user, logout_user_with_audit, get_user_context
 from extensions import db
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
@@ -127,9 +126,17 @@ def change_password():
         return redirect(url_for('auth.profile'))
     
     try:
+        from config import USE_MONGODB
+        
         # Atualiza a senha
         current_user.set_password(new_password)
-        db.session.commit()
+        
+        if USE_MONGODB:
+            # Para MongoDB, salva diretamente no documento
+            current_user.save()
+        else:
+            # Para SQLAlchemy, usa commit da sessão
+            db.session.commit()
         
         success_msg = 'Senha alterada com sucesso'
         if request.is_json:
