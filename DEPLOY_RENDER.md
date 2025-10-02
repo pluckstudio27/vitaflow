@@ -49,7 +49,7 @@ No painel do Render, adicionar as seguintes variáveis:
 
 ```bash
 # MongoDB
-MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/?retryWrites=true&w=majority
+MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/almox_sms?retryWrites=true&w=majority
 MONGO_DB=almox_sms
 
 # Flask
