@@ -245,7 +245,24 @@ def init_mongo(app):
         app.logger.info(f'URI final para conexão: {repr(uri)}')
         app.logger.info(f'URI final (primeiros 100 chars): {uri[:100]}')
         app.logger.info(f'Tentando conectar ao MongoDB com URI processada...')
-        mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        
+        # Configurações SSL específicas para Render
+        ssl_config = {}
+        if os.getenv('RENDER'):
+            app.logger.info('=== RENDER DETECTADO: Aplicando configurações SSL específicas ===')
+            import ssl
+            ssl_config = {
+                'ssl': True,
+                'ssl_cert_reqs': ssl.CERT_NONE,
+                'ssl_check_hostname': False,
+                'ssl_ca_certs': None,
+                'tlsAllowInvalidCertificates': True,
+                'tlsAllowInvalidHostnames': True,
+                'tlsInsecure': True
+            }
+            app.logger.info(f'Configurações SSL aplicadas: {ssl_config}')
+        
+        mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000, **ssl_config)
         mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
 
         # Verifica conectividade
@@ -259,6 +276,58 @@ def init_mongo(app):
             app.logger.info("Índices MongoDB inicializados")
             
     except Exception as e:
+        # Tratamento específico para erros SSL - tenta fallbacks progressivos
+        if 'SSL' in str(e) or 'TLS' in str(e) or 'ssl' in str(e).lower() or 'handshake' in str(e).lower():
+            app.logger.error(f'=== ERRO SSL DETECTADO: {e} ===')
+            app.logger.info('Tentando fallbacks SSL progressivos...')
+            
+            # Fallback 1: Tentar sem SSL
+            try:
+                app.logger.info('Fallback 1: Tentando conexão sem SSL...')
+                fallback_config = {'ssl': False, 'tls': False}
+                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=10000, **fallback_config)
+                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
+                mongo_client.admin.command('ping')
+                app.logger.warning("MongoDB conectado com fallback SSL desabilitado")
+                
+                if use_primary:
+                    from models_mongo import init_mongodb
+                    init_mongodb()
+                    app.logger.info("Índices MongoDB inicializados")
+                return
+            except Exception as e1:
+                app.logger.warning(f'Fallback 1 falhou: {e1}')
+            
+            # Fallback 2: Tentar com configurações SSL mais permissivas
+            try:
+                app.logger.info('Fallback 2: Tentando com SSL mais permissivo...')
+                import ssl
+                fallback_config = {
+                    'ssl': True,
+                    'ssl_cert_reqs': ssl.CERT_NONE,
+                    'ssl_check_hostname': False,
+                    'ssl_match_hostname': False,
+                    'tlsAllowInvalidCertificates': True,
+                    'tlsAllowInvalidHostnames': True,
+                    'tlsInsecure': True,
+                    'tlsDisableOCSPEndpointCheck': True
+                }
+                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=15000, **fallback_config)
+                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
+                mongo_client.admin.command('ping')
+                app.logger.warning("MongoDB conectado com fallback SSL permissivo")
+                
+                if use_primary:
+                    from models_mongo import init_mongodb
+                    init_mongodb()
+                    app.logger.info("Índices MongoDB inicializados")
+                return
+            except Exception as e2:
+                app.logger.warning(f'Fallback 2 falhou: {e2}')
+            
+            # Se todos os fallbacks SSL falharam, continua para outros tratamentos
+            app.logger.error('Todos os fallbacks SSL falharam, tentando outras correções...')
+        
         # Tratamento específico para InvalidURI - tenta uma última correção
         if 'InvalidURI' in str(type(e)) or 'MongoDB URI options are key=value pairs' in str(e):
             app.logger.error(f'=== DEBUG RENDER: Erro InvalidURI detectado ===')
@@ -290,9 +359,14 @@ def init_mongo(app):
                 error_msg = f'URI do MongoDB malformada mesmo após correção: {e}. Original: {e2}'
                 app.logger.error(error_msg)
         elif 'ServerSelectionTimeoutError' in str(type(e)):
-            error_msg = f'Timeout ao conectar ao MongoDB: {e}. Verifique se o servidor está acessível'
+            if 'SSL' in str(e) or 'TLS' in str(e) or 'ssl' in str(e).lower():
+                error_msg = f'Timeout ao conectar ao MongoDB: {e}. Problema SSL/TLS detectado. Verifique se o servidor está acessível e as configurações SSL estão corretas'
+            else:
+                error_msg = f'Timeout ao conectar ao MongoDB: {e}. Verifique se o servidor está acessível'
         elif 'Authentication' in str(e):
             error_msg = f'Erro de autenticação MongoDB: {e}. Verifique usuário e senha'
+        elif 'SSL' in str(e) or 'TLS' in str(e) or 'ssl' in str(e).lower():
+            error_msg = f'Erro SSL/TLS ao conectar ao MongoDB: {e}. Problema de certificado ou handshake SSL'
         else:
             error_msg = f'Falha ao conectar ao MongoDB: {e}'
         
