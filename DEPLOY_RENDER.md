@@ -48,17 +48,22 @@ As seguintes modificações já foram implementadas no código:
 No painel do Render, adicionar as seguintes variáveis:
 
 ```bash
-# MongoDB
+# Flask (OBRIGATÓRIO)
+FLASK_ENV=production
+SECRET_KEY=your-production-secret-key-here
+
+# MongoDB (OBRIGATÓRIO - URI deve incluir o nome do banco)
 MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/almox_sms?retryWrites=true&w=majority
 MONGO_DB=almox_sms
 
-# Flask
-SECRET_KEY=your-production-secret-key-here
-FLASK_ENV=production
-
-# Banco de dados principal (SQLite/PostgreSQL)
+# SQLAlchemy (Fallback - opcional)
 DATABASE_URL=sqlite:///almox_sms.db
 ```
+
+**⚠️ IMPORTANTE:** 
+- A variável `FLASK_ENV=production` é obrigatória para usar a configuração correta
+- A `MONGO_URI` deve incluir o nome do banco (`/almox_sms`) antes dos parâmetros de query
+- O Render detecta automaticamente a porta através da variável `$PORT`
 
 ### 4. Deploy
 
@@ -139,16 +144,20 @@ python app.py
 
 ### Executar com Gunicorn (produção)
 ```bash
-# Com inicialização automática (recomendado)
-python start.py && gunicorn -w 2 -b 0.0.0.0:5000 app:app
+# Comando usado pelo Render (via Procfile)
+gunicorn -w 2 -b 0.0.0.0:$PORT app:app
 
-# Apenas Gunicorn (se banco já estiver inicializado)
+# Para teste local com Gunicorn
 gunicorn -w 2 -b 0.0.0.0:5000 app:app
 ```
 
-### Inicializar banco de dados manualmente
+### Testar aplicação localmente
 ```bash
-python start.py
+# Desenvolvimento
+python app.py
+
+# Produção local
+FLASK_ENV=production python app.py
 ```
 
 ## 🎯 Próximos Passos

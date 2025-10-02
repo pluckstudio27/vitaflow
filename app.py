@@ -1,5 +1,6 @@
+import os
 from flask import Flask
-from config import Config
+from config import config
 from extensions import db, migrate, init_mongo, is_mongo_available
 from blueprints.main import main_bp
 from blueprints.api import api_bp
@@ -27,9 +28,12 @@ except ImportError as e:
     print(f"Aviso: Modelos MongoDB não disponíveis: {e}")
     MONGODB_MODELS_AVAILABLE = False
 
-def create_app(config_class=Config):
+def create_app(config_name=None):
+    if config_name is None:
+        config_name = os.environ.get('FLASK_ENV', 'development')
+    
     app = Flask(__name__)
-    app.config.from_object(config_class)
+    app.config.from_object(config[config_name])
     
     # Inicializar extensões
     db.init_app(app)
