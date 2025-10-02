@@ -36,8 +36,11 @@ def create_app(config_name=None):
     app.config.from_object(config[config_name])
     
     # Inicializar extensões
-    db.init_app(app)
-    migrate.init_app(app, db)
+    # Só inicializar SQLAlchemy se não estiver usando MongoDB como primário
+    if not app.config.get('USE_MONGODB_PRIMARY', False):
+        db.init_app(app)
+        migrate.init_app(app, db)
+    
     init_login_manager(app)
     init_mongo(app)
     

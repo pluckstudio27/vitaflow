@@ -45,7 +45,18 @@ As seguintes modificações já foram implementadas no código:
 
 ### 3. Configurar Variáveis de Ambiente
 
-No painel do Render, adicionar as seguintes variáveis:
+No painel do Render, configure as seguintes variáveis de ambiente:
+
+#### Variáveis Obrigatórias:
+- `FLASK_ENV`: `production`
+- `SECRET_KEY`: Uma chave secreta forte (gere uma nova para produção)
+- `MONGO_URI`: URI de conexão do MongoDB (ex: `mongodb+srv://user:password@cluster.mongodb.net/`)
+- `MONGO_DB`: Nome do banco de dados MongoDB (ex: `almox_sms`)
+
+#### Observações Importantes:
+- **MongoDB Apenas**: A aplicação em produção usa APENAS MongoDB (sem PostgreSQL)
+- **Python 3.13**: Configuração otimizada para compatibilidade com Python 3.13 no Render
+- **Sem psycopg2**: Removido para evitar conflitos de compilação no ambiente Render
 
 ```bash
 # Flask (OBRIGATÓRIO)
@@ -55,9 +66,6 @@ SECRET_KEY=your-production-secret-key-here
 # MongoDB (OBRIGATÓRIO - URI deve incluir o nome do banco)
 MONGO_URI=mongodb+srv://arthurkall_db_user:S8x9xKx0pgpqsIQ4@cluster0.wjr3t0h.mongodb.net/almox_sms?retryWrites=true&w=majority
 MONGO_DB=almox_sms
-
-# SQLAlchemy (Fallback - opcional)
-DATABASE_URL=sqlite:///almox_sms.db
 ```
 
 **⚠️ IMPORTANTE:** 
@@ -159,6 +167,19 @@ python app.py
 # Produção local
 FLASK_ENV=production python app.py
 ```
+
+## Resolução de Problemas
+
+### Erro psycopg2 com Python 3.13
+Se encontrar erro relacionado ao psycopg2:
+- ✅ **Resolvido**: psycopg2-binary foi removido do requirements.txt
+- ✅ **Configuração**: Produção usa apenas MongoDB (USE_MONGODB_PRIMARY=True)
+- ✅ **Compatibilidade**: Otimizado para Python 3.13 no Render
+
+### Verificação de Deploy
+1. Confirme que `FLASK_ENV=production` está configurado
+2. Verifique se `MONGO_URI` está correto e acessível
+3. Confirme que não há referências ao PostgreSQL nos logs
 
 ## 🎯 Próximos Passos
 

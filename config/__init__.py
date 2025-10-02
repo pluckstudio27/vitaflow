@@ -44,12 +44,11 @@ class DevelopmentConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
-    # MongoDB para produção
+    # MongoDB para produção (banco principal)
     MONGO_URI = os.environ.get('MONGO_URI')  # Deve ser definido em produção
     MONGO_DB = os.environ.get('MONGO_DB') or 'almox_sms'
-    # SQLAlchemy como fallback (PostgreSQL em produção)
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        'postgresql://username:password@localhost/almox_sms'
+    # Usar apenas MongoDB em produção (sem SQLAlchemy/PostgreSQL)
+    USE_MONGODB_PRIMARY = True
     
     # Configurações de segurança para produção
     SESSION_COOKIE_SECURE = True  # Requer HTTPS
