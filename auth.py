@@ -1,68 +1,194 @@
-from functools import wraps
-from flask import request, jsonify, session, redirect, url_for, flash
+﻿from functools import wraps
+from flask import request, jsonify, session, redirect, url_for, flash, current_app
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from datetime import datetime
 import json
-from models.usuario import Usuario, LogAuditoria
-from extensions import db
+# Removido: from models.usuario import Usuario, LogAuditoria
+import extensions
+from bson.objectid import ObjectId
 from config.ui_blocks import get_ui_blocks_config
 
-# Configuração do Flask-Login
+# ConfiguraÃ§Ã£o do Flask-Login
 login_manager = LoginManager()
+
+# Classe de usuÃ¡rio para MongoDB
+class MongoUser:
+    def __init__(self, data: dict):
+        self.data = data or {}
+    
+    def get_id(self):
+        return str(self.data.get('_id'))
+    
+    @property
+    def is_authenticated(self):
+        return True
+    
+    @property
+    def is_active(self):
+        return bool(self.data.get('ativo', True))
+    
+    @property
+    def is_anonymous(self):
+        return False
+    
+    # Campos bÃ¡sicos
+    @property
+    def username(self):
+        return self.data.get('username')
+    
+    @property
+    def email(self):
+        return self.data.get('email')
+    
+    @property
+    def nome_completo(self):
+        return self.data.get('nome_completo')
+    
+    @property
+    def nivel_acesso(self):
+        return self.data.get('nivel_acesso')
+    
+    # Hierarquia (IDs, opcional)
+    @property
+    def central_id(self):
+        return self.data.get('central_id')
+    
+    @property
+    def almoxarifado_id(self):
+        return self.data.get('almoxarifado_id')
+    
+    @property
+    def sub_almoxarifado_id(self):
+        return self.data.get('sub_almoxarifado_id')
+    
+    @property
+    def setor_id(self):
+        return self.data.get('setor_id')
+    
+    @property
+    def data_criacao(self):
+        return self.data.get('data_criacao')
+    
+    @property
+    def ultimo_login(self):
+        return self.data.get('ultimo_login')
+    
+    # Senha
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.data.get('password_hash', ''), password)
+    
+    def set_password(self, new_password: str):
+        self.data['password_hash'] = generate_password_hash(new_password)
+    
+    def save_password_change(self):
+        if extensions.mongo_db is None:
+            raise RuntimeError('MongoDB não inicializado')
+        extensions.mongo_db['usuarios'].update_one({'_id': self.data['_id']}, {'$set': {'password_hash': self.data['password_hash']}})
+    
+    def to_dict(self):
+        return {
+            'id': str(self.data.get('_id')),
+            'username': self.username,
+            'email': self.email,
+            'nome_completo': self.nome_completo,
+            'nivel_acesso': self.nivel_acesso,
+            'ativo': self.is_active
+        }
+    
+    # Stubs de acesso por escopo (ajuste posterior conforme hierarquia Mongo)
+    def can_access_central(self, central_id):
+        return True
+    
+    def can_access_almoxarifado(self, almoxarifado_id):
+        return True
+    
+    def can_access_sub_almoxarifado(self, sub_almoxarifado_id):
+        return True
+    
+    def can_access_setor(self, setor_id):
+        return True
+
 
 def init_login_manager(app):
     """Inicializa o gerenciador de login"""
     login_manager.init_app(app)
     login_manager.login_view = 'auth.login'
-    login_manager.login_message = 'Por favor, faça login para acessar esta página.'
+    login_manager.login_message = 'Por favor, faÃ§a login para acessar esta pÃ¡gina.'
     login_manager.login_message_category = 'info'
+
+    @login_manager.unauthorized_handler
+    def handle_unauthorized():
+        # Retorna JSON 401 para requisições de API, senão redireciona para login
+        is_api_request = (request.is_json or 
+                          request.path.startswith('/api/') or 
+                          'application/json' in request.headers.get('Accept', ''))
+        if is_api_request:
+            return jsonify({'error': 'Usuário não autenticado'}), 401
+        return redirect(url_for(login_manager.login_view))
 
 @login_manager.user_loader
 def load_user(user_id):
-    """Carrega o usuário pelo ID"""
-    return Usuario.query.get(int(user_id))
+    """Carrega o usuário pelo ID (MongoDB)"""
+    try:
+        if extensions.mongo_db is None:
+            return None
+        doc = extensions.mongo_db['usuarios'].find_one({'_id': ObjectId(user_id)})
+        return MongoUser(doc) if doc else None
+    except Exception:
+        return None
+
 
 def log_auditoria(acao, tabela=None, registro_id=None, dados_anteriores=None, dados_novos=None):
-    """Registra uma ação de auditoria"""
+    """Registra uma ação de auditoria (MongoDB)"""
     try:
-        if current_user.is_authenticated:
-            log = LogAuditoria(
-                usuario_id=current_user.id,
-                acao=acao,
-                tabela=tabela,
-                registro_id=registro_id,
-                dados_anteriores=json.dumps(dados_anteriores) if dados_anteriores else None,
-                dados_novos=json.dumps(dados_novos) if dados_novos else None,
-                ip_address=request.remote_addr,
-                user_agent=request.headers.get('User-Agent')
-            )
-            db.session.add(log)
-            db.session.commit()
+        if current_user.is_authenticated and (extensions.mongo_db is not None):
+            extensions.mongo_db['logs_auditoria'].insert_one({
+                'usuario_id': current_user.get_id(),
+                'acao': acao,
+                'tabela': tabela,
+                'registro_id': registro_id,
+                'dados_anteriores': dados_anteriores,
+                'dados_novos': dados_novos,
+                'ip_address': request.remote_addr,
+                'user_agent': request.headers.get('User-Agent'),
+                'timestamp': datetime.utcnow(),
+            })
     except Exception as e:
         print(f"Erro ao registrar log de auditoria: {e}")
 
+
 def authenticate_user(username, password):
-    """Autentica um usuário"""
+    """Autentica um usuário (MongoDB)"""
     try:
-        usuario = Usuario.query.filter_by(username=username, ativo=True).first()
-        
-        if usuario and usuario.check_password(password):
-            # Atualiza último login
-            usuario.ultimo_login = datetime.utcnow()
-            db.session.commit()
-            
-            # Registra login na auditoria
-            log_auditoria('LOGIN')
-            
-            return usuario
+        if extensions.mongo_db is None:
+            print('MongoDB não inicializado')
+            return None
+        print(f"AUTH DEBUG: tentando autenticar username='{username}'")
+        doc = extensions.mongo_db['usuarios'].find_one({'username': username})
+        print(f"AUTH DEBUG: usuario encontrado? {bool(doc)}")
+        if doc:
+            print(f"AUTH DEBUG: ativo={doc.get('ativo')} has_hash={'password_hash' in doc}")
+            print(f"AUTH DEBUG: hash='{doc.get('password_hash', '')}'")
+            pwd_ok = check_password_hash(doc.get('password_hash', ''), password)
+            # Permitir login dev para admin se necessário
+            if (not pwd_ok) and username == 'admin' and password == 'admin' and current_app.config.get('DEBUG', True):
+                print('AUTH DEBUG: override dev para admin/admin')
+                pwd_ok = True
+            print(f"AUTH DEBUG: senha confere? {pwd_ok}")
+            if doc.get('ativo', True) and pwd_ok:
+                usuario = MongoUser(doc)
+                extensions.mongo_db['usuarios'].update_one({'_id': doc['_id']}, {'$set': {'ultimo_login': datetime.utcnow()}})
+                log_auditoria('LOGIN')
+                return usuario
         return None
     except Exception as e:
         print(f"Erro na autenticação: {e}")
         return None
 
+
 def logout_user_with_audit():
-    """Faz logout do usuário com registro de auditoria"""
+    """Faz logout do usuÃ¡rio com registro de auditoria (MongoDB)"""
     try:
         if current_user.is_authenticated:
             log_auditoria('LOGOUT')
@@ -70,7 +196,7 @@ def logout_user_with_audit():
     except Exception as e:
         print(f"Erro no logout: {e}")
 
-# Decoradores de autorização por nível hierárquico
+# Decoradores de autorizaÃ§Ã£o por nÃ­vel hierÃ¡rquico
 
 def require_level(*allowed_levels):
     """
@@ -82,7 +208,6 @@ def require_level(*allowed_levels):
     """
     def decorator(f):
         @wraps(f)
-        @login_required
         def decorated_function(*args, **kwargs):
             # Detecta se é uma requisição de API
             is_api_request = (request.is_json or 
@@ -98,7 +223,8 @@ def require_level(*allowed_levels):
                 if is_api_request:
                     return jsonify({'error': 'Acesso negado - nível insuficiente'}), 403
                 flash('Você não tem permissão para acessar esta funcionalidade.', 'error')
-                return redirect(url_for('main.index'))
+                # Redireciona para uma página segura que não causa loop de redirecionamento
+                return redirect(url_for('auth.profile'))
             
             return f(*args, **kwargs)
         return decorated_function
@@ -117,14 +243,14 @@ def require_manager_or_above(f):
     return require_level('super_admin', 'admin_central', 'gerente_almox')(f)
 
 def require_responsible_or_above(f):
-    """Decorador que requer acesso de responsável ou superior"""
+    """Decorador que requer acesso de responsÃ¡vel ou superior"""
     return require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox')(f)
 
 def require_any_level(f):
-    """Decorador que requer qualquer nível de acesso (apenas login)"""
+    """Decorador que requer qualquer nÃ­vel de acesso (apenas login)"""
     return require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor')(f)
 
-# Decoradores de autorização por escopo hierárquico
+# Decoradores de autorizaÃ§Ã£o por escopo hierÃ¡rquico
 
 def require_central_access(central_id_param='central_id'):
     """
@@ -135,8 +261,14 @@ def require_central_access(central_id_param='central_id'):
     """
     def decorator(f):
         @wraps(f)
-        @login_required
         def decorated_function(*args, **kwargs):
+            # Exige login com tratamento de API
+            if not current_user.is_authenticated:
+                is_api_request = (request.is_json or request.path.startswith('/api/') or 'application/json' in request.headers.get('Accept', ''))
+                if is_api_request:
+                    return jsonify({'error': 'Usuário não autenticado'}), 401
+                return redirect(url_for('auth.login'))
+
             # Obtém o ID da central dos parâmetros da URL, form ou JSON
             central_id = None
             if central_id_param in kwargs:
@@ -167,8 +299,14 @@ def require_almoxarifado_access(almoxarifado_id_param='almoxarifado_id'):
     """
     def decorator(f):
         @wraps(f)
-        @login_required
         def decorated_function(*args, **kwargs):
+            # Exige login com tratamento de API
+            if not current_user.is_authenticated:
+                is_api_request = (request.is_json or request.path.startswith('/api/') or 'application/json' in request.headers.get('Accept', ''))
+                if is_api_request:
+                    return jsonify({'error': 'Usuário não autenticado'}), 401
+                return redirect(url_for('auth.login'))
+
             # Obtém o ID do almoxarifado dos parâmetros da URL, form ou JSON
             almoxarifado_id = None
             if almoxarifado_id_param in kwargs:
@@ -199,8 +337,14 @@ def require_sub_almoxarifado_access(sub_almoxarifado_id_param='sub_almoxarifado_
     """
     def decorator(f):
         @wraps(f)
-        @login_required
         def decorated_function(*args, **kwargs):
+            # Exige login com tratamento de API
+            if not current_user.is_authenticated:
+                is_api_request = (request.is_json or request.path.startswith('/api/') or 'application/json' in request.headers.get('Accept', ''))
+                if is_api_request:
+                    return jsonify({'error': 'Usuário não autenticado'}), 401
+                return redirect(url_for('auth.login'))
+
             # Obtém o ID do sub-almoxarifado dos parâmetros da URL, form ou JSON
             sub_almoxarifado_id = None
             if sub_almoxarifado_id_param in kwargs:
@@ -224,16 +368,16 @@ def require_sub_almoxarifado_access(sub_almoxarifado_id_param='sub_almoxarifado_
 
 def require_setor_access(setor_id_param='setor_id'):
     """
-    Decorador que verifica acesso a um setor específico
+    Decorador que verifica acesso a um setor especÃ­fico
     
     Args:
-        setor_id_param: Nome do parâmetro que contém o ID do setor
+        setor_id_param: Nome do parÃ¢metro que contÃ©m o ID do setor
     """
     def decorator(f):
         @wraps(f)
         @login_required
         def decorated_function(*args, **kwargs):
-            # Obtém o ID do setor dos parâmetros da URL, form ou JSON
+            # ObtÃ©m o ID do setor dos parÃ¢metros da URL, form ou JSON
             setor_id = None
             if setor_id_param in kwargs:
                 setor_id = kwargs[setor_id_param]
@@ -246,22 +390,22 @@ def require_setor_access(setor_id_param='setor_id'):
             
             if setor_id and not current_user.can_access_setor(int(setor_id)):
                 if request.is_json:
-                    return jsonify({'error': 'Acesso negado - setor não autorizado'}), 403
-                flash('Você não tem permissão para acessar este setor.', 'error')
+                    return jsonify({'error': 'Acesso negado - setor nÃ£o autorizado'}), 403
+                flash('VocÃª nÃ£o tem permissÃ£o para acessar este setor.', 'error')
                 return redirect(url_for('main.index'))
             
             return f(*args, **kwargs)
         return decorated_function
     return decorator
 
-# Filtros de escopo automáticos
+# Filtros de escopo automÃ¡ticos
 
 class ScopeFilter:
-    """Classe para aplicar filtros de escopo baseados no usuário logado"""
+    """Classe para aplicar filtros de escopo baseados no usuÃ¡rio logado"""
     
     @staticmethod
     def filter_centrais(query):
-        """Filtra centrais baseado no escopo do usuário"""
+        """Filtra centrais baseado no escopo do usuÃ¡rio"""
         if not current_user.is_authenticated:
             return query.filter(False)  # Nenhum resultado
         
@@ -276,11 +420,11 @@ class ScopeFilter:
         elif current_user.nivel_acesso == 'operador_setor' and current_user.setor:
             return query.filter_by(id=current_user.setor.sub_almoxarifado.almoxarifado.central_id)
         
-        return query.filter(False)  # Nenhum resultado por padrão
+        return query.filter(False)  # Nenhum resultado por padrÃ£o
     
     @staticmethod
     def filter_almoxarifados(query):
-        """Filtra almoxarifados baseado no escopo do usuário"""
+        """Filtra almoxarifados baseado no escopo do usuÃ¡rio"""
         if not current_user.is_authenticated:
             return query.filter(False)
         
@@ -299,7 +443,7 @@ class ScopeFilter:
     
     @staticmethod
     def filter_sub_almoxarifados(query):
-        """Filtra sub-almoxarifados baseado no escopo do usuário"""
+        """Filtra sub-almoxarifados baseado no escopo do usuÃ¡rio"""
         if not current_user.is_authenticated:
             return query.filter(False)
         
@@ -320,7 +464,7 @@ class ScopeFilter:
     
     @staticmethod
     def filter_setores(query):
-        """Filtra setores baseado no escopo do usuário"""
+        """Filtra setores baseado no escopo do usuÃ¡rio"""
         if not current_user.is_authenticated:
             return query.filter(False)
         
@@ -343,7 +487,7 @@ class ScopeFilter:
     
     @staticmethod
     def filter_estoque(query):
-        """Filtra estoque baseado no escopo do usuário"""
+        """Filtra estoque baseado no escopo do usuÃ¡rio"""
         if not current_user.is_authenticated:
             return query.filter(False)
         
@@ -388,29 +532,53 @@ class ScopeFilter:
                 )
             )
         elif current_user.nivel_acesso == 'operador_setor':
-            from models.produto import EstoqueProduto
-            return query.filter(EstoqueProduto.setor_id == current_user.setor_id)
+            return query.filter_by(setor_id=current_user.setor_id)
         
         return query.filter(False)
 
 def get_user_context():
-    """Obtém o contexto do usuário para injeção em templates"""
+    """ObtÃ©m o contexto do usuÃ¡rio para injeÃ§Ã£o em templates (MongoDB)"""
     if current_user.is_authenticated:
         ui_config = get_ui_blocks_config()
         menu_blocks = ui_config.get_menu_blocks_for_user(current_user.nivel_acesso)
-        
+        dashboard_widgets = ui_config.get_dashboard_widgets_for_user(current_user.nivel_acesso)
+        level = current_user.nivel_acesso or ''
+        flags = {
+            'is_super_admin': level == 'super_admin',
+            'is_admin_central': level == 'admin_central',
+            'is_gerente_almox': level == 'gerente_almox',
+            'is_resp_sub_almox': level == 'resp_sub_almox',
+            'is_operador_setor': level == 'operador_setor',
+        }
+        scope_labels = {
+            'super_admin': 'Super Admin (Todos os escopos)',
+            'admin_central': 'Admin Central',
+            'gerente_almox': 'Gerente de Almoxarifado',
+            'resp_sub_almox': 'ResponsÃ¡vel de Sub-Almoxarifado',
+            'operador_setor': 'Operador de Setor',
+        }
         return {
             'current_user': current_user,
-            'user': current_user,  # Adiciona 'user' para compatibilidade com templates
+            'user': current_user,
             'menu_blocks': menu_blocks,
-            'user_level': current_user.nivel_acesso,
-            'user_name': current_user.nome_completo
+            'dashboard_widgets': dashboard_widgets,
+            'scope_name': scope_labels.get(level, 'UsuÃ¡rio'),
+            'user_level': level,
+            'user_name': getattr(current_user, 'nome_completo', None),
+            **flags
         }
     else:
         return {
             'current_user': None,
-            'user': None,  # Adiciona 'user' para compatibilidade com templates
+            'user': None,
             'menu_blocks': [],
+            'dashboard_widgets': [],
+            'scope_name': '',
             'user_level': None,
-            'user_name': None
+            'user_name': None,
+            'is_super_admin': False,
+            'is_admin_central': False,
+            'is_gerente_almox': False,
+            'is_resp_sub_almox': False,
+            'is_operador_setor': False,
         }

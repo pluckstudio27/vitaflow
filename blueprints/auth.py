@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from auth_mongo import authenticate_user, logout_user_with_audit, get_user_context
-from extensions import db
+from auth import authenticate_user, logout_user_with_audit, get_user_context
+# Removido: from models.usuario import Usuario
+# Removido: from extensions import db
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -29,7 +30,7 @@ def login():
             flash(error_msg, 'error')
             return render_template('auth/login.html')
         
-        # Autentica o usuário
+        # Autentica o usuário (Mongo)
         usuario = authenticate_user(username, password)
         
         if usuario:
@@ -38,25 +39,14 @@ def login():
             login_user(usuario, remember=remember_me)
             
             if request.is_json:
-                return jsonify({
-                    'success': True,
-                    'message': 'Login realizado com sucesso',
-                    'user': usuario.to_dict(),
-                    'redirect_url': url_for('main.index')
-                })
-            
-            flash(f'Bem-vindo, {usuario.nome_completo}!', 'success')
-            
-            # Redireciona para a página solicitada ou página inicial
-            next_page = request.args.get('next')
-            if next_page:
-                return redirect(next_page)
+                return jsonify({'message': 'Login realizado com sucesso'}), 200
             return redirect(url_for('main.index'))
         else:
-            error_msg = 'Usuário ou senha inválidos'
+            error_msg = 'Credenciais inválidas'
             if request.is_json:
                 return jsonify({'error': error_msg}), 401
             flash(error_msg, 'error')
+            return render_template('auth/login.html')
     
     return render_template('auth/login.html')
 
@@ -64,12 +54,7 @@ def login():
 @login_required
 def logout():
     """Logout do usuário"""
-    if request.is_json:
-        logout_user_with_audit()
-        return jsonify({'success': True, 'message': 'Logout realizado com sucesso'})
-    
     logout_user_with_audit()
-    flash('Logout realizado com sucesso', 'info')
     return redirect(url_for('auth.login'))
 
 @auth_bp.route('/profile')
@@ -85,7 +70,7 @@ def profile():
 @auth_bp.route('/change-password', methods=['POST'])
 @login_required
 def change_password():
-    """Alteração de senha do usuário"""
+    """Alteração de senha do usuário (Mongo)"""
     if request.is_json:
         data = request.get_json()
         current_password = data.get('current_password', '')
@@ -118,51 +103,27 @@ def change_password():
         flash(error_msg, 'error')
         return redirect(url_for('auth.profile'))
     
-    if len(new_password) < 6:
-        error_msg = 'Nova senha deve ter pelo menos 6 caracteres'
-        if request.is_json:
-            return jsonify({'error': error_msg}), 400
-        flash(error_msg, 'error')
-        return redirect(url_for('auth.profile'))
-    
+    # Atualizar senha no Mongo via método do usuário
     try:
-        from config import USE_MONGODB
-        
-        # Atualiza a senha
         current_user.set_password(new_password)
-        
-        if USE_MONGODB:
-            # Para MongoDB, salva diretamente no documento
-            current_user.save()
-        else:
-            # Para SQLAlchemy, usa commit da sessão
-            db.session.commit()
-        
-        success_msg = 'Senha alterada com sucesso'
+        current_user.save_password_change()
         if request.is_json:
-            return jsonify({'success': True, 'message': success_msg})
-        flash(success_msg, 'success')
-        
+            return jsonify({'message': 'Senha alterada com sucesso'}), 200
+        flash('Senha alterada com sucesso', 'success')
     except Exception as e:
-        error_msg = 'Erro ao alterar senha'
         if request.is_json:
-            return jsonify({'error': error_msg}), 500
-        flash(error_msg, 'error')
-    
+            return jsonify({'error': f'Erro ao alterar senha: {e}'}), 500
+        flash('Erro ao alterar senha', 'error')
     return redirect(url_for('auth.profile'))
 
 @auth_bp.route('/check-session')
 def check_session():
-    """Verifica se o usuário está logado (para AJAX)"""
+    """Verifica se sessão é válida"""
     if current_user.is_authenticated:
-        return jsonify({
-            'authenticated': True,
-            'user': current_user.to_dict()
-        })
-    return jsonify({'authenticated': False}), 401
+        return jsonify({'authenticated': True, 'user': current_user.to_dict()})
+    return jsonify({'authenticated': False}), 200
 
-# Context processor para disponibilizar dados do usuário em todos os templates
 @auth_bp.app_context_processor
 def inject_user_context():
-    """Injeta contexto do usuário em todos os templates"""
+    """Injeta contexto do usuário em templates"""
     return get_user_context()

@@ -197,13 +197,31 @@ function carregarCentrals() {
 }
 
 // Gerar código do produto
-document.getElementById('gerarCodigo').addEventListener('click', function() {
+const gerarBtn = document.getElementById('gerarCodigo');
+function updateGerarButtonState() {
+    const hasCentral = document.getElementById('central_id').value;
+    const hasCategoria = document.getElementById('categoria').value;
+    gerarBtn.disabled = !(hasCentral && hasCategoria);
+}
+// estado inicial
+updateGerarButtonState();
+
+gerarBtn.addEventListener('click', function() {
     gerarCodigoProduto();
 });
 
-// Gerar código quando selecionar central
+// Habilitar/gerar código quando selecionar central
 document.getElementById('central_id').addEventListener('change', function() {
-    if (this.value) {
+    updateGerarButtonState();
+    if (this.value && document.getElementById('categoria').value) {
+        gerarCodigoProduto();
+    }
+});
+
+// Habilitar/gerar código quando selecionar categoria
+document.getElementById('categoria').addEventListener('change', function() {
+    updateGerarButtonState();
+    if (this.value && document.getElementById('central_id').value) {
         gerarCodigoProduto();
     }
 });
@@ -212,8 +230,7 @@ function gerarCodigoProduto() {
     const centralId = document.getElementById('central_id').value;
     const categoria = document.getElementById('categoria').value;
     
-    if (!centralId) {
-        alert('Selecione uma Central primeiro');
+    if (!centralId || !categoria) {
         return;
     }
     
@@ -249,6 +266,7 @@ function gerarCodigoProduto() {
         // Restaurar botão
         btn.innerHTML = originalHtml;
         btn.disabled = false;
+        updateGerarButtonState();
     });
 }
 

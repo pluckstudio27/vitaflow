@@ -247,10 +247,10 @@ function renderizarProdutos(produtos) {
                     <a href="/produtos/${produto.id}/recebimento" class="btn btn-outline-success" title="Recebimento">
                         <i class="fas fa-plus-circle"></i>
                     </a>
-                    <button type="button" class="btn btn-outline-warning" onclick="editarProduto(${produto.id})" title="Editar">
+                    <button type="button" class="btn btn-outline-warning" onclick="editarProduto('${produto.id}')" title="Editar">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button type="button" class="btn btn-outline-danger" onclick="apagarProduto(${produto.id}, '${produto.nome}')" title="Apagar">
+                    <button type="button" class="btn btn-outline-danger" onclick="apagarProduto('${produto.id}', '${produto.nome}')" title="Apagar">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>

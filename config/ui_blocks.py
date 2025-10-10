@@ -122,9 +122,9 @@ class UIBlocksConfig:
                 active_endpoints=['main.movimentacoes']
             ),
             MenuBlock(
-                id='relatorios_estoque',
-                label='Relatório de Estoque',
-                icon='fas fa-chart-line',
+                id='relatorios',
+                label='Relatórios',
+                icon='fas fa-chart-bar',
                 url='main.relatorios',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,

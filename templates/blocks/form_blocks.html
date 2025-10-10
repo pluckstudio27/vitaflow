@@ -181,10 +181,16 @@
     {% if message %}
     <p class="text-muted">{{ message }}</p>
     {% endif %}
-    {% if action_text and action_url %}
+    {% if action_text %}
+    {% if action_url and action_url != '#' %}
     <a href="{{ action_url }}" class="btn btn-primary">
         {{ action_text }}
     </a>
+    {% else %}
+    <button type="button" class="btn btn-primary" disabled aria-disabled="true">
+        {{ action_text }}
+    </button>
+    {% endif %}
     {% endif %}
 </div>
 {% endmacro %}

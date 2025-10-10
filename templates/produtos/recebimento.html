@@ -226,13 +226,12 @@ document.getElementById('buscarProduto').addEventListener('input', function() {
 });
 
 function buscarProdutos(termo) {
-    fetch(`/api/produtos?search=${encodeURIComponent(termo)}&limit=10`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos?search=${encodeURIComponent(termo)}&limit=10`)
         .then(data => {
             const lista = document.getElementById('listaProdutos');
             lista.innerHTML = '';
             
-            if (data.items.length === 0) {
+            if (!data.items || data.items.length === 0) {
                 lista.innerHTML = `
                     <div class="list-group-item text-muted">
                         <i class="fas fa-search"></i> Nenhum produto encontrado
@@ -316,12 +315,10 @@ function selecionarProduto(produto) {
 function carregarAlmoxarifados(produtoId) {
     const selectAlmoxarifado = document.getElementById('almoxarifado_id');
     
-    // Desabilitar e mostrar carregando
     selectAlmoxarifado.disabled = true;
     selectAlmoxarifado.innerHTML = '<option value="">Carregando...</option>';
     
-    fetch(`/api/produtos/${produtoId}/almoxarifados`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos/${produtoId}/almoxarifados`)
         .then(data => {
             if (data.success) {
                 selectAlmoxarifado.innerHTML = '<option value="">Selecione um almoxarifado</option>';
@@ -427,11 +424,12 @@ function novoRecebimento() {
 document.addEventListener('DOMContentLoaded', function() {
     // Verificar se há ID do produto na URL
     const path = window.location.pathname;
-    const match = path.match(/\/produtos\/(\d+)\/recebimento/);
-    if (match) {
-        const produtoId = parseInt(match[1]);
-        fetch(`/api/produtos/${produtoId}`)
-            .then(response => response.json())
+    // Extract segment after /produtos/
+    const after = path.split('/produtos/')[1] || '';
+    const idSegment = (after.split('/')[0] || '').trim();
+    if (idSegment) {
+        const produtoId = (/^[a-fA-F0-9]{24}$/.test(idSegment)) ? idSegment : (/^\d+$/.test(idSegment) ? parseInt(idSegment, 10) : idSegment);
+        fetchJson(`/api/produtos/${produtoId}`)
             .then(produto => {
                 if (!produto.error) {
                     selecionarProduto(produto);
@@ -483,7 +481,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        data.almoxarifado_id = parseInt(almoxarifadoId);
+        // Enviar ID robusto (numérico ou ObjectId string) sem parseInt obrigatório
+        data.almoxarifado_id = (/^\d+$/.test(almoxarifadoId)) ? parseInt(almoxarifadoId, 10) : almoxarifadoId;
         
         const submitBtn = document.getElementById('submitBtn');
         const originalText = submitBtn.innerHTML;
@@ -491,20 +490,18 @@ document.addEventListener('DOMContentLoaded', function() {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
         
-        fetch(`/api/produtos/${produtoSelecionado.id}/recebimento`, {
+        fetchJson(`/api/produtos/${produtoSelecionado.id}/recebimento`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         })
-        .then(response => response.json())
         .then(result => {
             if (result.error) {
                 throw new Error(result.error);
             }
             
-            // Mostrar resumo do recebimento
             const valorTotal = data.quantidade * (data.preco_unitario || 0);
             document.getElementById('resumoRecebimento').innerHTML = `
                 <div class="row">
@@ -518,41 +515,77 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="col-6">
                         <strong>Lote:</strong><br>
-                        ${data.lote || 'Não informado'}
+                        ${data.lote || '-'}
                     </div>
-                    ${data.preco_unitario ? `
-                        <div class="col-6 mt-2">
-                            <strong>Valor Total:</strong><br>
-                            R$ ${valorTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                        </div>
-                    ` : ''}
-                    ${data.data_vencimento ? `
-                        <div class="col-6 mt-2">
-                            <strong>Vencimento:</strong><br>
-                            ${new Date(data.data_vencimento).toLocaleDateString('pt-BR')}
-                        </div>
-                    ` : ''}
+                    <div class="col-6">
+                        <strong>Preço Unitário:</strong><br>
+                        ${data.preco_unitario ? data.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Valor Total:</strong><br>
+                        ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div class="col-6">
+                        <strong>Fornecedor:</strong><br>
+                        ${data.fornecedor || '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Nota Fiscal:</strong><br>
+                        ${data.nota_fiscal || '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Data de Fabricação:</strong><br>
+                        ${data.data_fabricacao ? new Date(data.data_fabricacao).toLocaleDateString('pt-BR') : '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Data de Vencimento:</strong><br>
+                        ${data.data_vencimento ? new Date(data.data_vencimento).toLocaleDateString('pt-BR') : '-'}
+                    </div>
+                    <div class="col-12">
+                        <strong>Observações:</strong><br>
+                        ${data.observacoes || '-'}
+                    </div>
                 </div>
             `;
             
-            // Configurar botão de ver detalhes
-            document.getElementById('verDetalhesBtn').onclick = () => {
-                window.location.href = `/produtos/${produtoSelecionado.id}`;
-            };
-            
-            // Mostrar modal
             const modal = new bootstrap.Modal(document.getElementById('confirmacaoModal'));
             modal.show();
         })
         .catch(error => {
             console.error('Erro ao registrar recebimento:', error);
-            alert('Erro ao registrar recebimento: ' + error.message);
+            alert('Erro ao registrar recebimento: ' + (error.message || error));
         })
         .finally(() => {
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalText;
         });
     });
+    
+    // Handler do botão do modal "Ver Detalhes do Produto"
+    const verDetalhesBtn = document.getElementById('verDetalhesBtn');
+    if (verDetalhesBtn) {
+        verDetalhesBtn.addEventListener('click', function() {
+            // Fechar o modal de confirmação, se estiver aberto
+            const modalEl = document.getElementById('confirmacaoModal');
+            const instance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            try { instance.hide(); } catch (e) {}
+            
+            // Determinar o ID do produto: preferir selecionado, senão usar o da URL
+            let destinoId = produtoSelecionado && produtoSelecionado.id ? produtoSelecionado.id : null;
+            if (!destinoId) {
+                const path = window.location.pathname;
+                const after = path.split('/produtos/')[1] || '';
+                const fromUrl = (after.split('/')[0] || '').trim();
+                if (fromUrl) destinoId = fromUrl;
+            }
+            
+            if (destinoId) {
+                window.location.href = `/produtos/${destinoId}`;
+            } else {
+                console.warn('Não foi possível determinar o produto para exibir detalhes.');
+            }
+        });
+    }
     
     // Focar na busca
     document.getElementById('buscarProduto').focus();

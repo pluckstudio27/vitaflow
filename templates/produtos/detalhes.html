@@ -152,6 +152,16 @@
                         </div>
                     </div>
                     <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label for="almoxarifado_id" class="form-label">Almoxarifado *</label>
+                                <select class="form-select" id="almoxarifado_id" name="almoxarifado_id" required>
+                                    <option value="">Carregando...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="data_fabricacao" class="form-label">Data de Fabricação</label>
@@ -187,8 +197,15 @@ let produtoId = null;
 // Extrair ID do produto da URL
 function obterProdutoId() {
     const path = window.location.pathname;
-    const match = path.match(/\/produtos\/(\d+)/);
-    return match ? parseInt(match[1]) : null;
+    const after = path.split('/produtos/')[1] || '';
+    const idSegment = (after.split('/')[0] || '').trim();
+    if (!idSegment) return null;
+    // ObjectId (24 hex chars)
+    if (/^[a-fA-F0-9]{24}$/.test(idSegment)) return idSegment;
+    // Numeric ID
+    if (/^\d+$/.test(idSegment)) return parseInt(idSegment, 10);
+    // Fallback to raw segment
+    return idSegment;
 }
 
 // Carregar dados do produto
@@ -198,9 +215,7 @@ function carregarProduto() {
         alert('ID do produto não encontrado');
         return;
     }
-    
-    fetch(`/api/produtos/${produtoId}`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos/${produtoId}`)
         .then(data => {
             if (data.error) {
                 throw new Error(data.error);
@@ -222,6 +237,7 @@ function renderizarProduto(produto) {
     const statusBadge = produto.ativo ? 
         '<span class="badge bg-success">Ativo</span>' : 
         '<span class="badge bg-danger">Inativo</span>';
+    const criadoEm = produto.data_criacao ? new Date(produto.data_criacao).toLocaleDateString('pt-BR') : '-';
     
     document.getElementById('produtoInfo').innerHTML = `
         <div class="row">
@@ -248,7 +264,7 @@ function renderizarProduto(produto) {
                     </div>
                     <div class="col-6">
                         <strong>Criado em:</strong><br>
-                        ${new Date(produto.data_criacao).toLocaleDateString('pt-BR')}
+                        ${criadoEm}
                     </div>
                 </div>
             </div>
@@ -264,12 +280,10 @@ function renderizarProduto(produto) {
 
 // Carregar resumo de estoque
 function carregarResumoEstoque() {
-    fetch(`/api/produtos/${produtoId}/estoque`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
         .then(data => {
             const resumo = data.resumo || {};
             const total = resumo.total_disponivel || 0;
-            
             document.getElementById('resumoEstoque').innerHTML = `
                 <div class="text-center">
                     <div class="row">
@@ -293,8 +307,7 @@ function carregarResumoEstoque() {
 
 // Carregar estoque por hierarquia
 function carregarEstoqueHierarquia() {
-    fetch(`/api/produtos/${produtoId}/estoque`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
         .then(data => {
             const estoques = data.estoques || [];
             if (estoques.length === 0) {
@@ -358,7 +371,7 @@ function carregarEstoqueHierarquia() {
         .catch(error => {
             console.error('Erro ao carregar estoque:', error);
             document.getElementById('estoqueHierarquia').innerHTML = `
-                <div class="alert alert-danger">
+                <div class="alert alert-warning">
                     <i class="fas fa-exclamation-triangle"></i> Erro ao carregar estoque por hierarquia
                 </div>
             `;
@@ -367,8 +380,8 @@ function carregarEstoqueHierarquia() {
 
 // Carregar lotes
 function carregarLotes() {
-    fetch(`/api/produtos/${produtoId}/lotes`)
-        .then(response => response.json())
+    const url = `/api/produtos/${produtoId}/lotes`;
+    fetchJson(url)
         .then(data => {
             const lotes = data.items || [];
             if (lotes.length === 0) {
@@ -439,11 +452,9 @@ function carregarMovimentacoes() {
     if (filtro) {
         url += `&tipo=${filtro}`;
     }
-    
-    fetch(url)
-        .then(response => response.json())
+    fetchJson(url)
         .then(data => {
-            if (data.items.length === 0) {
+            if (!data.items || data.items.length === 0) {
                 document.getElementById('movimentacoes').innerHTML = `
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle"></i> Nenhuma movimentação encontrada
@@ -495,7 +506,7 @@ function carregarMovimentacoes() {
         .catch(error => {
             console.error('Erro ao carregar movimentações:', error);
             document.getElementById('movimentacoes').innerHTML = `
-                <div class="alert alert-danger">
+                <div class="alert alert-warning">
                     <i class="fas fa-exclamation-triangle"></i> Erro ao carregar movimentações
                 </div>
             `;
@@ -509,69 +520,104 @@ function atualizarEstoque() {
     carregarLotes();
 }
 
-// Event listeners
+// Função para carregar almoxarifados no modal de recebimento
+// Botão de recebimento
+document.getElementById('btnRecebimento').addEventListener('click', function() {
+    carregarAlmoxarifadosDetalhes();
+    const modal = new bootstrap.Modal(document.getElementById('recebimentoModal'));
+    modal.show();
+});
+
+// Função para carregar almoxarifados no modal de recebimento
+function carregarAlmoxarifadosDetalhes() {
+    const select = document.getElementById('almoxarifado_id');
+    if (!produtoId) {
+        select.innerHTML = '<option value="Produto não identificado">Produto não identificado</option>';
+        select.disabled = true;
+        return;
+    }
+    select.innerHTML = '<option value="">Carregando...</option>';
+    select.disabled = true;
+    fetchJson(`/api/produtos/${produtoId}/almoxarifados`)
+        .then(res => {
+            const lista = res.almoxarifados || [];
+            if (lista.length === 0) {
+                select.innerHTML = '<option value="">Nenhum almoxarifado disponível</option>';
+            } else {
+                const options = ['<option value="">Selecione...</option>'];
+                lista.forEach(a => {
+                    const qtd = (a.quantidade_atual && a.quantidade_atual > 0) ? ` - ${parseFloat(a.quantidade_atual).toFixed(2)}` : '';
+                    options.push(`<option value="${a.id}">${a.nome}${qtd}</option>`);
+                });
+                select.innerHTML = options.join('');
+            }
+            select.disabled = false;
+        })
+        .catch(err => {
+            console.error('Erro ao carregar almoxarifados:', err);
+            select.innerHTML = '<option value="">Erro ao carregar almoxarifados</option>';
+            select.disabled = false;
+        });
+}
+
+// Filtro de movimentações
+document.getElementById('filtroMovimentacao').addEventListener('change', carregarMovimentacoes);
+
+// Salvar recebimento
+document.getElementById('salvarRecebimento').addEventListener('click', function() {
+    const form = document.getElementById('recebimentoForm');
+    const formData = new FormData(form);
+    
+    const data = {
+        produto_id: produtoId,
+        quantidade: parseFloat(formData.get('quantidade')),
+        lote: formData.get('lote'),
+        data_fabricacao: formData.get('data_fabricacao'),
+        data_vencimento: formData.get('data_vencimento'),
+        observacoes: formData.get('observacoes')
+    };
+    
+    if (!data.quantidade || data.quantidade <= 0) {
+        alert('Quantidade deve ser maior que zero');
+        return;
+    }
+    const almoxId = formData.get('almoxarifado_id');
+    if (!almoxId) {
+        alert('Selecione um almoxarifado');
+        return;
+    }
+    data.almoxarifado_id = (/^\d+$/.test(almoxId)) ? parseInt(almoxId, 10) : almoxId;
+    
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando...';
+    
+    fetchJson(`/api/produtos/${produtoId}/recebimento`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(resp => {
+        if (resp.error) {
+            throw new Error(resp.error);
+        }
+        alert('Recebimento registrado com sucesso!');
+        bootstrap.Modal.getInstance(document.getElementById('recebimentoModal')).hide();
+        form.reset();
+        atualizarEstoque();
+        carregarMovimentacoes();
+    })
+    .catch(error => {
+        console.error('Erro ao registrar recebimento:', error);
+        alert('Erro ao registrar recebimento: ' + error.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> Registrar Recebimento';
+    });
+});
 document.addEventListener('DOMContentLoaded', function() {
     carregarProduto();
-    
-    // Botão de recebimento
-    document.getElementById('btnRecebimento').addEventListener('click', function() {
-        const modal = new bootstrap.Modal(document.getElementById('recebimentoModal'));
-        modal.show();
-    });
-    
-    // Filtro de movimentações
-    document.getElementById('filtroMovimentacao').addEventListener('change', carregarMovimentacoes);
-    
-    // Salvar recebimento
-    document.getElementById('salvarRecebimento').addEventListener('click', function() {
-        const form = document.getElementById('recebimentoForm');
-        const formData = new FormData(form);
-        
-        const data = {
-            produto_id: produtoId,
-            quantidade: parseFloat(formData.get('quantidade')),
-            lote: formData.get('lote'),
-            data_fabricacao: formData.get('data_fabricacao'),
-            data_vencimento: formData.get('data_vencimento'),
-            observacoes: formData.get('observacoes')
-        };
-        
-        if (!data.quantidade || data.quantidade <= 0) {
-            alert('Quantidade deve ser maior que zero');
-            return;
-        }
-        
-        this.disabled = true;
-        this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando...';
-        
-        fetch('/api/produtos/recebimento', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
-            }
-            
-            alert('Recebimento registrado com sucesso!');
-            bootstrap.Modal.getInstance(document.getElementById('recebimentoModal')).hide();
-            form.reset();
-            atualizarEstoque();
-            carregarMovimentacoes();
-        })
-        .catch(error => {
-            console.error('Erro ao registrar recebimento:', error);
-            alert('Erro ao registrar recebimento: ' + error.message);
-        })
-        .finally(() => {
-            this.disabled = false;
-            this.innerHTML = '<i class="fas fa-save"></i> Registrar Recebimento';
-        });
-    });
 });
 </script>
 {% endblock %}

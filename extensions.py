@@ -1,469 +1,82 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-import os
+from pymongo import MongoClient, ASCENDING
+from werkzeug.security import generate_password_hash
+from datetime import datetime
 
+# SQLAlchemy (mantido para compatibilidade em partes do código)
 db = SQLAlchemy()
 migrate = Migrate()
 
-# ------------------ MongoDB Integration ------------------
-try:
-    from pymongo import MongoClient
-except Exception:
-    # Permite rodar sem pymongo instalado (ex.: antes de instalar dependências)
-    MongoClient = None
-
-mongo_client = None
+# MongoDB (persistência oficial)
+mongo_client: MongoClient | None = None
 mongo_db = None
 
-def validate_and_sanitize_mongo_uri(uri):
-    """Valida e sanitiza uma URI do MongoDB.
-    
-    Args:
-        uri (str): URI do MongoDB para validar
-        
-    Returns:
-        str: URI sanitizada e válida
-        
-    Raises:
-        ValueError: Se a URI for inválida e não puder ser corrigida
-    """
-    if not uri:
-        raise ValueError('URI do MongoDB não pode estar vazia')
-    
-    # Converte para string se não for e remove espaços das extremidades
-    uri = str(uri).strip()
-    
-    # Remove caracteres de controle e invisíveis
-    import re
-    # Remove caracteres de controle ASCII (0-31) exceto tab, newline, carriage return
-    uri = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', uri)
-    
-    # Remove quebras de linha e tabs
-    uri = uri.replace('\n', '').replace('\r', '').replace('\t', '')
-    
-    # Remove espaços extras (múltiplos espaços se tornam um)
-    uri = re.sub(r'\s+', ' ', uri)
-    
-    # Decodifica URL encoding se presente
+def ensure_collections_and_indexes(db):
+    """Cria coleções essenciais e índices (idempotente)."""
     try:
-        import urllib.parse
-        # Tenta decodificar, mas só se parecer estar codificado
-        if '%' in uri:
-            decoded = urllib.parse.unquote(uri)
-            # Só usa a versão decodificada se ainda for uma URI válida
-            if decoded.startswith(('mongodb://', 'mongodb+srv://')):
-                uri = decoded
-    except Exception:
-        pass  # Se falhar na decodificação, continua com a URI original
-    
-    # Verifica se tem prefixo válido
-    if not (uri.startswith('mongodb://') or uri.startswith('mongodb+srv://')):
-        raise ValueError('URI deve começar com mongodb:// ou mongodb+srv://')
-    
-    # Se não tem opções, remove espaços finais e retorna
-    if '?' not in uri:
-        return uri.replace(' ', '')
-    
-    # Separa base da URI das opções
-    try:
-        base_uri, options_str = uri.split('?', 1)
-        
-        # Remove todos os espaços das opções
-        options_str = re.sub(r'\s', '', options_str)
-        
-        if not options_str:
-            return base_uri
-        
-        # Processa as opções
-        option_pairs = []
-        for option in options_str.split('&'):
-            if not option:
-                continue
-                
-            pair = option.strip()
-            if not pair:
-                continue
-            
-            # Se não tem '=', tenta corrigir baseado em opções conhecidas
-            if '=' not in pair:
-                # Lista expandida de opções conhecidas
-                known_boolean_options = [
-                    'retryWrites', 'ssl', 'tls', 'directConnection', 
-                    'journal', 'fsync', 'safe', 'slaveOk', 'uuidRepresentation'
-                ]
-                known_string_options = [
-                    'authSource', 'authMechanism', 'readPreference',
-                    'readConcernLevel', 'compressors', 'zlibCompressionLevel',
-                    'w', 'wtimeoutMS', 'maxPoolSize', 'minPoolSize'
-                ]
-                
-                if pair in known_boolean_options:
-                    pair = f'{pair}=true'
-                elif pair in known_string_options:
-                    if pair == 'authSource':
-                        pair = f'{pair}=admin'
-                    elif pair == 'readPreference':
-                        pair = f'{pair}=primary'
-                    elif pair == 'w':
-                        pair = f'{pair}=majority'
-                    elif pair == 'authMechanism':
-                        pair = f'{pair}=SCRAM-SHA-1'
-                    else:
-                        # Para outras opções string, pula (será removido)
-                        continue
-                else:
-                    # Para opções completamente desconhecidas, tenta adicionar =true
-                    pair = f'{pair}=true'
-            
-            # Verifica se o par tem formato válido key=value
-            if '=' in pair:
-                key, value = pair.split('=', 1)
-                key = key.strip()
-                value = value.strip()
-                
-                # Remove opções com chaves ou valores vazios
-                if not key or value == '':
-                    continue
-                
-                # Valida caracteres especiais na chave
-                if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', key):
-                    continue  # Pula chaves com caracteres inválidos
-                
-                # Reconstrói o par limpo
-                pair = f'{key}={value}'
-            
-            option_pairs.append(pair)
-        
-        # Remove duplicatas mantendo a última ocorrência
-        seen_keys = {}
-        final_pairs = []
-        for pair in option_pairs:
-            if '=' in pair:
-                key = pair.split('=', 1)[0]
-                seen_keys[key] = pair
-        final_pairs = list(seen_keys.values())
-        
-        # Reconstrói a URI com opções corrigidas
-        if final_pairs:
-            uri = f'{base_uri}?{"&".join(final_pairs)}'
-        else:
-            uri = base_uri
-            
+        required = [
+            'usuarios',
+            'centrais',
+            'almoxarifados',
+            'sub_almoxarifados',
+            'setores',
+            'categorias',
+            'produtos',
+            'movimentacoes',
+            'locais',
+        ]
+        existing = set(db.list_collection_names())
+        for name in required:
+            if name not in existing:
+                db.create_collection(name)
+        # Índices essenciais
+        db['usuarios'].create_index([('username', ASCENDING)], unique=True, name='idx_unique_username')
+        db['produtos'].create_index([('codigo', ASCENDING)], name='idx_prod_codigo')
+        db['produtos'].create_index([('nome', ASCENDING)], name='idx_prod_nome')
+        db['movimentacoes'].create_index([('data', ASCENDING)], name='idx_mov_data')
     except Exception as e:
-        # Se houver erro no processamento das opções, usa apenas a base
-        if '?' in uri:
-            uri = uri.split('?', 1)[0]
-    
-    # Limpeza final: remove todos os espaços
-    uri = uri.replace(' ', '')
-    
-    # Validação final básica
-    if not uri or len(uri) < 10:
-        raise ValueError('URI do MongoDB muito curta ou inválida')
-    
-    # Validação adicional: verifica se a estrutura básica está correta
-    if not re.match(r'^mongodb(\+srv)?://[^/]+(/[^?]*)?(\?.*)?$', uri):
-        raise ValueError('Estrutura da URI do MongoDB inválida')
-    
-    return uri
+        print(f'[Mongo Init] Falha ao criar coleções/índices: {e}')
 
 def init_mongo(app):
-    """Inicializa conexão com MongoDB.
-
-    Lê MONGO_URI e MONGO_DB de app.config.
-    Se USE_MONGODB_PRIMARY for True, a conexão é obrigatória.
-    """
+    """Inicializa cliente MongoDB usando configurações do app e semeia usuário admin padrão se necessário."""
     global mongo_client, mongo_db
+    if mongo_client is None:
+        mongo_uri = app.config.get('MONGO_URI')
+        dbname = app.config.get('MONGO_DB')
+        mongo_client = MongoClient(mongo_uri)
+        mongo_db = mongo_client[dbname]
 
-    uri = app.config.get('MONGO_URI')
-    db_name = app.config.get('MONGO_DB')
-    use_primary = app.config.get('USE_MONGODB_PRIMARY', False)
-
-    app.logger.info(f"Inicializando MongoDB (primary={use_primary})...")
-
-    if not uri:
-        if use_primary:
-            app.logger.error('MongoDB configurado como principal mas MONGO_URI não definido!')
-            raise ValueError('MONGO_URI é obrigatório quando USE_MONGODB_PRIMARY=True')
-        else:
-            app.logger.info('MongoDB não configurado: defina MONGO_URI para habilitar.')
-            return
-    
-    # Valida e sanitiza a URI
-    try:
-        # Logs extremamente detalhados para debug no Render
-        app.logger.info(f'=== DEBUG RENDER: Iniciando validação da URI ===')
-        app.logger.info(f'URI original completa: {repr(uri)}')
-        app.logger.info(f'URI original (primeiros 100 chars): {uri[:100]}')
-        app.logger.info(f'Tipo da URI: {type(uri)}')
-        app.logger.info(f'Tamanho da URI: {len(uri)} caracteres')
+        # Garantir coleções e índices
+        ensure_collections_and_indexes(mongo_db)
         
-        # Verifica caracteres especiais
-        special_chars = [c for c in uri if ord(c) < 32 or ord(c) > 126]
-        if special_chars:
-            app.logger.warning(f'Caracteres especiais encontrados: {[hex(ord(c)) for c in special_chars]}')
-        
-        uri_original = uri
-        uri = validate_and_sanitize_mongo_uri(uri)
-        
-        if uri != uri_original:
-            app.logger.info(f'URI foi corrigida!')
-            app.logger.info(f'URI corrigida completa: {repr(uri)}')
-            app.logger.info(f'URI corrigida (primeiros 100 chars): {uri[:100]}')
-        else:
-            app.logger.info('URI não precisou de correção')
-        
-        app.logger.info(f'=== DEBUG RENDER: Validação concluída ===')
-        
-    except ValueError as e:
-        error_msg = f'URI do MongoDB inválida: {e}'
-        app.logger.error(f'=== DEBUG RENDER: Erro de validação ===')
-        app.logger.error(f'Erro: {error_msg}')
-        app.logger.error(f'URI que causou erro: {repr(uri)}')
-        if use_primary:
-            raise ValueError(error_msg)
-        return
-    except Exception as e:
-        error_msg = f'Erro inesperado na validação da URI: {e}'
-        app.logger.error(f'=== DEBUG RENDER: Erro inesperado ===')
-        app.logger.error(f'Erro: {error_msg}')
-        app.logger.error(f'URI que causou erro: {repr(uri)}')
-        app.logger.error(f'Tipo do erro: {type(e)}')
-        if use_primary:
-            raise ValueError(error_msg)
-        return
-
-    if MongoClient is None:
-        error_msg = 'pymongo não está instalado. Execute: pip install pymongo'
-        app.logger.error(error_msg)
-        if use_primary:
-            raise ImportError(error_msg)
-        return
-
-    try:
-        app.logger.info(f'=== DEBUG RENDER: Tentando conectar ao MongoDB ===')
-        app.logger.info(f'URI final para conexão: {repr(uri)}')
-        app.logger.info(f'URI final (primeiros 100 chars): {uri[:100]}')
-        app.logger.info(f'Tentando conectar ao MongoDB com URI processada...')
-        
-        # Configurações SSL específicas para Render
-        ssl_config = {}
-        if os.getenv('RENDER'):
-            app.logger.info('=== RENDER DETECTADO: Aplicando configurações TLS específicas ===')
-            ssl_config = {
-                'tls': True,
-                'tlsAllowInvalidCertificates': True,
-                'tlsAllowInvalidHostnames': True
+        # Seed/Upsert de usuário admin padrão
+        try:
+            usuarios_col = mongo_db['usuarios']
+            # Garantir índice (idempotente)
+            usuarios_col.create_index([('username', ASCENDING)], unique=True, name='idx_unique_username')
+            admin_fields = {
+                'email': 'admin@local',
+                'nome': 'Administrador',
+                'password_hash': generate_password_hash('admin'),
+                'ativo': True,
+                'nivel_acesso': 'super_admin',
+                'data_criacao': datetime.utcnow(),
+                'ultimo_login': None,
+                'central_id': None,
+                'almoxarifado_id': None,
+                'sub_almoxarifado_id': None,
+                'setor_id': None,
             }
-            app.logger.info(f'Configurações TLS aplicadas: {ssl_config}')
-        
-        mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000, **ssl_config)
-        mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-
-        # Verifica conectividade
-        mongo_client.admin.command('ping')
-        app.logger.info(f"MongoDB conectado com sucesso (db='{mongo_db.name}', primary={use_primary})")
-        
-        # Se MongoDB é o principal, inicializa os índices
-        if use_primary:
-            from models_mongo import init_mongodb
-            init_mongodb()
-            app.logger.info("Índices MongoDB inicializados")
-            
-    except Exception as e:
-        # Tratamento específico para erros SSL - tenta fallbacks progressivos
-        if 'SSL' in str(e) or 'TLS' in str(e) or 'ssl' in str(e).lower() or 'handshake' in str(e).lower():
-            app.logger.error(f'=== ERRO SSL DETECTADO: {e} ===')
-            app.logger.info('Tentando fallbacks SSL progressivos...')
-            
-            # Fallback 1: Tentar sem SSL
-            try:
-                app.logger.info('Fallback 1: Tentando conexão sem SSL...')
-                fallback_config = {'ssl': False, 'tls': False}
-                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=10000, **fallback_config)
-                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                mongo_client.admin.command('ping')
-                app.logger.warning("MongoDB conectado com fallback SSL desabilitado")
-                
-                if use_primary:
-                    from models_mongo import init_mongodb
-                    init_mongodb()
-                    app.logger.info("Índices MongoDB inicializados")
-                return
-            except Exception as e1:
-                app.logger.warning(f'Fallback 1 falhou: {e1}')
-            
-            # Fallback 2: Tentar com configurações TLS mais permissivas
-            try:
-                app.logger.info('Fallback 2: Tentando com TLS mais permissivo...')
-                fallback_config = {
-                    'tls': True,
-                    'tlsAllowInvalidCertificates': True,
-                    'tlsAllowInvalidHostnames': True,
-                    'tlsDisableOCSPEndpointCheck': True
-                }
-                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=15000, **fallback_config)
-                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                mongo_client.admin.command('ping')
-                app.logger.warning("MongoDB conectado com fallback TLS permissivo")
-                
-                if use_primary:
-                    from models_mongo import init_mongodb
-                    init_mongodb()
-                    app.logger.info("Índices MongoDB inicializados")
-                return
-            except Exception as e2:
-                app.logger.warning(f'Fallback 2 falhou: {e2}')
-            
-            # Fallback 3: Tentar com configurações mínimas
-            try:
-                app.logger.info('Fallback 3: Tentando com configurações mínimas...')
-                fallback_config = {
-                    'tls': True
-                }
-                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=20000, **fallback_config)
-                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                mongo_client.admin.command('ping')
-                app.logger.warning("MongoDB conectado com fallback TLS mínimo")
-                
-                if use_primary:
-                    from models_mongo import init_mongodb
-                    init_mongodb()
-                    app.logger.info("Índices MongoDB inicializados")
-                return
-            except Exception as e3:
-                app.logger.warning(f'Fallback 3 falhou: {e3}')
-            
-            # Fallback 4: Tentar apenas com a URI (sem configurações extras)
-            try:
-                app.logger.info('Fallback 4: Tentando apenas com URI padrão...')
-                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=30000)
-                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                mongo_client.admin.command('ping')
-                app.logger.warning("MongoDB conectado com URI padrão")
-                
-                if use_primary:
-                    from models_mongo import init_mongodb
-                    init_mongodb()
-                    app.logger.info("Índices MongoDB inicializados")
-                return
-            except Exception as e4:
-                app.logger.warning(f'Fallback 4 falhou: {e4}')
-            
-            # Fallback 5: Tentar sem TLS (último recurso para problemas SSL no Render)
-            try:
-                app.logger.info('Fallback 5: Tentando SEM TLS (último recurso)...')
-                # Remove parâmetros TLS da URI se existirem
-                no_tls_uri = uri
-                tls_params = ['tls=true', 'ssl=true', 'tlsAllowInvalidCertificates=true', 
-                             'tlsAllowInvalidHostnames=true', 'tlsInsecure=true']
-                for param in tls_params:
-                    no_tls_uri = no_tls_uri.replace(f'&{param}', '').replace(f'?{param}', '?').replace(f'{param}&', '')
-                
-                # Adiciona ssl=false explicitamente
-                separator = '&' if '?' in no_tls_uri else '?'
-                no_tls_uri = f"{no_tls_uri}{separator}ssl=false"
-                
-                app.logger.info(f'Tentando URI sem TLS: {no_tls_uri[:80]}...')
-                mongo_client = MongoClient(no_tls_uri, serverSelectionTimeoutMS=15000)
-                mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                mongo_client.admin.command('ping')
-                app.logger.warning("MongoDB conectado SEM TLS (último recurso)")
-                
-                if use_primary:
-                    from models_mongo import init_mongodb
-                    init_mongodb()
-                    app.logger.info("Índices MongoDB inicializados")
-                return
-            except Exception as e5:
-                app.logger.warning(f'Fallback 5 (sem TLS) falhou: {e5}')
-            
-            # Fallback 6: Tentar com mongodb:// em vez de mongodb+srv:// (problemas DNS no Render)
-            if 'mongodb+srv://' in uri:
-                try:
-                    app.logger.info('Fallback 6: Tentando mongodb:// em vez de mongodb+srv://...')
-                    # Converte mongodb+srv para mongodb direto
-                    direct_uri = uri.replace('mongodb+srv://', 'mongodb://')
-                    # Remove o nome do banco da URI se estiver presente
-                    if '/' in direct_uri.split('@')[1]:
-                        parts = direct_uri.split('/')
-                        direct_uri = '/'.join(parts[:-1]) + ':27017/' + parts[-1]
-                    else:
-                        direct_uri = direct_uri.replace('@', '@').replace('.mongodb.net', '.mongodb.net:27017')
-                    
-                    app.logger.info(f'Tentando URI direta: {direct_uri[:80]}...')
-                    mongo_client = MongoClient(direct_uri, serverSelectionTimeoutMS=15000)
-                    mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                    mongo_client.admin.command('ping')
-                    app.logger.warning("MongoDB conectado com URI direta (sem SRV)")
-                    
-                    if use_primary:
-                        from models_mongo import init_mongodb
-                        init_mongodb()
-                        app.logger.info("Índices MongoDB inicializados")
-                    return
-                except Exception as e6:
-                    app.logger.warning(f'Fallback 6 (URI direta) falhou: {e6}')
-            
-            # Se todos os fallbacks SSL falharam, continua para outros tratamentos
-            app.logger.error('Todos os fallbacks TLS falharam, tentando outras correções...')
-        
-        # Tratamento específico para InvalidURI - tenta uma última correção
-        if 'InvalidURI' in str(type(e)) or 'MongoDB URI options are key=value pairs' in str(e):
-            app.logger.error(f'=== DEBUG RENDER: Erro InvalidURI detectado ===')
-            app.logger.error(f'Erro InvalidURI: {e}')
-            app.logger.error(f'Tipo do erro: {type(e)}')
-            app.logger.error(f'URI que causou o erro: {repr(uri)}')
-            app.logger.warning(f'Tentando correção de emergência...')
-            
-            # Tenta uma correção de emergência removendo todas as opções
-            try:
-                if '?' in uri:
-                    base_uri = uri.split('?', 1)[0]
-                    app.logger.info(f'URI base para emergência: {repr(base_uri)}')
-                    app.logger.info(f'Tentando conectar apenas com URI base: {base_uri[:50]}...')
-                    mongo_client = MongoClient(base_uri, serverSelectionTimeoutMS=5000)
-                    mongo_db = mongo_client.get_database(db_name) if db_name else mongo_client.get_default_database()
-                    mongo_client.admin.command('ping')
-                    app.logger.warning("MongoDB conectado com URI base (sem opções)")
-                    
-                    # Se MongoDB é o principal, inicializa os índices
-                    if use_primary:
-                        from models_mongo import init_mongodb
-                        init_mongodb()
-                        app.logger.info("Índices MongoDB inicializados")
-                    return
-                else:
-                    raise e  # Re-lança se não há opções para remover
-            except Exception as e2:
-                error_msg = f'URI do MongoDB malformada mesmo após correção: {e}. Original: {e2}'
-                app.logger.error(error_msg)
-        elif 'ServerSelectionTimeoutError' in str(type(e)):
-            if 'SSL' in str(e) or 'TLS' in str(e) or 'ssl' in str(e).lower():
-                error_msg = f'Timeout ao conectar ao MongoDB: {e}. Problema SSL/TLS detectado. Verifique se o servidor está acessível e as configurações SSL estão corretas'
+            result = usuarios_col.update_one(
+                {'username': 'admin'},
+                {'$set': {'username': 'admin', **admin_fields}},
+                upsert=True
+            )
+            if result.matched_count:
+                print('[Mongo Seed] Usuário admin existente atualizado com senha padrão "admin".')
             else:
-                error_msg = f'Timeout ao conectar ao MongoDB: {e}. Verifique se o servidor está acessível'
-        elif 'Authentication' in str(e):
-            error_msg = f'Erro de autenticação MongoDB: {e}. Verifique usuário e senha'
-        elif 'SSL' in str(e) or 'TLS' in str(e) or 'ssl' in str(e).lower():
-            error_msg = f'Erro SSL/TLS ao conectar ao MongoDB: {e}. Problema de certificado ou handshake SSL'
-        else:
-            error_msg = f'Falha ao conectar ao MongoDB: {e}'
-        
-        app.logger.error(error_msg)
-        
-        if use_primary:
-            raise ConnectionError(error_msg)
-        # Mantém a aplicação rodando se MongoDB não é principal
-        mongo_client = None
-        mongo_db = None
-
-
-def get_mongo_db():
-    """Retorna a instância do banco MongoDB"""
-    return mongo_db
-
-
-def is_mongo_available():
-    """Verifica se MongoDB está disponível"""
-    return mongo_client is not None and mongo_db is not None
+                print('[Mongo Seed] Usuário admin criado com senha padrão "admin".')
+        except Exception as e:
+            print(f'[Mongo Seed] Falha ao semear/atualizar usuário admin: {e}')
+    return mongo_client, mongo_db

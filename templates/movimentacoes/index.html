@@ -106,6 +106,7 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="produtoTransferencia" class="form-label">Produto *</label>
+                                <input type="text" class="form-control mb-2" id="buscaProdutoTransferencia" placeholder="Buscar produto por nome ou código...">
                                 <select class="form-select" id="produtoTransferencia" required onchange="carregarLocaisProduto(); carregarTiposDestino();">
                                     <option value="">Selecione um produto...</option>
                                 </select>
@@ -193,6 +194,7 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="produtoDistribuicao" class="form-label">Produto *</label>
+                                <input type="text" class="form-control mb-2" id="buscaProdutoDistribuicao" placeholder="Buscar produto por nome ou código...">
                                 <select class="form-select" id="produtoDistribuicao" required onchange="carregarLocaisProdutoDistribuicao()">
                                     <option value="">Selecione um produto...</option>
                                 </select>
@@ -271,18 +273,27 @@
 <script type="application/json" id="almoxarifados-data">{{ almoxarifados | tojson | safe }}</script>
 <script type="application/json" id="sub-almoxarifados-data">{{ sub_almoxarifados | tojson | safe }}</script>
 <script type="application/json" id="setores-data">{{ setores | tojson | safe }}</script>
+<script type="application/json" id="use-mongo-flag">{{ 'true' if use_mongo else 'false' }}</script>
 
 <script>
 let currentPage = 1;
 const itemsPerPage = 20;
 
 // Carregar dados dos locais
-const locaisData = {
-    centrais: JSON.parse(document.getElementById('centrais-data')?.textContent || '[]'),
-    almoxarifados: JSON.parse(document.getElementById('almoxarifados-data')?.textContent || '[]'),
-    sub_almoxarifados: JSON.parse(document.getElementById('sub-almoxarifados-data')?.textContent || '[]'),
-    setores: JSON.parse(document.getElementById('setores-data')?.textContent || '[]')
-};
+const centraisEl = document.getElementById('centrais-data');
+const almoxEl = document.getElementById('almoxarifados-data');
+const subEl = document.getElementById('sub-almoxarifados-data');
+const setoresEl = document.getElementById('setores-data');
+
+// Inicialização defensiva dos dados de locais (evita erros de parser do linter)
+const locaisData = {};
+locaisData.centrais = JSON.parse((centraisEl && centraisEl.textContent) ? centraisEl.textContent : '[]');
+locaisData.almoxarifados = JSON.parse((almoxEl && almoxEl.textContent) ? almoxEl.textContent : '[]');
+locaisData.sub_almoxarifados = JSON.parse((subEl && subEl.textContent) ? subEl.textContent : '[]');
+locaisData.setores = JSON.parse((setoresEl && setoresEl.textContent) ? setoresEl.textContent : '[]');
+
+// Indica se estamos em modo MongoDB (IDs são strings)
+const USE_MONGO = (document.getElementById('use-mongo-flag') && document.getElementById('use-mongo-flag').textContent === 'true');
 
 // Carregar movimentações
 function carregarMovimentacoes(page = 1) {
@@ -302,18 +313,20 @@ function carregarMovimentacoes(page = 1) {
         if (filtros[key]) params.append(key, filtros[key]);
     });
     
-    fetch(`/api/movimentacoes?${params.toString()}`)
-        .then(response => response.json())
+    window.fetchJson(`/api/movimentacoes?${params.toString()}`)
         .then(data => {
             if (data.error) {
                 throw new Error(data.error);
             }
-            
             renderizarMovimentacoes(data.items);
             renderizarPaginacao(data.pagination);
         })
         .catch(error => {
             console.error('Erro:', error);
+            // Se sessão expirar, o utilitário global já alerta e redireciona; evita poluir a tabela
+            if (String(error && error.message).includes('Sessão expirada')) {
+                return;
+            }
             document.getElementById('movimentacoesTableBody').innerHTML = `
                 <tr>
                     <td colspan="8" class="text-center text-danger">
@@ -356,8 +369,8 @@ function renderizarMovimentacoes(movimentacoes) {
                 ${mov.tipo_movimentacao}
             </td>
             <td>
-                <strong>${mov.produto_codigo}</strong><br>
-                <small class="text-muted">${mov.produto_nome}</small>
+                <strong>${mov.produto_nome}</strong><br>
+                <small>${mov.produto_codigo}</small>
             </td>
             <td>${parseFloat(mov.quantidade).toLocaleString('pt-BR')} ${mov.produto_unidade}</td>
             <td>${mov.origem_nome || '-'}</td>
@@ -409,21 +422,33 @@ function filtrarMovimentacoes() {
 }
 
 // Carregar produtos para os selects
-function carregarProdutos() {
-    fetch('/api/produtos?ativo=true&per_page=1000')
-        .then(response => response.json())
+function carregarProdutos(searchTerm = '') {
+    const params = new URLSearchParams({ativo: 'true', per_page: '1000'});
+    if (searchTerm && searchTerm.trim() !== '') {
+        params.set('search', searchTerm.trim());
+    }
+    fetchJson('/api/produtos?' + params.toString())
         .then(data => {
             const produtos = data.items || [];
-            
             const selectTransferencia = document.getElementById('produtoTransferencia');
             const selectDistribuicao = document.getElementById('produtoDistribuicao');
-            
             const options = produtos.map(produto => 
-                `<option value="${produto.id}">${produto.codigo} - ${produto.nome}</option>`
+                `<option value="${produto.id}">${produto.codigo || ''} - ${produto.nome}</option>`
             ).join('');
-            
-            selectTransferencia.innerHTML = '<option value="">Selecione um produto...</option>' + options;
-            selectDistribuicao.innerHTML = '<option value="">Selecione um produto...</option>' + options;
+            if (selectTransferencia) {
+                const current = selectTransferencia.value;
+                selectTransferencia.innerHTML = '<option value="">Selecione um produto...</option>' + options;
+                if (current && [...selectTransferencia.options].some(o => o.value === current)) {
+                    selectTransferencia.value = current;
+                }
+            }
+            if (selectDistribuicao) {
+                const current2 = selectDistribuicao.value;
+                selectDistribuicao.innerHTML = '<option value="">Selecione um produto...</option>' + options;
+                if (current2 && [...selectDistribuicao.options].some(o => o.value === current2)) {
+                    selectDistribuicao.value = current2;
+                }
+            }
         })
         .catch(error => {
             console.error('Erro ao carregar produtos:', error);
@@ -440,75 +465,77 @@ function carregarLocaisOrigem() {
         select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
         return;
     }
-    
-    let locais = [];
-    switch (tipo) {
-        case 'almoxarifado':
-            locais = locaisData.almoxarifados;
-            break;
-        case 'sub_almoxarifado':
-            locais = locaisData.sub_almoxarifados;
-            break;
-        case 'setor':
-            locais = locaisData.setores;
-            break;
-    }
-    
-    // Se um produto estiver selecionado, mostrar apenas locais com estoque
-    if (produtoId) {
-        fetch(`/api/produtos/${produtoId}/estoque`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.estoques && data.estoques.length > 0) {
-                    const estoquesDoTipo = data.estoques.filter(estoque => 
-                        estoque.tipo === tipo && estoque.quantidade_disponivel > 0
-                    );
-                    
-                    const options = estoquesDoTipo
-                        .filter(estoque => estoque.local_id !== undefined && estoque.local_id !== null && estoque.local_id !== 'undefined')
-                        .map(estoque => {
 
-                            // Garantir que local_id é um número válido
-                            const localId = parseInt(estoque.local_id);
-                            if (isNaN(localId) || localId <= 0) {
-                                return null;
-                            }
-                            return `<option value="${localId}">${estoque.nome_local} (Disponível: ${estoque.quantidade_disponivel})</option>`;
-                        })
-                        .filter(option => option !== null)
-                        .join('');
-                    
-                    select.innerHTML = '<option value="">Selecione...</option>' + options;
-                } else {
-                    select.innerHTML = '<option value="">Nenhum local com estoque disponível</option>';
-                }
-            })
-            .catch(error => {
-                console.error('Erro ao carregar estoque:', error);
-                // Fallback para mostrar todos os locais
-                const options = locais
-                    .filter(local => local.id !== undefined && local.id !== null)
-                    .map(local => 
-                        `<option value="${local.id}">${local.nome}</option>`
-                    ).join('');
+    const buildLocaisPermitidos = async () => {
+        if (!produtoId) {
+            if (tipo === 'almoxarifado') return (locaisData.almoxarifados || []);
+            if (tipo === 'sub_almoxarifado') return (locaisData.sub_almoxarifados || []);
+            if (tipo === 'setor') return (locaisData.setores || []);
+            return [];
+        }
+        // Buscar informações do produto para obter a central
+        const produto = await fetchJson(`/api/produtos/${produtoId}`);
+        const produtoCentral = produto.central_id;
+
+        if (tipo === 'almoxarifado') {
+            return (locaisData.almoxarifados || [])
+                .filter(a => String(a.central_id) === String(produtoCentral));
+        } else if (tipo === 'sub_almoxarifado') {
+            const almoxIdsCentral = (locaisData.almoxarifados || [])
+                .filter(a => String(a.central_id) === String(produtoCentral))
+                .map(a => String(a.id));
+            return (locaisData.sub_almoxarifados || [])
+                .filter(sa => almoxIdsCentral.includes(String(sa.almoxarifado_id)));
+        } else if (tipo === 'setor') {
+            const almoxIdsCentral = (locaisData.almoxarifados || [])
+                .filter(a => String(a.central_id) === String(produtoCentral))
+                .map(a => String(a.id));
+            const subIdsCentral = (locaisData.sub_almoxarifados || [])
+                .filter(sa => almoxIdsCentral.includes(String(sa.almoxarifado_id)))
+                .map(sa => String(sa.id));
+            return (locaisData.setores || [])
+                .filter(s => subIdsCentral.includes(String(s.sub_almoxarifado_id)));
+        }
+        return [];
+    };
+
+    // Mostrar estado de carregamento
+    select.innerHTML = '<option value="">Carregando...</option>';
+
+    buildLocaisPermitidos()
+        .then(async locaisPermitidos => {
+            // Sem produto: apenas lista locais permitidos pelo tipo
+            if (!produtoId) {
+                const options = (locaisPermitidos || []).map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
                 select.innerHTML = '<option value="">Selecione...</option>' + options;
-            });
-    } else {
-        // Se nenhum produto selecionado, mostrar todos os locais
-        const options = locais
-            .filter(local => local.id !== undefined && local.id !== null && local.id !== 'undefined')
-            .map(local => {
-                // Garantir que id é um número válido
-                const localId = parseInt(local.id);
-                if (isNaN(localId) || localId <= 0) {
-                    return null;
-                }
-                return `<option value="${localId}">${local.nome}</option>`;
-            })
-            .filter(option => option !== null)
-            .join('');
-        select.innerHTML = '<option value="">Selecione...</option>' + options;
-    }
+                return;
+            }
+
+            // Com produto: intersectar com locais que têm estoque (ignorar estoque.tipo para evitar vazamento de sub-almoxarifados)
+            const estoqueData = await fetchJson(`/api/produtos/${produtoId}/estoque`);
+            const idsComEstoque = (Array.isArray(estoqueData.estoques) ? estoqueData.estoques : [])
+                .filter(e => e && e.quantidade_disponivel > 0)
+                .map(e => String(e.local_id));
+
+            const locaisFiltrados = (locaisPermitidos || []).filter(l => idsComEstoque.includes(String(l.id)));
+
+            if (!locaisFiltrados || locaisFiltrados.length === 0) {
+                select.innerHTML = '<option value="">Nenhum local com estoque disponível na central do produto</option>';
+            } else {
+                const options = locaisFiltrados.map(local => `<option value="${local.id}">${local.nome}</option>`).join('');
+                select.innerHTML = '<option value="">Selecione...</option>' + options;
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar locais de origem:', error);
+            // Fallback para mostrar todos os locais do tipo (sem filtrar por estoque)
+            let locais = [];
+            if (tipo === 'almoxarifado') locais = (locaisData.almoxarifados || []);
+            else if (tipo === 'sub_almoxarifado') locais = (locaisData.sub_almoxarifados || []);
+            else if (tipo === 'setor') locais = (locaisData.setores || []);
+            const options = locais.map(local => `<option value="${local.id}">${local.nome}</option>`).join('');
+            select.innerHTML = '<option value="">Selecione...</option>' + options;
+        });
 }
 
 // Carregar tipos de destino disponíveis baseados na central do produto
@@ -529,31 +556,45 @@ function carregarTiposDestino() {
     }
     
     // Buscar informações do produto para verificar quais tipos estão disponíveis
-    fetch(`/api/produtos/${produtoId}`)
-        .then(response => response.json())
-        .then(produto => {
+    fetchJson(`/api/produtos/${produtoId}`)
+        .then(async produto => {
             let opcoesDisponiveis = [];
-            
-            // Central não é mais um local de estoque - removido
-            
-            // Verificar se existem almoxarifados da central
-            const almoxarifadosDaCentral = locaisData.almoxarifados.filter(almox => almox.central_id === produto.central_id);
-            if (almoxarifadosDaCentral.length > 0) {
-                opcoesDisponiveis.push('<option value="almoxarifado">Almoxarifado</option>');
-            }
-            
-            // Verificar se existem sub-almoxarifados da central
-            const almoxarifadosIds = almoxarifadosDaCentral.map(almox => almox.id);
-            const subAlmoxarifadosDaCentral = locaisData.sub_almoxarifados.filter(subAlmox => almoxarifadosIds.includes(subAlmox.almoxarifado_id));
-            if (subAlmoxarifadosDaCentral.length > 0) {
-                opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
-            }
-            
-            // Verificar se existem setores da central
-            const subAlmoxarifadosIds = subAlmoxarifadosDaCentral.map(subAlmox => subAlmox.id);
-            const setoresDaCentral = locaisData.setores.filter(setor => subAlmoxarifadosIds.includes(setor.sub_almoxarifado_id));
-            if (setoresDaCentral.length > 0) {
-                opcoesDisponiveis.push('<option value="setor">Setor</option>');
+
+            if (USE_MONGO) {
+                // Em Mongo, buscar listas via API e comparar por string central_id
+                const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                const almoxarifadosDaCentral = almoxResp.items || [];
+                if (almoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="almoxarifado">Almoxarifado</option>');
+                }
+                const almoxIds = almoxarifadosDaCentral.map(a => a.id);
+                const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                const subAlmoxarifadosDaCentral = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                if (subAlmoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
+                }
+                const subIds = subAlmoxarifadosDaCentral.map(sa => sa.id);
+                const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
+                const setoresDaCentral = (setoresResp.items || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                if (setoresDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="setor">Setor</option>');
+                }
+            } else {
+                // SQL: usar dados carregados do template sem chamadas à API
+                const almoxarifadosDaCentral = (locaisData.almoxarifados || []).filter(almox => almox.central_id === produto.central_id);
+                if (almoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="almoxarifado">Almoxarifado</option>');
+                }
+                const almoxIds = almoxarifadosDaCentral.map(almox => almox.id);
+                const subAlmoxarifadosDaCentral = (locaisData.sub_almoxarifados || []).filter(subAlmox => almoxIds.includes(subAlmox.almoxarifado_id));
+                if (subAlmoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
+                }
+                const subIds = subAlmoxarifadosDaCentral.map(subAlmox => subAlmox.id);
+                const setoresDaCentral = (locaisData.setores || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                if (setoresDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="setor">Setor</option>');
+                }
             }
             
             if (opcoesDisponiveis.length === 0) {
@@ -585,30 +626,46 @@ function carregarLocaisDestino() {
     }
     
     // Buscar informações do produto para obter a central
-    fetch(`/api/produtos/${produtoId}`)
-        .then(response => response.json())
-        .then(produto => {
+    fetchJson(`/api/produtos/${produtoId}`)
+        .then(async produto => {
             let locais = [];
             
-            switch (tipo) {
-                case 'almoxarifado':
-                    // Permitir apenas almoxarifados da central do produto
-                    locais = locaisData.almoxarifados.filter(almox => almox.central_id === produto.central_id);
-                    break;
-                case 'sub_almoxarifado':
-                    // Permitir apenas sub-almoxarifados dos almoxarifados da central do produto
-                    const almoxarifadosDaCentral = locaisData.almoxarifados.filter(almox => almox.central_id === produto.central_id);
-                    const almoxarifadosIds = almoxarifadosDaCentral.map(almox => almox.id);
-                    locais = locaisData.sub_almoxarifados.filter(subAlmox => almoxarifadosIds.includes(subAlmox.almoxarifado_id));
-                    break;
-                case 'setor':
-                    // Permitir apenas setores dos sub-almoxarifados da central do produto
-                    const almoxarifadosDaCentralSetor = locaisData.almoxarifados.filter(almox => almox.central_id === produto.central_id);
-                    const almoxarifadosIdsSetor = almoxarifadosDaCentralSetor.map(almox => almox.id);
-                    const subAlmoxarifadosDaCentral = locaisData.sub_almoxarifados.filter(subAlmox => almoxarifadosIdsSetor.includes(subAlmox.almoxarifado_id));
-                    const subAlmoxarifadosIds = subAlmoxarifadosDaCentral.map(subAlmox => subAlmox.id);
-                    locais = locaisData.setores.filter(setor => subAlmoxarifadosIds.includes(setor.sub_almoxarifado_id));
-                    break;
+            if (USE_MONGO) {
+                // Em Mongo, buscar listas via API e montar conforme o tipo
+                if (tipo === 'almoxarifado') {
+                    const resp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                    locais = resp.items || [];
+                } else if (tipo === 'sub_almoxarifado') {
+                    const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                    const almoxIds = (almoxResp.items || []).map(a => a.id);
+                    const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                    locais = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                } else if (tipo === 'setor') {
+                    const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                    const almoxIds = (almoxResp.items || []).map(a => a.id);
+                    const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                    const subIds = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id)).map(sa => sa.id);
+                    const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
+                    locais = (setoresResp.items || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                }
+            } else {
+                // SQL: montar listas a partir dos dados embutidos no template
+                switch (tipo) {
+                    case 'almoxarifado':
+                        locais = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id);
+                        break;
+                    case 'sub_almoxarifado': {
+                        const almoxIds = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id).map(a => a.id);
+                        locais = (locaisData.sub_almoxarifados || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                        break;
+                    }
+                    case 'setor': {
+                        const almoxIds = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id).map(a => a.id);
+                        const subIds = (locaisData.sub_almoxarifados || []).filter(sa => almoxIds.includes(sa.almoxarifado_id)).map(sa => sa.id);
+                        locais = (locaisData.setores || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                        break;
+                    }
+                }
             }
             
             if (locais.length === 0) {
@@ -616,15 +673,7 @@ function carregarLocaisDestino() {
             } else {
                 const options = locais
                     .filter(local => local.id !== undefined && local.id !== null && local.id !== 'undefined')
-                    .map(local => {
-                        // Garantir que id é um número válido
-                        const localId = parseInt(local.id);
-                        if (isNaN(localId) || localId <= 0) {
-                            return null;
-                        }
-                        return `<option value="${localId}">${local.nome}</option>`;
-                    })
-                    .filter(option => option !== null)
+                    .map(local => `<option value="${local.id}">${local.nome}</option>`) // não forçar parseInt para suportar ObjectId
                     .join('');
                 
                 select.innerHTML = '<option value="">Selecione...</option>' + options;
@@ -662,8 +711,7 @@ function carregarLocaisOrigemDistribuicao() {
     
     // Se um produto estiver selecionado, mostrar apenas locais com estoque
     if (produtoId) {
-        fetch(`/api/produtos/${produtoId}/estoque`)
-            .then(response => response.json())
+        fetchJson(`/api/produtos/${produtoId}/estoque`)
             .then(data => {
                 if (data.estoques && data.estoques.length > 0) {
                     const estoquesDoTipo = data.estoques.filter(estoque => 
@@ -711,8 +759,7 @@ function carregarLocaisProdutoDistribuicao() {
     }
     
     // Buscar estoque do produto
-    fetch(`/api/produtos/${produtoId}/estoque`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
         .then(data => {
             if (data.estoques && data.estoques.length > 0) {
                 // Agrupar por tipo de local (apenas centrais, almoxarifados e sub-almoxarifados para distribuição)
@@ -732,9 +779,9 @@ function carregarLocaisProdutoDistribuicao() {
                 });
                 
                 // Se há apenas um tipo de local, selecionar automaticamente
-                const tipos = Object.keys(locaisPorTipo);
-                if (tipos.length === 1) {
-                    const tipoUnico = tipos[0];
+                const tiposDisponiveis = Object.keys(locaisPorTipo);
+                if (tiposDisponiveis.length === 1) {
+                    tipoUnico = tiposDisponiveis[0];
                     tipoOrigemSelect.value = tipoUnico;
                     
                     // Carregar locais deste tipo
@@ -749,7 +796,7 @@ function carregarLocaisProdutoDistribuicao() {
                     if (locais.length === 1) {
                         localOrigemSelect.value = locais[0].id;
                     }
-                } else if (tipos.length > 1) {
+                } else if (tiposDisponiveis.length > 1) {
                     // Mostrar mensagem informativa
                     localOrigemSelect.innerHTML = '<option value="">Produto disponível em múltiplos tipos de local - selecione o tipo primeiro</option>';
                 } else {
@@ -780,8 +827,7 @@ function carregarLocaisProduto() {
     }
     
     // Buscar estoque do produto
-    fetch(`/api/produtos/${produtoId}/estoque`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
         .then(data => {
             if (data.estoques && data.estoques.length > 0) {
                 // Agrupar por tipo de local
@@ -801,9 +847,9 @@ function carregarLocaisProduto() {
                 });
                 
                 // Se há apenas um tipo de local, selecionar automaticamente
-                const tipos = Object.keys(locaisPorTipo);
-                if (tipos.length === 1) {
-                    const tipoUnico = tipos[0];
+                const tiposDisponiveis = Object.keys(locaisPorTipo);
+                if (tiposDisponiveis.length === 1) {
+                    const tipoUnico = tiposDisponiveis[0];
                     tipoOrigemSelect.value = tipoUnico;
                     
                     // Carregar locais deste tipo
@@ -818,7 +864,7 @@ function carregarLocaisProduto() {
                     if (locais.length === 1) {
                         localOrigemSelect.value = locais[0].id;
                     }
-                } else if (tipos.length > 1) {
+                } else if (tiposDisponiveis.length > 1) {
                     // Mostrar mensagem informativa
                     localOrigemSelect.innerHTML = '<option value="">Produto disponível em múltiplos tipos de local - selecione o tipo primeiro</option>';
                 } else {
@@ -829,7 +875,7 @@ function carregarLocaisProduto() {
             }
         })
         .catch(error => {
-            console.error('Erro ao carregar estoque do produto:', error);
+            console.error('Erro ao carregar estoque:', error);
             localOrigemSelect.innerHTML = '<option value="">Erro ao carregar estoque</option>';
         });
 }
@@ -845,31 +891,32 @@ function executarTransferencia() {
     const motivo = document.getElementById('motivoTransferencia').value;
     const observacoes = document.getElementById('observacoesTransferencia').value;
     
-    // Validações
+    // Validações básicas
     if (!produtoId || !quantidade || !tipoOrigem || !localOrigem || !tipoDestino || !localDestino) {
         alert('Preencha todos os campos obrigatórios');
         return;
     }
     
-    if (!localOrigem || localOrigem === '' || localOrigem === 'undefined' || localOrigem === undefined || localOrigem === null || isNaN(parseInt(localOrigem))) {
-        alert('Por favor, selecione um local de origem válido.');
-        return;
-    }
-    
-    if (parseInt(localOrigem) <= 0) {
-        alert('Por favor, selecione um local de origem válido.');
-        return;
-    }
-    
-    // Validar local de destino
-    if (!localDestino || localDestino === '' || localDestino === 'undefined' || localDestino === undefined || localDestino === null || isNaN(parseInt(localDestino))) {
-        alert('Por favor, selecione um local de destino válido.');
-        return;
-    }
-    
-    if (parseInt(localDestino) <= 0) {
-        alert('Por favor, selecione um local de destino válido.');
-        return;
+    if (USE_MONGO) {
+        // Em Mongo, IDs são strings
+        if (!localOrigem || typeof localOrigem !== 'string') {
+            alert('Por favor, selecione um local de origem válido.');
+            return;
+        }
+        if (!localDestino || typeof localDestino !== 'string') {
+            alert('Por favor, selecione um local de destino válido.');
+            return;
+        }
+    } else {
+        // SQL: validar IDs numéricos
+        if (!localOrigem || localOrigem === '' || localOrigem === 'undefined' || localOrigem === undefined || localOrigem === null || isNaN(parseInt(localOrigem)) || parseInt(localOrigem) <= 0) {
+            alert('Por favor, selecione um local de origem válido.');
+            return;
+        }
+        if (!localDestino || localDestino === '' || localDestino === 'undefined' || localDestino === undefined || localDestino === null || isNaN(parseInt(localDestino)) || parseInt(localDestino) <= 0) {
+            alert('Por favor, selecione um local de destino válido.');
+            return;
+        }
     }
     
     if (parseFloat(quantidade) <= 0) {
@@ -877,32 +924,51 @@ function executarTransferencia() {
         return;
     }
     
-    // Preparar dados
-    const origemId = parseInt(localOrigem);
-    const destinoId = parseInt(localDestino);
-    
-    // Validação final dos IDs
-    if (isNaN(origemId) || origemId <= 0) {
-        alert('ID do local de origem inválido');
-        return;
-    }
-    
-    if (isNaN(destinoId) || destinoId <= 0) {
-        alert('ID do local de destino inválido');
-        return;
-    }
+    // Preparar IDs conforme modo
+    const origemId = USE_MONGO ? String(localOrigem) : parseInt(localOrigem);
+    const destinoId = USE_MONGO ? String(localDestino) : parseInt(localDestino);
+    const produtoIdPayload = USE_MONGO ? String(produtoId) : parseInt(produtoId);
     
     // Validar se origem e destino são diferentes
     if (tipoOrigem === tipoDestino && origemId === destinoId) {
         alert('Não é possível transferir de um local para ele mesmo. Por favor, selecione um local de destino diferente.');
         return;
     }
-    
+
+    // Validar se origem e destino pertencem à mesma central
+    const idEq = (a, b) => String(a) === String(b);
+    const getCentralIdByLocal = (tipo, id) => {
+        if (tipo === 'almoxarifado') {
+            const a = (locaisData.almoxarifados || []).find(x => idEq(x.id, id));
+            return a ? String(a.central_id) : null;
+        } else if (tipo === 'sub_almoxarifado') {
+            const sub = (locaisData.sub_almoxarifados || []).find(x => idEq(x.id, id));
+            if (!sub) return null;
+            const alm = (locaisData.almoxarifados || []).find(x => idEq(x.id, sub.almoxarifado_id));
+            return alm ? String(alm.central_id) : null;
+        } else if (tipo === 'setor') {
+            const set = (locaisData.setores || []).find(x => idEq(x.id, id));
+            if (!set) return null;
+            const sub = (locaisData.sub_almoxarifados || []).find(x => idEq(x.id, set.sub_almoxarifado_id));
+            if (!sub) return null;
+            const alm = (locaisData.almoxarifados || []).find(x => idEq(x.id, sub.almoxarifado_id));
+            return alm ? String(alm.central_id) : null;
+        }
+        return null;
+    };
+
+    const centralOrigem = getCentralIdByLocal(tipoOrigem, origemId);
+    const centralDestino = getCentralIdByLocal(tipoDestino, destinoId);
+    if (centralOrigem && centralDestino && centralOrigem !== centralDestino) {
+        alert('Não é possível transferir entre locais de centrais diferentes.');
+        return;
+    }
+
     const dadosTransferencia = {
-        produto_id: parseInt(produtoId),
+        produto_id: produtoIdPayload,
         quantidade: parseFloat(quantidade),
-        motivo: motivo,
-        observacoes: observacoes,
+        motivo: motivo || null,
+        observacoes: observacoes || null,
         origem: {
             tipo: tipoOrigem,
             id: origemId
@@ -912,23 +978,14 @@ function executarTransferencia() {
             id: destinoId
         }
     };
-    
+
     // Enviar para API
-    fetch('/api/movimentacoes/transferencia', {
+    fetchJson('/api/movimentacoes/transferencia', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify(dadosTransferencia)
-    })
-    .then(response => {
-        if (response.ok) {
-            return response.json();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Erro ao executar transferência');
-            });
-        }
     })
     .then(result => {
         alert('Transferência executada com sucesso!');
@@ -961,7 +1018,7 @@ function executarDistribuicao() {
     // Coletar setores selecionados
     const setoresSelecionados = [];
     document.querySelectorAll('#setoresDistribuicao input[type="checkbox"]:checked').forEach(checkbox => {
-        setoresSelecionados.push(parseInt(checkbox.value));
+        setoresSelecionados.push(USE_MONGO ? String(checkbox.value) : parseInt(checkbox.value));
     });
     
     // Validações
@@ -980,35 +1037,25 @@ function executarDistribuicao() {
         return;
     }
     
-    // Preparar dados
     const dadosDistribuicao = {
-        produto_id: parseInt(produtoId),
+        produto_id: USE_MONGO ? String(produtoId) : parseInt(produtoId),
         quantidade_total: parseFloat(quantidade),
         motivo: motivo,
         observacoes: observacoes,
         origem: {
             tipo: tipoOrigem,
-            id: parseInt(localOrigem)
+            id: USE_MONGO ? String(localOrigem) : parseInt(localOrigem)
         },
         setores_destino: setoresSelecionados
     };
     
     // Enviar para API
-    fetch('/api/movimentacoes/distribuicao', {
+    fetchJson('/api/movimentacoes/distribuicao', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify(dadosDistribuicao)
-    })
-    .then(response => {
-        if (response.ok) {
-            return response.json();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Erro ao executar distribuição');
-            });
-        }
     })
     .then(result => {
         alert(`Distribuição executada com sucesso! ${result.movimentacoes_criadas} movimentações criadas.`);
@@ -1037,6 +1084,20 @@ document.getElementById('filtroProduto').addEventListener('input',
     debounce(() => filtrarMovimentacoes(), 500)
 );
 
+// Listeners de busca nos selects de produtos
+const inputBuscaTransf = document.getElementById('buscaProdutoTransferencia');
+if (inputBuscaTransf) {
+    inputBuscaTransf.addEventListener('input', debounce(() => {
+        carregarProdutos(inputBuscaTransf.value);
+    }, 400));
+}
+const inputBuscaDist = document.getElementById('buscaProdutoDistribuicao');
+if (inputBuscaDist) {
+    inputBuscaDist.addEventListener('input', debounce(() => {
+        carregarProdutos(inputBuscaDist.value);
+    }, 400));
+}
+
 // Função debounce
 function debounce(func, wait) {
     let timeout;
@@ -1054,6 +1115,19 @@ function debounce(func, wait) {
 document.addEventListener('DOMContentLoaded', () => {
     carregarMovimentacoes(1);
     carregarProdutos();
+    window.addEventListener('DOMContentLoaded', () => {
+        if (USE_MONGO) {
+            const tipoOrigemDist = document.getElementById('tipoOrigemDistribuicao');
+            if (tipoOrigemDist) {
+                // Remover opção Central em modo Mongo
+                Array.from(tipoOrigemDist.options).forEach(opt => {
+                    if (opt.value === 'central') {
+                        opt.remove();
+                    }
+                });
+            }
+        }
+    });
 });
 </script>
 {% endblock %}

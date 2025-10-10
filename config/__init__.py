@@ -9,14 +9,13 @@ load_dotenv()
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     
-    # Configuração do banco de dados principal - MongoDB
-    USE_MONGODB_PRIMARY = True
-    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://localhost:27017/'
-    MONGO_DB = os.environ.get('MONGO_DB') or 'almox_sms'
-    
-    # Configuração SQLAlchemy (mantido para compatibilidade/fallback)
+    # Configuração de banco de dados RELACIONAL (mantido apenas para compatibilidade)
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///almox_sms.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # Configuração de banco de dados MongoDB (persistência oficial)
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://localhost:27017/almox_sms'
+    MONGO_DB = os.environ.get('MONGO_DB') or 'almox_sms'
     
     # Configurações da aplicação
     ITEMS_PER_PAGE = 20
@@ -36,19 +35,13 @@ class Config:
 
 class DevelopmentConfig(Config):
     DEBUG = True
-    # MongoDB para desenvolvimento
-    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://localhost:27017/'
-    MONGO_DB = os.environ.get('MONGO_DB') or 'almox_sms_dev'
-    # SQLAlchemy como fallback
     SQLALCHEMY_DATABASE_URI = os.environ.get('DEV_DATABASE_URL') or 'sqlite:///almox_sms_dev.db'
 
 class ProductionConfig(Config):
     DEBUG = False
-    # MongoDB para produção (banco principal)
-    MONGO_URI = os.environ.get('MONGO_URI')  # Deve ser definido em produção
-    MONGO_DB = os.environ.get('MONGO_DB') or 'almox_sms'
-    # Usar apenas MongoDB em produção (sem SQLAlchemy/PostgreSQL)
-    USE_MONGODB_PRIMARY = True
+    # Em produção, use PostgreSQL ou outro banco robusto
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
+        'postgresql://username:password@localhost/almox_sms'
     
     # Configurações de segurança para produção
     SESSION_COOKIE_SECURE = True  # Requer HTTPS
@@ -56,10 +49,6 @@ class ProductionConfig(Config):
 
 class TestingConfig(Config):
     TESTING = True
-    # MongoDB para testes (banco separado)
-    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://localhost:27017/'
-    MONGO_DB = 'almox_sms_test'
-    # SQLAlchemy para testes (em memória)
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
 
 config = {

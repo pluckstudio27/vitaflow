@@ -36,19 +36,19 @@
                                 <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">Nome Completo</label>
-                                        <p class="form-control-plaintext">{{ user.nome_completo }}</p>
+                                        <p class="form-control-plaintext">{{ user.nome_completo or user.username or user.email }}</p>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">Usuário</label>
-                                        <p class="form-control-plaintext">{{ user.username }}</p>
+                                        <p class="form-control-plaintext">{{ user.username or user.email }}</p>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">E-mail</label>
-                                        <p class="form-control-plaintext">{{ user.email }}</p>
+                                        <p class="form-control-plaintext">{{ user.email or '-' }}</p>
                                     </div>
                                 </div>
                                 <div class="col-md-6">

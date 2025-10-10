@@ -167,24 +167,6 @@ function carregarDados() {
         fetch('/api/hierarquia/locais').then(r => r.json())
     ])
     .then(([estoque, locais]) => {
-        // Verificar se as respostas são válidas
-        if (estoque && estoque.error) {
-            throw new Error(`Erro ao carregar produtos: ${estoque.error}`);
-        }
-        if (locais && locais.error) {
-            throw new Error(`Erro ao carregar locais: ${locais.error}`);
-        }
-        
-        // Verificar se estoque é um array
-        if (!Array.isArray(estoque)) {
-            throw new Error('Dados de estoque inválidos - esperado array');
-        }
-        
-        // Verificar se locais é um array
-        if (!Array.isArray(locais)) {
-            throw new Error('Dados de locais inválidos - esperado array');
-        }
-        
         dadosEstoque = estoque;
         dadosFiltrados = [...dadosEstoque];
         
@@ -196,7 +178,7 @@ function carregarDados() {
         console.error('Erro ao carregar dados:', error);
         document.getElementById('tabelaEstoque').innerHTML = `
             <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i> Erro ao carregar dados: ${error.message}
+                <i class="fas fa-exclamation-triangle"></i> Erro ao carregar dados do estoque
             </div>
         `;
     });
@@ -394,7 +376,7 @@ function renderizarTabela() {
                     }) : '-'}
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes(${item.produto_id}, ${item.local_id})">
+                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes('${item.produto_id}', '${item.local_id}')">
                         <i class="fas fa-eye"></i>
                     </button>
                 </td>
