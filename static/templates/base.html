@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Almox SMS{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script>
+        // Utilitário global para requisições JSON com tratamento de erros
+        window.fetchJson = async function(url, options = {}) {
+            const resp = await fetch(url, Object.assign({ credentials: 'same-origin' }, options));
+
+            // Redirecionar em 401
+            if (resp.status === 401) {
+                try {
+                    const ct401 = resp.headers.get('content-type') || '';
+                    if (ct401.includes('application/json')) {
+                        const data401 = await resp.json();
+                        if (data401 && data401.redirect) {
+                            window.location.href = data401.redirect;
+                            throw new Error('Não autenticado (401)');
+                        }
+                    }
+                } catch (_) { /* ignore */ }
+                // Fallback para login
+                window.location.href = '/auth/login';
+                throw new Error('Não autenticado (401)');
+            }
+
+            const ct = resp.headers.get('content-type') || '';
+
+            // Tratar erros HTTP não-OK
+            if (!resp.ok) {
+                if (ct.includes('application/json')) {
+                    const errData = await resp.json().catch(() => null);
+                    const msg = errData && (errData.error || errData.message);
+                    throw new Error(msg || `Erro HTTP ${resp.status}`);
+                } else {
+                    const text = await resp.text();
+                    if (text.trim().startsWith('<')) {
+                        throw new SyntaxError(`Resposta HTML inesperada (status ${resp.status}): ${text.substring(0, 120)}...`);
+                    }
+                    throw new Error(`Erro HTTP ${resp.status}: ${text.substring(0, 120)}...`);
+                }
+            }
+
+            // OK: tentar parsear JSON
+            if (ct.includes('application/json')) {
+                return await resp.json();
+            } else {
+                const text = await resp.text();
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    if (text.trim().startsWith('<')) {
+                        throw new SyntaxError(`Conteúdo HTML recebido em vez de JSON: ${text.substring(0, 120)}...`);
+                    }
+                    throw new SyntaxError(`Conteúdo não-JSON recebido: ${text.substring(0, 120)}...`);
+                }
+            }
+        };
+    </script>
+    <style>
+        /* Reset básico para evitar espaços desnecessários */
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow-x: hidden;
+        }
+        
+        .sidebar {
+            width: 250px;
+            min-width: 250px;
+            height: calc(100vh - 60px);
+            margin-top: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transition: all 0.3s ease;
+            z-index: 1001;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar.collapsed {
+            width: 60px;
+            min-width: 60px;
+        }
+        
+        .sidebar.collapsed .sidebar-brand h4,
+        .sidebar.collapsed .sidebar-brand small,
+        .sidebar.collapsed .menu-text {
+            display: none;
+        }
+        
+        .sidebar.collapsed .menu-item {
+            justify-content: center;
+            padding: 12px 0;
+        }
+        
+        .sidebar.collapsed .menu-item i {
+            margin-right: 0;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .menu-item i {
+            margin-right: 12px;
+            width: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .menu-text {
+            transition: opacity 0.3s ease;
+        }
+        
+        .sidebar.collapsed .menu-text {
+            opacity: 0;
+        }
+        
+
+        
+        .sidebar.show {
+            left: 0;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.8);
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin: 5px 10px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            color: white;
+            background-color: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+        
+        .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+
+        
+        .main-content {
+            margin-left: 0; /* zera a margem esquerda do conteúdo */
+            margin-top: 60px; /* Espaço para a topbar fixa */
+            padding: 15px 15px 15px 0; /* sem padding à esquerda para colar no nav */
+            height: calc(100vh - 60px);
+            background-color: #f8f9fa;
+            transition: margin-left 0.3s ease;
+            flex: 1;
+            overflow-y: auto;
+            /* Remover width fixo para usar flex naturalmente */
+        }
+        
+        .main-content.collapsed {
+            margin-left: 0; /* mantém zerado também quando colapsado */
+            /* Remover width fixo para usar flex naturalmente */
+        }
+        
+        .layout-container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .main-content.expanded {
+            margin-left: 0;
+        }
+        
+        .menu-toggle {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        
+        .menu-toggle:hover {
+            background: rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.5);
+            transform: scale(1.05);
+        }
+        
+        .sidebar-brand {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar-brand h4 {
+            margin: 0;
+            font-weight: bold;
+        }
+        
+        /* Header/Topbar */
+        .topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1002;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex: 1;
+        }
+        
+        .topbar-center {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+        }
+        
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex: 1;
+        }
+        
+        .topbar-title {
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        #current-datetime {
+            font-family: 'Courier New', monospace;
+            font-weight: 500;
+        }
+        
+        .user-avatar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .avatar-dropdown {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        
+        .avatar-dropdown:hover {
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.05);
+        }
+        
+        .avatar-dropdown i {
+            color: white;
+            font-size: 16px;
+        }
+        
+        .user-name-topbar {
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 0;
+        }
+        
+        .user-dropdown-menu {
+            min-width: 200px;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            padding: 8px 0;
+            margin-top: 8px;
+        }
+        
+        .user-dropdown-item {
+            padding: 12px 20px;
+            color: #333;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s;
+        }
+        
+        .user-dropdown-item:hover {
+            background-color: #f8f9fa;
+            color: #667eea;
+            transform: translateX(5px);
+        }
+        
+        .user-dropdown-item i {
+            margin-right: 12px;
+            width: 16px;
+            text-align: center;
+        }
+        
+        .user-info {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 5px;
+        }
+        
+        .user-name {
+            font-weight: 600;
+            color: #333;
+            margin: 0;
+            font-size: 14px;
+        }
+        
+        .user-email {
+            color: #666;
+            margin: 0;
+            font-size: 12px;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+        }
+        
+        .card:hover {
+            transform: none; /* Efeito de movimento removido */
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        }
+        
+        @media (max-width: 768px) {
+            .layout-container {
+                flex-direction: column;
+                height: 100vh;
+            }
+            
+            .sidebar {
+                position: fixed;
+                top: 60px; /* Posicionar abaixo da topbar */
+                left: -100%; /* Esconder por padrão */
+                width: 80%;
+                max-width: 300px;
+                height: calc(100vh - 60px);
+                margin-top: 0;
+                z-index: 1001;
+                transition: left 0.3s ease;
+                overflow-y: auto;
+            }
+            
+            .sidebar.show {
+                left: 0; /* Mostrar quando ativo */
+            }
+            
+            .main-content {
+                margin-left: 0; /* zera a margem à esquerda */
+                margin-top: 60px; /* Espaço para a topbar fixa */
+                padding: 15px;
+                height: calc(100vh - 60px);
+                background-color: #f8f9fa;
+                transition: margin-left 0.3s ease;
+                flex: 1;
+                overflow-y: auto;
+                /* Remover width fixo para usar flex naturalmente */
+            }
+            .main-content {
+                margin-left: 0; /* alinha com largura da sidebar expandida */
+                margin-top: 60px;
+                padding: 15px 15px 15px 0; /* sem espaço à esquerda entre nav e conteúdo */
+                height: calc(100vh - 60px);
+                background-color: #f8f9fa;
+                transition: margin-left 0.3s ease;
+                flex: 1;
+                overflow-y: auto;
+                /* Remover width fixo para usar flex naturalmente */
+            }
+            .main-content {
+                margin-left: 0; /* alinha sem margem com sidebar expandida */
+                margin-top: 60px;
+                padding: 15px 15px 15px 0; /* sem espaço à esquerda entre nav e conteúdo */
+            }
+            .main-content.collapsed {
+                margin-left: 0; /* quando sidebar está colapsada, continua sem margem */
+            }
+            .menu-toggle {
+                display: flex !important;
+            }
+        }
+        
+        /* Badge com cor dinâmica */
+        .badge-dynamic {
+            color: white !important;
+        }
+        
+        /* Overlay para mobile */
+        .mobile-overlay {
+            display: none;
+            position: fixed;
+            top: 60px;
+            left: 0;
+            width: 100%;
+            height: calc(100vh - 60px);
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            transition: opacity 0.3s ease;
+        }
+        
+        .mobile-overlay.show {
+            display: block;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Header/Topbar -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <!-- Menu Toggle Button -->
+            <button class="menu-toggle" id="menuToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+
+        <!-- Relógio centralizado -->
+        <div class="topbar-center">
+            <h1 class="topbar-title">
+                <i class="fas fa-clock"></i> <span id="current-datetime"></span>
+            </h1>
+        </div>
+
+        <!-- User Avatar -->
+        <div class="topbar-right">
+        {% if current_user.is_authenticated %}
+        <div class="user-avatar dropdown">
+            <p class="user-name-topbar d-none d-md-block">{{ current_user.nome_completo or current_user.username or current_user.email }}</p>
+            <button class="avatar-dropdown dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="fas fa-user"></i>
+            </button>
+            <ul class="dropdown-menu user-dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                <li class="user-info">
+                    <p class="user-name">{{ current_user.nome_completo or current_user.username or current_user.email }}</p>
+                    <p class="user-email">{{ current_user.email }}</p>
+                </li>
+                <li>
+                    <a class="user-dropdown-item" href="{{ url_for('auth.profile') }}">
+                        <i class="fas fa-user-edit"></i>
+                        Editar Perfil
+                    </a>
+                </li>
+                <li>
+                    <a class="user-dropdown-item" href="{{ url_for('main.configuracoes') }}">
+                        <i class="fas fa-cog"></i>
+                        Configurações
+                    </a>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                    <a class="user-dropdown-item" href="#" onclick="logout()">
+                        <i class="fas fa-sign-out-alt"></i>
+                        Sair
+                    </a>
+                </li>
+            </ul>
+        </div>
+        {% endif %}
+        </div>
+    </header>
+
+    <!-- Overlay para mobile -->
+    <div class="mobile-overlay" id="mobileOverlay"></div>
+    
+    <div class="layout-container">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <h4><i class="fas fa-boxes"></i> Almox SMS</h4>
+                <small>Sistema de Gerenciamento</small>
+            </div>
+            
+            {% from 'blocks/menu_blocks.html' import render_personalized_menu %}
+            {{ render_personalized_menu(menu_blocks) }}
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content" id="mainContent">
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <script>
+        // Toggle do menu lateral
+        document.addEventListener('DOMContentLoaded', function() {
+            const menuToggle = document.getElementById('menuToggle');
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('mainContent');
+            const mobileOverlay = document.getElementById('mobileOverlay');
+            
+            // Inicializar menu colapsado em desktop
+            function initializeMenu() {
+                if (window.innerWidth > 768) {
+                    sidebar.classList.add('collapsed');
+                    mainContent.classList.add('collapsed');
+                    menuToggle.querySelector('i').className = 'fas fa-angle-right';
+                }
+            }
+            
+            function toggleMenu() {
+                if (window.innerWidth <= 768) {
+                    // Comportamento mobile - mostrar/esconder
+                    const isOpen = sidebar.classList.contains('show');
+                    
+                    if (isOpen) {
+                        sidebar.classList.remove('show');
+                        mobileOverlay.classList.remove('show');
+                        menuToggle.querySelector('i').className = 'fas fa-bars';
+                    } else {
+                        sidebar.classList.add('show');
+                        mobileOverlay.classList.add('show');
+                        menuToggle.querySelector('i').className = 'fas fa-times';
+                    }
+                } else {
+                    // Comportamento desktop - colapsar/expandir
+                    const isCollapsed = sidebar.classList.contains('collapsed');
+                    
+                    if (isCollapsed) {
+                        sidebar.classList.remove('collapsed');
+                        mainContent.classList.remove('collapsed');
+                        menuToggle.querySelector('i').className = 'fas fa-bars';
+                    } else {
+                        sidebar.classList.add('collapsed');
+                        mainContent.classList.add('collapsed');
+                        menuToggle.querySelector('i').className = 'fas fa-angle-right';
+                    }
+                }
+            }
+            
+            // Inicializar menu
+            initializeMenu();
+            
+            menuToggle.addEventListener('click', toggleMenu);
+            
+            // Controlar comportamento dos submenus baseado no estado do sidebar
+            sidebar.addEventListener('click', function(e) {
+                // Permitir funcionamento normal dos submenus tanto quando colapsado quanto expandido
+                // Não interferir com o comportamento padrão do Bootstrap collapse
+            });
+            
+            // Permitir que submenus permaneçam abertos quando colapsado
+            // Removido auto-fechamento para permitir acesso aos itens do submenu
+            
+            // Fechar menu ao clicar no overlay
+            mobileOverlay.addEventListener('click', function() {
+                sidebar.classList.remove('show');
+                mobileOverlay.classList.remove('show');
+                menuToggle.querySelector('i').className = 'fas fa-bars';
+            });
+            
+            // Ajustar menu em redimensionamento da tela
+            window.addEventListener('resize', function() {
+                if (window.innerWidth > 768) {
+                    // Desktop: remover classes mobile e inicializar colapsado
+                    sidebar.classList.remove('show');
+                    mobileOverlay.classList.remove('show');
+                    initializeMenu();
+                } else {
+                    // Mobile: remover classes desktop
+                    sidebar.classList.remove('collapsed');
+                    mainContent.classList.remove('collapsed');
+                    menuToggle.querySelector('i').className = 'fas fa-bars';
+                }
+            });
+        });
+        
+        // Função de logout
+        function logout() {
+            if (confirm('Tem certeza que deseja sair?')) {
+                fetch('/auth/logout', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = '/auth/login';
+                    } else {
+                        alert('Erro ao fazer logout. Tente novamente.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro:', error);
+                    // Fallback: redirecionar mesmo com erro
+                    window.location.href = '/auth/logout';
+                });
+            }
+        }
+        
+        // Aplicar cores dinâmicas aos badges
+        document.addEventListener('DOMContentLoaded', function() {
+            const dynamicBadges = document.querySelectorAll('.badge-dynamic[data-color]');
+            dynamicBadges.forEach(badge => {
+                const color = badge.getAttribute('data-color');
+                if (color) {
+                    badge.style.backgroundColor = color;
+                }
+            });
+        });
+        
+        // Atualizar data e hora atual
+        function updateDateTime() {
+            const now = new Date();
+            const options = {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZone: 'America/Sao_Paulo'
+            };
+            
+            const dateTimeString = now.toLocaleDateString('pt-BR', options);
+            const dateTimeElement = document.getElementById('current-datetime');
+            if (dateTimeElement) {
+                dateTimeElement.textContent = dateTimeString;
+            }
+        }
+        
+        // Atualizar imediatamente e depois a cada segundo
+        document.addEventListener('DOMContentLoaded', function() {
+            updateDateTime();
+            setInterval(updateDateTime, 1000);
+        });
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,481 @@
+{% extends "base.html" %}
+
+{% block title %}Produtos - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-boxes"></i> Gestão de Produtos</h2>
+                <a href="{{ url_for('main.produtos_cadastro') }}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Novo Produto
+                </a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label for="searchInput" class="form-label">Buscar</label>
+                            <input type="text" class="form-control" id="searchInput" placeholder="Nome, código ou descrição...">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="categoriaFilter" class="form-label">Categoria</label>
+                            <select class="form-select" id="categoriaFilter">
+                                <option value="">Todas as categorias</option>
+                                {% for categoria in categorias %}
+                                <option value="{{ categoria.id }}">{{ categoria.codigo }} - {{ categoria.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="statusFilter" class="form-label">Status</label>
+                            <select class="form-select" id="statusFilter">
+                                <option value="">Todos</option>
+                                <option value="true">Ativo</option>
+                                <option value="false">Inativo</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button type="button" class="btn btn-outline-secondary w-100" onclick="limparFiltros()">
+                                <i class="fas fa-eraser"></i> Limpar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabela de Produtos -->
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="produtosTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Código</th>
+                                    <th>Nome</th>
+                                    <th>Categoria</th>
+                                    <th>Unidade</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="produtosTableBody">
+                                <!-- Dados carregados via JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Paginação -->
+                    <nav aria-label="Navegação de páginas" class="mt-3">
+                        <ul class="pagination justify-content-center" id="pagination">
+                            <!-- Paginação carregada via JavaScript -->
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Spinner -->
+<div id="loadingSpinner" class="text-center mt-4" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Carregando...</span>
+    </div>
+</div>
+
+<!-- Modal de Edição de Produto -->
+<div class="modal fade" id="editarProdutoModal" tabindex="-1" aria-labelledby="editarProdutoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editarProdutoModalLabel">Editar Produto</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editarProdutoForm">
+                    <input type="hidden" id="editProdutoId">
+                    
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="editNome" class="form-label">Nome *</label>
+                                <input type="text" class="form-control" id="editNome" required maxlength="200">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="editCodigo" class="form-label">Código *</label>
+                                <input type="text" class="form-control" id="editCodigo" required maxlength="50">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editDescricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="editDescricao" rows="3" maxlength="500"></textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editCategoria" class="form-label">Categoria</label>
+                                <input type="text" class="form-control" id="editCategoria" maxlength="100">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editUnidadeMedida" class="form-label">Unidade de Medida</label>
+                                <select class="form-select" id="editUnidadeMedida">
+                                    <option value="">Selecione...</option>
+                                    <option value="UN">Unidade</option>
+                                    <option value="KG">Quilograma</option>
+                                    <option value="L">Litro</option>
+                                    <option value="M">Metro</option>
+                                    <option value="M²">Metro Quadrado</option>
+                                    <option value="M³">Metro Cúbico</option>
+                                    <option value="CX">Caixa</option>
+                                    <option value="PC">Peça</option>
+                                    <option value="PAR">Par</option>
+                                    <option value="DZ">Dúzia</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="editAtivo">
+                            <label class="form-check-label" for="editAtivo">
+                                Produto ativo
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="salvarEdicaoProduto()">
+                    <i class="fas fa-save"></i> Salvar Alterações
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPage = 1;
+let totalPages = 1;
+
+// Carregar produtos
+function carregarProdutos(page = 1) {
+    const search = document.getElementById('searchInput').value;
+    const categoria_id = document.getElementById('categoriaFilter').value;
+    const ativo = document.getElementById('statusFilter').value;
+    
+    const params = new URLSearchParams({
+        page: page,
+        per_page: 20
+    });
+    
+    if (search) params.append('search', search);
+    if (categoria_id) params.append('categoria_id', categoria_id);
+    if (ativo !== '') params.append('ativo', ativo);
+    
+    document.getElementById('loadingSpinner').style.display = 'block';
+    
+    fetch(`/api/produtos?${params}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            renderizarProdutos(data.items);
+            renderizarPaginacao(data);
+            currentPage = data.page;
+            totalPages = data.pages;
+        })
+        .catch(error => {
+            console.error('Erro ao carregar produtos:', error);
+            document.getElementById('produtosTableBody').innerHTML = 
+                '<tr><td colspan="6" class="text-center text-danger">Erro ao carregar produtos</td></tr>';
+        })
+        .finally(() => {
+            document.getElementById('loadingSpinner').style.display = 'none';
+        });
+}
+
+// Renderizar produtos na tabela
+function renderizarProdutos(produtos) {
+    const tbody = document.getElementById('produtosTableBody');
+    
+    if (produtos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhum produto encontrado</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = produtos.map(produto => `
+        <tr>
+            <td><code>${produto.codigo}</code></td>
+            <td>
+                <strong>${produto.nome}</strong>
+                ${produto.descricao ? `<br><small class="text-muted">${produto.descricao}</small>` : ''}
+            </td>
+            <td>
+                ${produto.categoria_produto ? 
+                    `<span class="badge" style="background-color: ${produto.categoria_produto.cor}; color: white;">
+                        ${produto.categoria_produto.codigo}
+                    </span>
+                    <small class="text-muted d-block">${produto.categoria_produto.nome}</small>` 
+                    : '-'}
+            </td>
+            <td>${produto.unidade_medida}</td>
+            <td>
+                <span class="badge ${produto.ativo ? 'bg-success' : 'bg-secondary'}">
+                    ${produto.ativo ? 'Ativo' : 'Inativo'}
+                </span>
+            </td>
+            <td>
+                <div class="btn-group btn-group-sm" role="group">
+                    <a href="/produtos/${produto.id}" class="btn btn-outline-primary" title="Detalhes">
+                        <i class="fas fa-eye"></i>
+                    </a>
+                    <a href="/produtos/${produto.id}/recebimento" class="btn btn-outline-success" title="Recebimento">
+                        <i class="fas fa-plus-circle"></i>
+                    </a>
+                    <button type="button" class="btn btn-outline-warning" onclick="editarProduto('${produto.id}')" title="Editar">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-danger" onclick="apagarProduto('${produto.id}', '${produto.nome}')" title="Apagar">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// Renderizar paginação
+function renderizarPaginacao(pagination) {
+    const paginationEl = document.getElementById('pagination');
+    
+    if (pagination.pages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // Botão anterior
+    html += `
+        <li class="page-item ${pagination.page <= 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="carregarProdutos(${pagination.page - 1})">Anterior</a>
+        </li>
+    `;
+    
+    // Páginas
+    for (let i = 1; i <= pagination.pages; i++) {
+        if (i === pagination.page || 
+            i === 1 || 
+            i === pagination.pages || 
+            (i >= pagination.page - 2 && i <= pagination.page + 2)) {
+            html += `
+                <li class="page-item ${i === pagination.page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="carregarProdutos(${i})">${i}</a>
+                </li>
+            `;
+        } else if (i === pagination.page - 3 || i === pagination.page + 3) {
+            html += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+        }
+    }
+    
+    // Botão próximo
+    html += `
+        <li class="page-item ${pagination.page >= pagination.pages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="carregarProdutos(${pagination.page + 1})">Próximo</a>
+        </li>
+    `;
+    
+    paginationEl.innerHTML = html;
+}
+
+// Limpar filtros
+function limparFiltros() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('categoriaFilter').value = '';
+    document.getElementById('statusFilter').value = '';
+    carregarProdutos(1);
+}
+
+// Editar produto
+function editarProduto(id) {
+    // Buscar dados do produto
+    fetch(`/api/produtos/${id}`)
+        .then(response => response.json())
+        .then(produto => {
+            if (produto.error) {
+                alert('Erro ao carregar produto: ' + produto.error);
+                return;
+            }
+            
+            // Preencher o formulário do modal
+            document.getElementById('editProdutoId').value = produto.id;
+            document.getElementById('editNome').value = produto.nome || '';
+            document.getElementById('editCodigo').value = produto.codigo || '';
+            document.getElementById('editDescricao').value = produto.descricao || '';
+            document.getElementById('editCategoria').value = produto.categoria || '';
+            document.getElementById('editUnidadeMedida').value = produto.unidade_medida || '';
+            document.getElementById('editAtivo').checked = produto.ativo;
+            
+            // Abrir o modal
+            const modal = new bootstrap.Modal(document.getElementById('editarProdutoModal'));
+            modal.show();
+        })
+        .catch(error => {
+            console.error('Erro ao carregar produto:', error);
+            alert('Erro ao carregar dados do produto');
+        });
+}
+
+// Apagar produto
+function apagarProduto(id, nome) {
+    // Primeiro verificar se o produto tem estoque
+    fetch(`/api/produtos/${id}/estoque`)
+        .then(response => response.json())
+        .then(data => {
+            // Verificar se há estoque usando o formato correto da API
+            const temEstoque = data.estoques && data.estoques.some(estoque => estoque.quantidade > 0);
+            const totalQuantidade = data.resumo ? data.resumo.total_quantidade : 0;
+            
+            if (temEstoque || totalQuantidade > 0) {
+                alert(`Não é possível apagar o produto "${nome}" porque ele possui estoque.\n\nQuantidade total em estoque: ${totalQuantidade}\n\nPara apagar este produto, primeiro você precisa zerar todo o estoque em todos os almoxarifados.`);
+                return;
+            }
+            
+            // Se não tem estoque, pedir confirmação
+            if (confirm(`Tem certeza que deseja apagar o produto "${nome}"?\n\nEsta ação marcará o produto como inativo e ele não aparecerá mais nas listagens.`)) {
+                fetch(`/api/produtos/${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        alert('Produto apagado com sucesso!');
+                        carregarProdutos(1); // Recarregar a lista
+                    } else {
+                        return response.json().then(data => {
+                            throw new Error(data.error || 'Erro ao apagar produto');
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro:', error);
+                    alert('Erro ao apagar produto: ' + error.message);
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao verificar estoque:', error);
+            alert('Erro ao verificar estoque do produto. Tente novamente.');
+        });
+}
+
+// Salvar edição do produto
+function salvarEdicaoProduto() {
+    const id = document.getElementById('editProdutoId').value;
+    const nome = document.getElementById('editNome').value.trim();
+    const codigo = document.getElementById('editCodigo').value.trim();
+    const descricao = document.getElementById('editDescricao').value.trim();
+    const categoria = document.getElementById('editCategoria').value.trim();
+    const unidadeMedida = document.getElementById('editUnidadeMedida').value;
+    const ativo = document.getElementById('editAtivo').checked;
+    
+    // Validações básicas
+    if (!nome) {
+        alert('Nome é obrigatório');
+        document.getElementById('editNome').focus();
+        return;
+    }
+    
+    if (!codigo) {
+        alert('Código é obrigatório');
+        document.getElementById('editCodigo').focus();
+        return;
+    }
+    
+    // Preparar dados para envio
+    const dadosProduto = {
+        nome: nome,
+        codigo: codigo,
+        descricao: descricao,
+        categoria: categoria,
+        unidade_medida: unidadeMedida,
+        ativo: ativo
+    };
+    
+    // Enviar para API
+    fetch(`/api/produtos/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(dadosProduto)
+    })
+    .then(response => {
+        if (response.ok) {
+            return response.json();
+        } else {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Erro ao atualizar produto');
+            });
+        }
+    })
+    .then(produto => {
+        alert('Produto atualizado com sucesso!');
+        
+        // Fechar modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editarProdutoModal'));
+        modal.hide();
+        
+        // Recarregar lista
+        carregarProdutos(currentPage);
+    })
+    .catch(error => {
+        console.error('Erro:', error);
+        alert('Erro ao atualizar produto: ' + error.message);
+    });
+}
+
+// Event listeners
+document.getElementById('searchInput').addEventListener('input', 
+    debounce(() => carregarProdutos(1), 500)
+);
+
+document.getElementById('categoriaFilter').addEventListener('change', () => carregarProdutos(1));
+document.getElementById('statusFilter').addEventListener('change', () => carregarProdutos(1));
+
+// Função debounce para otimizar busca
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Carregar dados iniciais
+document.addEventListener('DOMContentLoaded', () => {
+    carregarProdutos(1);
+});
+</script>
+{% endblock %}

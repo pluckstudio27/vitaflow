@@ -1,0 +1,1133 @@
+{% extends "base.html" %}
+
+{% block title %}Movimentações{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-exchange-alt"></i> Movimentações</h2>
+                <div>
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#novaTransferenciaModal">
+                        <i class="fas fa-plus"></i> Nova Transferência
+                    </button>
+                    <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#distribuicaoModal">
+                        <i class="fas fa-share-alt"></i> Distribuição
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label for="filtroTipo" class="form-label">Tipo</label>
+                            <select class="form-select" id="filtroTipo">
+                                <option value="">Todos</option>
+                                <option value="ENTRADA">Entrada</option>
+                                <option value="SAIDA">Saída</option>
+                                <option value="TRANSFERENCIA">Transferência</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="filtroProduto" class="form-label">Produto</label>
+                            <input type="text" class="form-control" id="filtroProduto" placeholder="Nome ou código">
+                        </div>
+                        <div class="col-md-2">
+                            <label for="filtroDataInicio" class="form-label">Data Início</label>
+                            <input type="date" class="form-control" id="filtroDataInicio">
+                        </div>
+                        <div class="col-md-2">
+                            <label for="filtroDataFim" class="form-label">Data Fim</label>
+                            <input type="date" class="form-control" id="filtroDataFim">
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button type="button" class="btn btn-outline-primary w-100" onclick="filtrarMovimentacoes()">
+                                <i class="fas fa-search"></i> Filtrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lista de Movimentações -->
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Tipo</th>
+                                    <th>Produto</th>
+                                    <th>Quantidade</th>
+                                    <th>Origem</th>
+                                    <th>Destino</th>
+                                    <th>Responsável</th>
+                                    <th>Motivo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="movimentacoesTableBody">
+                                <tr>
+                                    <td colspan="8" class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Carregando...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Paginação -->
+                    <nav aria-label="Paginação">
+                        <ul class="pagination justify-content-center" id="paginacao">
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nova Transferência -->
+<div class="modal fade" id="novaTransferenciaModal" tabindex="-1" aria-labelledby="novaTransferenciaModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="novaTransferenciaModalLabel">Nova Transferência</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="transferenciaForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="produtoTransferencia" class="form-label">Produto *</label>
+                                <input type="text" class="form-control mb-2" id="buscaProdutoTransferencia" placeholder="Buscar produto por nome ou código...">
+                                <select class="form-select" id="produtoTransferencia" required onchange="carregarLocaisProduto(); carregarTiposDestino();">
+                                    <option value="">Selecione um produto...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="quantidadeTransferencia" class="form-label">Quantidade *</label>
+                                <input type="number" class="form-control" id="quantidadeTransferencia" step="0.001" min="0.001" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-muted">Origem</h6>
+                            <div class="mb-3">
+                                <label for="tipoOrigemTransferencia" class="form-label">Tipo de Local *</label>
+                                <select class="form-select" id="tipoOrigemTransferencia" required onchange="carregarLocaisOrigem()">
+                                    <option value="">Selecione...</option>
+                                    <option value="almoxarifado">Almoxarifado</option>
+                                    <option value="sub_almoxarifado">Sub-Almoxarifado</option>
+                                    <option value="setor">Setor</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="localOrigemTransferencia" class="form-label">Local *</label>
+                                <select class="form-select" id="localOrigemTransferencia" required>
+                                    <option value="">Selecione o tipo primeiro...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-muted">Destino</h6>
+                            <div class="mb-3">
+                                <label for="tipoDestinoTransferencia" class="form-label">Tipo de Local *</label>
+                                <select class="form-select" id="tipoDestinoTransferencia" required onchange="carregarLocaisDestino()">
+                                    <option value="">Selecione...</option>
+                                    <option value="almoxarifado">Almoxarifado</option>
+                                    <option value="sub_almoxarifado">Sub-Almoxarifado</option>
+                                    <option value="setor">Setor</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="localDestinoTransferencia" class="form-label">Local *</label>
+                                <select class="form-select" id="localDestinoTransferencia" required>
+                                    <option value="">Selecione o tipo primeiro...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="motivoTransferencia" class="form-label">Motivo</label>
+                        <input type="text" class="form-control" id="motivoTransferencia" maxlength="200">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="observacoesTransferencia" class="form-label">Observações</label>
+                        <textarea class="form-control" id="observacoesTransferencia" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="executarTransferencia()">
+                    <i class="fas fa-exchange-alt"></i> Executar Transferência
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Distribuição -->
+<div class="modal fade" id="distribuicaoModal" tabindex="-1" aria-labelledby="distribuicaoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="distribuicaoModalLabel">Distribuição para Setores</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="distribuicaoForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="produtoDistribuicao" class="form-label">Produto *</label>
+                                <input type="text" class="form-control mb-2" id="buscaProdutoDistribuicao" placeholder="Buscar produto por nome ou código...">
+                                <select class="form-select" id="produtoDistribuicao" required onchange="carregarLocaisProdutoDistribuicao()">
+                                    <option value="">Selecione um produto...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="quantidadeDistribuicao" class="form-label">Quantidade Total *</label>
+                                <input type="number" class="form-control" id="quantidadeDistribuicao" step="0.001" min="0.001" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-muted">Origem</h6>
+                            <div class="mb-3">
+                                <label for="tipoOrigemDistribuicao" class="form-label">Tipo de Local *</label>
+                                <select class="form-select" id="tipoOrigemDistribuicao" required onchange="carregarLocaisOrigemDistribuicao()">
+                                    <option value="">Selecione...</option>
+                                    <option value="central">Central</option>
+                                    <option value="almoxarifado">Almoxarifado</option>
+                                    <option value="sub_almoxarifado">Sub-Almoxarifado</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="localOrigemDistribuicao" class="form-label">Local *</label>
+                                <select class="form-select" id="localOrigemDistribuicao" required>
+                                    <option value="">Selecione o tipo primeiro...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-muted">Setores de Destino</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Selecione os setores:</label>
+                                <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                                    <div id="setoresDistribuicao">
+                                        {% for setor in setores %}
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" value="{{ setor.id }}" id="setor{{ setor.id }}">
+                                            <label class="form-check-label" for="setor{{ setor.id }}">
+                                                {{ setor.nome }}
+                                            </label>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="motivoDistribuicao" class="form-label">Motivo</label>
+                        <input type="text" class="form-control" id="motivoDistribuicao" maxlength="200">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="observacoesDistribuicao" class="form-label">Observações</label>
+                        <textarea class="form-control" id="observacoesDistribuicao" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-success" onclick="executarDistribuicao()">
+                    <i class="fas fa-share-alt"></i> Executar Distribuição
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Dados dos locais -->
+<script type="application/json" id="centrais-data">{{ centrais | tojson | safe }}</script>
+<script type="application/json" id="almoxarifados-data">{{ almoxarifados | tojson | safe }}</script>
+<script type="application/json" id="sub-almoxarifados-data">{{ sub_almoxarifados | tojson | safe }}</script>
+<script type="application/json" id="setores-data">{{ setores | tojson | safe }}</script>
+<script type="application/json" id="use-mongo-flag">{{ 'true' if use_mongo else 'false' }}</script>
+
+<script>
+let currentPage = 1;
+const itemsPerPage = 20;
+
+// Carregar dados dos locais
+const centraisEl = document.getElementById('centrais-data');
+const almoxEl = document.getElementById('almoxarifados-data');
+const subEl = document.getElementById('sub-almoxarifados-data');
+const setoresEl = document.getElementById('setores-data');
+
+// Inicialização defensiva dos dados de locais (evita erros de parser do linter)
+const locaisData = {};
+locaisData.centrais = JSON.parse((centraisEl && centraisEl.textContent) ? centraisEl.textContent : '[]');
+locaisData.almoxarifados = JSON.parse((almoxEl && almoxEl.textContent) ? almoxEl.textContent : '[]');
+locaisData.sub_almoxarifados = JSON.parse((subEl && subEl.textContent) ? subEl.textContent : '[]');
+locaisData.setores = JSON.parse((setoresEl && setoresEl.textContent) ? setoresEl.textContent : '[]');
+
+// Indica se estamos em modo MongoDB (IDs são strings)
+const USE_MONGO = (document.getElementById('use-mongo-flag') && document.getElementById('use-mongo-flag').textContent === 'true');
+
+// Carregar movimentações
+function carregarMovimentacoes(page = 1) {
+    currentPage = page;
+    
+    const filtros = {
+        tipo: document.getElementById('filtroTipo').value,
+        produto: document.getElementById('filtroProduto').value,
+        data_inicio: document.getElementById('filtroDataInicio').value,
+        data_fim: document.getElementById('filtroDataFim').value,
+        page: page,
+        per_page: itemsPerPage
+    };
+    
+    const params = new URLSearchParams();
+    Object.keys(filtros).forEach(key => {
+        if (filtros[key]) params.append(key, filtros[key]);
+    });
+    
+    window.fetchJson(`/api/movimentacoes?${params.toString()}`)
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            renderizarMovimentacoes(data.items);
+            renderizarPaginacao(data.pagination);
+        })
+        .catch(error => {
+            console.error('Erro:', error);
+            // Se sessão expirar, o utilitário global já alerta e redireciona; evita poluir a tabela
+            if (String(error && error.message).includes('Sessão expirada')) {
+                return;
+            }
+            document.getElementById('movimentacoesTableBody').innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center text-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Erro ao carregar movimentações: ${error.message}
+                    </td>
+                </tr>
+            `;
+        });
+}
+
+// Renderizar movimentações na tabela
+function renderizarMovimentacoes(movimentacoes) {
+    const tbody = document.getElementById('movimentacoesTableBody');
+    
+    if (!movimentacoes || movimentacoes.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center text-muted">
+                    <i class="fas fa-inbox"></i> Nenhuma movimentação encontrada
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    const tipoIcons = {
+        'entrada': 'fas fa-arrow-down text-success',
+        'saida': 'fas fa-arrow-up text-danger',
+        'transferencia': 'fas fa-exchange-alt text-primary'
+    };
+    
+    tbody.innerHTML = movimentacoes.map(mov => `
+        <tr>
+            <td>
+                <div>${new Date(mov.data_movimentacao).toLocaleDateString('pt-BR')}</div>
+                <small class="text-muted">${new Date(mov.data_movimentacao).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})}</small>
+            </td>
+            <td>
+                <i class="${tipoIcons[mov.tipo_movimentacao?.toLowerCase()] || 'fas fa-question'}"></i>
+                ${mov.tipo_movimentacao}
+            </td>
+            <td>
+                <strong>${mov.produto_nome}</strong><br>
+                <small>${mov.produto_codigo}</small>
+            </td>
+            <td>${parseFloat(mov.quantidade).toLocaleString('pt-BR')} ${mov.produto_unidade}</td>
+            <td>${mov.origem_nome || '-'}</td>
+            <td>${mov.destino_nome || '-'}</td>
+            <td>${mov.usuario_responsavel}</td>
+            <td>${mov.motivo || '-'}</td>
+        </tr>
+    `).join('');
+}
+
+// Renderizar paginação
+function renderizarPaginacao(pagination) {
+    const paginacaoEl = document.getElementById('paginacao');
+    
+    if (!pagination || pagination.total_pages <= 1) {
+        paginacaoEl.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // Botão anterior
+    if (pagination.current_page > 1) {
+        html += `<li class="page-item">
+            <a class="page-link" href="#" onclick="carregarMovimentacoes(${pagination.current_page - 1})">Anterior</a>
+        </li>`;
+    }
+    
+    // Páginas
+    for (let i = Math.max(1, pagination.current_page - 2); i <= Math.min(pagination.total_pages, pagination.current_page + 2); i++) {
+        html += `<li class="page-item ${i === pagination.current_page ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="carregarMovimentacoes(${i})">${i}</a>
+        </li>`;
+    }
+    
+    // Botão próximo
+    if (pagination.current_page < pagination.total_pages) {
+        html += `<li class="page-item">
+            <a class="page-link" href="#" onclick="carregarMovimentacoes(${pagination.current_page + 1})">Próximo</a>
+        </li>`;
+    }
+    
+    paginacaoEl.innerHTML = html;
+}
+
+// Filtrar movimentações
+function filtrarMovimentacoes() {
+    carregarMovimentacoes(1);
+}
+
+// Carregar produtos para os selects
+function carregarProdutos(searchTerm = '') {
+    const params = new URLSearchParams({ativo: 'true', per_page: '1000'});
+    if (searchTerm && searchTerm.trim() !== '') {
+        params.set('search', searchTerm.trim());
+    }
+    fetchJson('/api/produtos?' + params.toString())
+        .then(data => {
+            const produtos = data.items || [];
+            const selectTransferencia = document.getElementById('produtoTransferencia');
+            const selectDistribuicao = document.getElementById('produtoDistribuicao');
+            const options = produtos.map(produto => 
+                `<option value="${produto.id}">${produto.codigo || ''} - ${produto.nome}</option>`
+            ).join('');
+            if (selectTransferencia) {
+                const current = selectTransferencia.value;
+                selectTransferencia.innerHTML = '<option value="">Selecione um produto...</option>' + options;
+                if (current && [...selectTransferencia.options].some(o => o.value === current)) {
+                    selectTransferencia.value = current;
+                }
+            }
+            if (selectDistribuicao) {
+                const current2 = selectDistribuicao.value;
+                selectDistribuicao.innerHTML = '<option value="">Selecione um produto...</option>' + options;
+                if (current2 && [...selectDistribuicao.options].some(o => o.value === current2)) {
+                    selectDistribuicao.value = current2;
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar produtos:', error);
+        });
+}
+
+// Carregar locais de origem para transferência
+function carregarLocaisOrigem() {
+    const tipo = document.getElementById('tipoOrigemTransferencia').value;
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const select = document.getElementById('localOrigemTransferencia');
+    
+    if (!tipo) {
+        select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        return;
+    }
+
+    const buildLocaisPermitidos = async () => {
+        if (!produtoId) {
+            if (tipo === 'almoxarifado') return (locaisData.almoxarifados || []);
+            if (tipo === 'sub_almoxarifado') return (locaisData.sub_almoxarifados || []);
+            if (tipo === 'setor') return (locaisData.setores || []);
+            return [];
+        }
+        // Buscar informações do produto para obter a central
+        const produto = await fetchJson(`/api/produtos/${produtoId}`);
+        const produtoCentral = produto.central_id;
+
+        if (tipo === 'almoxarifado') {
+            return (locaisData.almoxarifados || [])
+                .filter(a => String(a.central_id) === String(produtoCentral));
+        } else if (tipo === 'sub_almoxarifado') {
+            const almoxIdsCentral = (locaisData.almoxarifados || [])
+                .filter(a => String(a.central_id) === String(produtoCentral))
+                .map(a => String(a.id));
+            return (locaisData.sub_almoxarifados || [])
+                .filter(sa => almoxIdsCentral.includes(String(sa.almoxarifado_id)));
+        } else if (tipo === 'setor') {
+            const almoxIdsCentral = (locaisData.almoxarifados || [])
+                .filter(a => String(a.central_id) === String(produtoCentral))
+                .map(a => String(a.id));
+            const subIdsCentral = (locaisData.sub_almoxarifados || [])
+                .filter(sa => almoxIdsCentral.includes(String(sa.almoxarifado_id)))
+                .map(sa => String(sa.id));
+            return (locaisData.setores || [])
+                .filter(s => subIdsCentral.includes(String(s.sub_almoxarifado_id)));
+        }
+        return [];
+    };
+
+    // Mostrar estado de carregamento
+    select.innerHTML = '<option value="">Carregando...</option>';
+
+    buildLocaisPermitidos()
+        .then(async locaisPermitidos => {
+            // Sem produto: apenas lista locais permitidos pelo tipo
+            if (!produtoId) {
+                const options = (locaisPermitidos || []).map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+                select.innerHTML = '<option value="">Selecione...</option>' + options;
+                return;
+            }
+
+            // Com produto: intersectar com locais que têm estoque (ignorar estoque.tipo para evitar vazamento de sub-almoxarifados)
+            const estoqueData = await fetchJson(`/api/produtos/${produtoId}/estoque`);
+            const idsComEstoque = (Array.isArray(estoqueData.estoques) ? estoqueData.estoques : [])
+                .filter(e => e && e.quantidade_disponivel > 0)
+                .map(e => String(e.local_id));
+
+            const locaisFiltrados = (locaisPermitidos || []).filter(l => idsComEstoque.includes(String(l.id)));
+
+            if (!locaisFiltrados || locaisFiltrados.length === 0) {
+                select.innerHTML = '<option value="">Nenhum local com estoque disponível na central do produto</option>';
+            } else {
+                const options = locaisFiltrados.map(local => `<option value="${local.id}">${local.nome}</option>`).join('');
+                select.innerHTML = '<option value="">Selecione...</option>' + options;
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar locais de origem:', error);
+            // Fallback para mostrar todos os locais do tipo (sem filtrar por estoque)
+            let locais = [];
+            if (tipo === 'almoxarifado') locais = (locaisData.almoxarifados || []);
+            else if (tipo === 'sub_almoxarifado') locais = (locaisData.sub_almoxarifados || []);
+            else if (tipo === 'setor') locais = (locaisData.setores || []);
+            const options = locais.map(local => `<option value="${local.id}">${local.nome}</option>`).join('');
+            select.innerHTML = '<option value="">Selecione...</option>' + options;
+        });
+}
+
+// Carregar tipos de destino disponíveis baseados na central do produto
+function carregarTiposDestino() {
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const tipoSelect = document.getElementById('tipoDestinoTransferencia');
+    const localSelect = document.getElementById('localDestinoTransferencia');
+    
+    // Limpar seleções
+    tipoSelect.value = '';
+    localSelect.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+    
+    if (!produtoId) {
+        tipoSelect.innerHTML = `
+            <option value="">Selecione um produto primeiro...</option>
+        `;
+        return;
+    }
+    
+    // Buscar informações do produto para verificar quais tipos estão disponíveis
+    fetchJson(`/api/produtos/${produtoId}`)
+        .then(async produto => {
+            let opcoesDisponiveis = [];
+
+            if (USE_MONGO) {
+                // Em Mongo, buscar listas via API e comparar por string central_id
+                const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                const almoxarifadosDaCentral = almoxResp.items || [];
+                if (almoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="almoxarifado">Almoxarifado</option>');
+                }
+                const almoxIds = almoxarifadosDaCentral.map(a => a.id);
+                const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                const subAlmoxarifadosDaCentral = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                if (subAlmoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
+                }
+                const subIds = subAlmoxarifadosDaCentral.map(sa => sa.id);
+                const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
+                const setoresDaCentral = (setoresResp.items || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                if (setoresDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="setor">Setor</option>');
+                }
+            } else {
+                // SQL: usar dados carregados do template sem chamadas à API
+                const almoxarifadosDaCentral = (locaisData.almoxarifados || []).filter(almox => almox.central_id === produto.central_id);
+                if (almoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="almoxarifado">Almoxarifado</option>');
+                }
+                const almoxIds = almoxarifadosDaCentral.map(almox => almox.id);
+                const subAlmoxarifadosDaCentral = (locaisData.sub_almoxarifados || []).filter(subAlmox => almoxIds.includes(subAlmox.almoxarifado_id));
+                if (subAlmoxarifadosDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
+                }
+                const subIds = subAlmoxarifadosDaCentral.map(subAlmox => subAlmox.id);
+                const setoresDaCentral = (locaisData.setores || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                if (setoresDaCentral.length > 0) {
+                    opcoesDisponiveis.push('<option value="setor">Setor</option>');
+                }
+            }
+            
+            if (opcoesDisponiveis.length === 0) {
+                tipoSelect.innerHTML = '<option value="">Nenhum tipo de local disponível</option>';
+            } else {
+                tipoSelect.innerHTML = '<option value="">Selecione...</option>' + opcoesDisponiveis.join('');
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar tipos de destino:', error);
+            tipoSelect.innerHTML = '<option value="">Erro ao carregar tipos</option>';
+        });
+}
+
+// Carregar locais de destino para transferência
+function carregarLocaisDestino() {
+    const tipo = document.getElementById('tipoDestinoTransferencia').value;
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const select = document.getElementById('localDestinoTransferencia');
+    
+    if (!tipo) {
+        select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        return;
+    }
+    
+    if (!produtoId) {
+        select.innerHTML = '<option value="">Selecione um produto primeiro...</option>';
+        return;
+    }
+    
+    // Buscar informações do produto para obter a central
+    fetchJson(`/api/produtos/${produtoId}`)
+        .then(async produto => {
+            let locais = [];
+            
+            if (USE_MONGO) {
+                // Em Mongo, buscar listas via API e montar conforme o tipo
+                if (tipo === 'almoxarifado') {
+                    const resp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                    locais = resp.items || [];
+                } else if (tipo === 'sub_almoxarifado') {
+                    const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                    const almoxIds = (almoxResp.items || []).map(a => a.id);
+                    const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                    locais = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                } else if (tipo === 'setor') {
+                    const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                    const almoxIds = (almoxResp.items || []).map(a => a.id);
+                    const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                    const subIds = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id)).map(sa => sa.id);
+                    const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
+                    locais = (setoresResp.items || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                }
+            } else {
+                // SQL: montar listas a partir dos dados embutidos no template
+                switch (tipo) {
+                    case 'almoxarifado':
+                        locais = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id);
+                        break;
+                    case 'sub_almoxarifado': {
+                        const almoxIds = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id).map(a => a.id);
+                        locais = (locaisData.sub_almoxarifados || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                        break;
+                    }
+                    case 'setor': {
+                        const almoxIds = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id).map(a => a.id);
+                        const subIds = (locaisData.sub_almoxarifados || []).filter(sa => almoxIds.includes(sa.almoxarifado_id)).map(sa => sa.id);
+                        locais = (locaisData.setores || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                        break;
+                    }
+                }
+            }
+            
+            if (locais.length === 0) {
+                select.innerHTML = '<option value="">Nenhum local disponível para este produto</option>';
+            } else {
+                const options = locais
+                    .filter(local => local.id !== undefined && local.id !== null && local.id !== 'undefined')
+                    .map(local => `<option value="${local.id}">${local.nome}</option>`) // não forçar parseInt para suportar ObjectId
+                    .join('');
+                
+                select.innerHTML = '<option value="">Selecione...</option>' + options;
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar informações do produto:', error);
+            select.innerHTML = '<option value="">Erro ao carregar locais</option>';
+        });
+}
+
+// Carregar locais de origem para distribuição
+function carregarLocaisOrigemDistribuicao() {
+    const tipo = document.getElementById('tipoOrigemDistribuicao').value;
+    const produtoId = document.getElementById('produtoDistribuicao').value;
+    const select = document.getElementById('localOrigemDistribuicao');
+    
+    if (!tipo) {
+        select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        return;
+    }
+    
+    let locais = [];
+    switch (tipo) {
+        case 'central':
+            locais = locaisData.centrais;
+            break;
+        case 'almoxarifado':
+            locais = locaisData.almoxarifados;
+            break;
+        case 'sub_almoxarifado':
+            locais = locaisData.sub_almoxarifados;
+            break;
+    }
+    
+    // Se um produto estiver selecionado, mostrar apenas locais com estoque
+    if (produtoId) {
+        fetchJson(`/api/produtos/${produtoId}/estoque`)
+            .then(data => {
+                if (data.estoques && data.estoques.length > 0) {
+                    const estoquesDoTipo = data.estoques.filter(estoque => 
+                        estoque.tipo === tipo && estoque.quantidade_disponivel > 0
+                    );
+                    
+                    const options = estoquesDoTipo.map(estoque => 
+                        `<option value="${estoque.local_id}">${estoque.nome_local} (Disponível: ${estoque.quantidade_disponivel})</option>`
+                    ).join('');
+                    
+                    select.innerHTML = '<option value="">Selecione...</option>' + options;
+                } else {
+                    select.innerHTML = '<option value="">Nenhum local com estoque disponível</option>';
+                }
+            })
+            .catch(error => {
+                console.error('Erro ao carregar estoque:', error);
+                // Fallback para mostrar todos os locais
+                const options = locais.map(local => 
+                    `<option value="${local.id}">${local.nome}</option>`
+                ).join('');
+                select.innerHTML = '<option value="">Selecione...</option>' + options;
+            });
+    } else {
+        // Se nenhum produto selecionado, mostrar todos os locais
+        const options = locais.map(local => 
+            `<option value="${local.id}">${local.nome}</option>`
+        ).join('');
+        select.innerHTML = '<option value="">Selecione...</option>' + options;
+    }
+}
+
+// Carregar locais onde o produto está disponível para distribuição
+function carregarLocaisProdutoDistribuicao() {
+    const produtoId = document.getElementById('produtoDistribuicao').value;
+    const tipoOrigemSelect = document.getElementById('tipoOrigemDistribuicao');
+    const localOrigemSelect = document.getElementById('localOrigemDistribuicao');
+    
+    // Limpar seleções anteriores
+    tipoOrigemSelect.value = '';
+    localOrigemSelect.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+    
+    if (!produtoId) {
+        return;
+    }
+    
+    // Buscar estoque do produto
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
+        .then(data => {
+            if (data.estoques && data.estoques.length > 0) {
+                // Agrupar por tipo de local (apenas centrais, almoxarifados e sub-almoxarifados para distribuição)
+                const locaisPorTipo = {};
+                data.estoques.forEach(estoque => {
+                    if (estoque.quantidade_disponivel > 0 && estoque.tipo !== 'setor') {
+                        const tipo = estoque.tipo;
+                        if (!locaisPorTipo[tipo]) {
+                            locaisPorTipo[tipo] = [];
+                        }
+                        locaisPorTipo[tipo].push({
+                            id: estoque.local_id,
+                            nome: estoque.nome_local,
+                            quantidade: estoque.quantidade_disponivel
+                        });
+                    }
+                });
+                
+                // Se há apenas um tipo de local, selecionar automaticamente
+                const tiposDisponiveis = Object.keys(locaisPorTipo);
+                if (tiposDisponiveis.length === 1) {
+                    tipoUnico = tiposDisponiveis[0];
+                    tipoOrigemSelect.value = tipoUnico;
+                    
+                    // Carregar locais deste tipo
+                    const locais = locaisPorTipo[tipoUnico];
+                    const options = locais.map(local => 
+                        `<option value="${local.id}">${local.nome} (Disponível: ${local.quantidade})</option>`
+                    ).join('');
+                    
+                    localOrigemSelect.innerHTML = '<option value="">Selecione...</option>' + options;
+                    
+                    // Se há apenas um local, selecionar automaticamente
+                    if (locais.length === 1) {
+                        localOrigemSelect.value = locais[0].id;
+                    }
+                } else if (tiposDisponiveis.length > 1) {
+                    // Mostrar mensagem informativa
+                    localOrigemSelect.innerHTML = '<option value="">Produto disponível em múltiplos tipos de local - selecione o tipo primeiro</option>';
+                } else {
+                    localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível para distribuição</option>';
+                }
+            } else {
+                localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível</option>';
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar estoque do produto:', error);
+            localOrigemSelect.innerHTML = '<option value="">Erro ao carregar estoque</option>';
+        });
+}
+
+// Carregar locais onde o produto está disponível
+function carregarLocaisProduto() {
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const tipoOrigemSelect = document.getElementById('tipoOrigemTransferencia');
+    const localOrigemSelect = document.getElementById('localOrigemTransferencia');
+    
+    // Limpar seleções anteriores
+    tipoOrigemSelect.value = '';
+    localOrigemSelect.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+    
+    if (!produtoId) {
+        return;
+    }
+    
+    // Buscar estoque do produto
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
+        .then(data => {
+            if (data.estoques && data.estoques.length > 0) {
+                // Agrupar por tipo de local
+                const locaisPorTipo = {};
+                data.estoques.forEach(estoque => {
+                    if (estoque.quantidade_disponivel > 0) {
+                        const tipo = estoque.tipo;
+                        if (!locaisPorTipo[tipo]) {
+                            locaisPorTipo[tipo] = [];
+                        }
+                        locaisPorTipo[tipo].push({
+                            id: estoque.local_id,
+                            nome: estoque.nome_local,
+                            quantidade: estoque.quantidade_disponivel
+                        });
+                    }
+                });
+                
+                // Se há apenas um tipo de local, selecionar automaticamente
+                const tiposDisponiveis = Object.keys(locaisPorTipo);
+                if (tiposDisponiveis.length === 1) {
+                    const tipoUnico = tiposDisponiveis[0];
+                    tipoOrigemSelect.value = tipoUnico;
+                    
+                    // Carregar locais deste tipo
+                    const locais = locaisPorTipo[tipoUnico];
+                    const options = locais.map(local => 
+                        `<option value="${local.id}">${local.nome} (Disponível: ${local.quantidade})</option>`
+                    ).join('');
+                    
+                    localOrigemSelect.innerHTML = '<option value="">Selecione...</option>' + options;
+                    
+                    // Se há apenas um local, selecionar automaticamente
+                    if (locais.length === 1) {
+                        localOrigemSelect.value = locais[0].id;
+                    }
+                } else if (tiposDisponiveis.length > 1) {
+                    // Mostrar mensagem informativa
+                    localOrigemSelect.innerHTML = '<option value="">Produto disponível em múltiplos tipos de local - selecione o tipo primeiro</option>';
+                } else {
+                    localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível</option>';
+                }
+            } else {
+                localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível</option>';
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar estoque:', error);
+            localOrigemSelect.innerHTML = '<option value="">Erro ao carregar estoque</option>';
+        });
+}
+
+// Executar transferência
+function executarTransferencia() {
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const quantidade = document.getElementById('quantidadeTransferencia').value;
+    const tipoOrigem = document.getElementById('tipoOrigemTransferencia').value;
+    const localOrigem = document.getElementById('localOrigemTransferencia').value;
+    const tipoDestino = document.getElementById('tipoDestinoTransferencia').value;
+    const localDestino = document.getElementById('localDestinoTransferencia').value;
+    const motivo = document.getElementById('motivoTransferencia').value;
+    const observacoes = document.getElementById('observacoesTransferencia').value;
+    
+    // Validações básicas
+    if (!produtoId || !quantidade || !tipoOrigem || !localOrigem || !tipoDestino || !localDestino) {
+        alert('Preencha todos os campos obrigatórios');
+        return;
+    }
+    
+    if (USE_MONGO) {
+        // Em Mongo, IDs são strings
+        if (!localOrigem || typeof localOrigem !== 'string') {
+            alert('Por favor, selecione um local de origem válido.');
+            return;
+        }
+        if (!localDestino || typeof localDestino !== 'string') {
+            alert('Por favor, selecione um local de destino válido.');
+            return;
+        }
+    } else {
+        // SQL: validar IDs numéricos
+        if (!localOrigem || localOrigem === '' || localOrigem === 'undefined' || localOrigem === undefined || localOrigem === null || isNaN(parseInt(localOrigem)) || parseInt(localOrigem) <= 0) {
+            alert('Por favor, selecione um local de origem válido.');
+            return;
+        }
+        if (!localDestino || localDestino === '' || localDestino === 'undefined' || localDestino === undefined || localDestino === null || isNaN(parseInt(localDestino)) || parseInt(localDestino) <= 0) {
+            alert('Por favor, selecione um local de destino válido.');
+            return;
+        }
+    }
+    
+    if (parseFloat(quantidade) <= 0) {
+        alert('Quantidade deve ser maior que zero');
+        return;
+    }
+    
+    // Preparar IDs conforme modo
+    const origemId = USE_MONGO ? String(localOrigem) : parseInt(localOrigem);
+    const destinoId = USE_MONGO ? String(localDestino) : parseInt(localDestino);
+    const produtoIdPayload = USE_MONGO ? String(produtoId) : parseInt(produtoId);
+    
+    // Validar se origem e destino são diferentes
+    if (tipoOrigem === tipoDestino && origemId === destinoId) {
+        alert('Não é possível transferir de um local para ele mesmo. Por favor, selecione um local de destino diferente.');
+        return;
+    }
+
+    // Validar se origem e destino pertencem à mesma central
+    const idEq = (a, b) => String(a) === String(b);
+    const getCentralIdByLocal = (tipo, id) => {
+        if (tipo === 'almoxarifado') {
+            const a = (locaisData.almoxarifados || []).find(x => idEq(x.id, id));
+            return a ? String(a.central_id) : null;
+        } else if (tipo === 'sub_almoxarifado') {
+            const sub = (locaisData.sub_almoxarifados || []).find(x => idEq(x.id, id));
+            if (!sub) return null;
+            const alm = (locaisData.almoxarifados || []).find(x => idEq(x.id, sub.almoxarifado_id));
+            return alm ? String(alm.central_id) : null;
+        } else if (tipo === 'setor') {
+            const set = (locaisData.setores || []).find(x => idEq(x.id, id));
+            if (!set) return null;
+            const sub = (locaisData.sub_almoxarifados || []).find(x => idEq(x.id, set.sub_almoxarifado_id));
+            if (!sub) return null;
+            const alm = (locaisData.almoxarifados || []).find(x => idEq(x.id, sub.almoxarifado_id));
+            return alm ? String(alm.central_id) : null;
+        }
+        return null;
+    };
+
+    const centralOrigem = getCentralIdByLocal(tipoOrigem, origemId);
+    const centralDestino = getCentralIdByLocal(tipoDestino, destinoId);
+    if (centralOrigem && centralDestino && centralOrigem !== centralDestino) {
+        alert('Não é possível transferir entre locais de centrais diferentes.');
+        return;
+    }
+
+    const dadosTransferencia = {
+        produto_id: produtoIdPayload,
+        quantidade: parseFloat(quantidade),
+        motivo: motivo || null,
+        observacoes: observacoes || null,
+        origem: {
+            tipo: tipoOrigem,
+            id: origemId
+        },
+        destino: {
+            tipo: tipoDestino,
+            id: destinoId
+        }
+    };
+
+    // Enviar para API
+    fetchJson('/api/movimentacoes/transferencia', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(dadosTransferencia)
+    })
+    .then(result => {
+        alert('Transferência executada com sucesso!');
+        
+        // Fechar modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('novaTransferenciaModal'));
+        modal.hide();
+        
+        // Limpar formulário
+        document.getElementById('transferenciaForm').reset();
+        
+        // Recarregar lista
+        carregarMovimentacoes(currentPage);
+    })
+    .catch(error => {
+        console.error('Erro:', error);
+        alert('Erro ao executar transferência: ' + error.message);
+    });
+}
+
+// Executar distribuição
+function executarDistribuicao() {
+    const produtoId = document.getElementById('produtoDistribuicao').value;
+    const quantidade = document.getElementById('quantidadeDistribuicao').value;
+    const tipoOrigem = document.getElementById('tipoOrigemDistribuicao').value;
+    const localOrigem = document.getElementById('localOrigemDistribuicao').value;
+    const motivo = document.getElementById('motivoDistribuicao').value;
+    const observacoes = document.getElementById('observacoesDistribuicao').value;
+    
+    // Coletar setores selecionados
+    const setoresSelecionados = [];
+    document.querySelectorAll('#setoresDistribuicao input[type="checkbox"]:checked').forEach(checkbox => {
+        setoresSelecionados.push(USE_MONGO ? String(checkbox.value) : parseInt(checkbox.value));
+    });
+    
+    // Validações
+    if (!produtoId || !quantidade || !tipoOrigem || !localOrigem) {
+        alert('Preencha todos os campos obrigatórios');
+        return;
+    }
+    
+    if (setoresSelecionados.length === 0) {
+        alert('Selecione pelo menos um setor de destino');
+        return;
+    }
+    
+    if (parseFloat(quantidade) <= 0) {
+        alert('Quantidade deve ser maior que zero');
+        return;
+    }
+    
+    const dadosDistribuicao = {
+        produto_id: USE_MONGO ? String(produtoId) : parseInt(produtoId),
+        quantidade_total: parseFloat(quantidade),
+        motivo: motivo,
+        observacoes: observacoes,
+        origem: {
+            tipo: tipoOrigem,
+            id: USE_MONGO ? String(localOrigem) : parseInt(localOrigem)
+        },
+        setores_destino: setoresSelecionados
+    };
+    
+    // Enviar para API
+    fetchJson('/api/movimentacoes/distribuicao', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(dadosDistribuicao)
+    })
+    .then(result => {
+        alert(`Distribuição executada com sucesso! ${result.movimentacoes_criadas} movimentações criadas.`);
+        
+        // Fechar modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('distribuicaoModal'));
+        modal.hide();
+        
+        // Limpar formulário
+        document.getElementById('distribuicaoForm').reset();
+        document.querySelectorAll('#setoresDistribuicao input[type="checkbox"]').forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        
+        // Recarregar lista
+        carregarMovimentacoes(currentPage);
+    })
+    .catch(error => {
+        console.error('Erro:', error);
+        alert('Erro ao executar distribuição: ' + error.message);
+    });
+}
+
+// Event listeners
+document.getElementById('filtroProduto').addEventListener('input', 
+    debounce(() => filtrarMovimentacoes(), 500)
+);
+
+// Listeners de busca nos selects de produtos
+const inputBuscaTransf = document.getElementById('buscaProdutoTransferencia');
+if (inputBuscaTransf) {
+    inputBuscaTransf.addEventListener('input', debounce(() => {
+        carregarProdutos(inputBuscaTransf.value);
+    }, 400));
+}
+const inputBuscaDist = document.getElementById('buscaProdutoDistribuicao');
+if (inputBuscaDist) {
+    inputBuscaDist.addEventListener('input', debounce(() => {
+        carregarProdutos(inputBuscaDist.value);
+    }, 400));
+}
+
+// Função debounce
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Carregar dados iniciais
+document.addEventListener('DOMContentLoaded', () => {
+    carregarMovimentacoes(1);
+    carregarProdutos();
+    window.addEventListener('DOMContentLoaded', () => {
+        if (USE_MONGO) {
+            const tipoOrigemDist = document.getElementById('tipoOrigemDistribuicao');
+            if (tipoOrigemDist) {
+                // Remover opção Central em modo Mongo
+                Array.from(tipoOrigemDist.options).forEach(opt => {
+                    if (opt.value === 'central') {
+                        opt.remove();
+                    }
+                });
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

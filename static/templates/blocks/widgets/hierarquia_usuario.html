@@ -1,0 +1,79 @@
+<!-- Widget de Hierarquia do Usuário -->
+<div class="card h-100">
+    <div class="card-header bg-secondary text-white">
+        <h6 class="card-title mb-0">
+            <i class="fas fa-sitemap me-2"></i>
+            Minha Hierarquia
+        </h6>
+    </div>
+    <div class="card-body">
+        <div class="d-flex flex-column">
+            <!-- Nível de Acesso -->
+            <div class="mb-3">
+                <label class="form-label text-muted small">Nível de Acesso:</label>
+                <div class="d-flex align-items-center">
+                    {% if is_super_admin %}
+                        <span class="badge bg-danger me-2">
+                            <i class="fas fa-crown"></i>
+                        </span>
+                        <span class="fw-bold">Super Administrador</span>
+                    {% elif is_admin_central %}
+                        <span class="badge bg-primary me-2">
+                            <i class="fas fa-user-shield"></i>
+                        </span>
+                        <span class="fw-bold">Administrador Central</span>
+                    {% elif is_gerente_almox %}
+                        <span class="badge bg-success me-2">
+                            <i class="fas fa-warehouse"></i>
+                        </span>
+                        <span class="fw-bold">Gerente de Almoxarifado</span>
+                    {% elif is_resp_sub_almox %}
+                        <span class="badge bg-info me-2">
+                            <i class="fas fa-boxes"></i>
+                        </span>
+                        <span class="fw-bold">Responsável Sub-Almoxarifado</span>
+                    {% elif is_operador_setor %}
+                        <span class="badge bg-warning me-2">
+                            <i class="fas fa-user"></i>
+                        </span>
+                        <span class="fw-bold">Operador de Setor</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Escopo de Atuação -->
+            <div class="mb-3">
+                <label class="form-label text-muted small">Escopo de Atuação:</label>
+                <div class="bg-light p-2 rounded">
+                    <strong>{{ scope_name or 'Sistema Completo' }}</strong>
+                </div>
+            </div>
+
+            <!-- Caminho Hierárquico -->
+            {% if hierarchy_path %}
+            <div>
+                <label class="form-label text-muted small">Caminho Hierárquico:</label>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb mb-0">
+                        {% for item in hierarchy_path %}
+                        <li class="breadcrumb-item {% if loop.last %}active{% endif %}">
+                            {% if not loop.last %}
+                                {{ item }}
+                            {% else %}
+                                <strong>{{ item }}</strong>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ol>
+                </nav>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-footer bg-light">
+        <a href="{{ url_for('auth.profile') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-user-edit me-1"></i>
+            Editar Perfil
+        </a>
+    </div>
+</div>

@@ -1,0 +1,1063 @@
+{% extends "base.html" %}
+
+{% block title %}Gerenciamento de Usuários - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-0">Gerenciamento de Usuários</h1>
+                    <p class="text-muted">Gerencie usuários e suas permissões no sistema</p>
+                </div>
+                {% if is_super_admin %}
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal" onclick="openUserModal()">
+                    <i class="fas fa-plus me-2"></i>Novo Usuário
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label for="filter-nivel" class="form-label">Nível de Acesso</label>
+                            <select class="form-select" id="filter-nivel">
+                                <option value="">Todos os níveis</option>
+                                <option value="super_admin">Super Administrador</option>
+                                <option value="admin_central">Admin Central</option>
+                                <option value="gerente_almox">Gerente Almoxarifado</option>
+                                <option value="resp_sub_almox">Responsável Sub-Almox</option>
+                                <option value="operador_setor">Operador Setor</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="filter-status" class="form-label">Status</label>
+                            <select class="form-select" id="filter-status">
+                                <option value="">Todos</option>
+                                <option value="true">Ativo</option>
+                                <option value="false">Inativo</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="filter-search" class="form-label">Buscar</label>
+                            <input type="text" class="form-control" id="filter-search" placeholder="Nome, username ou email">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <button type="button" class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                                <i class="fas fa-times me-2"></i>Limpar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lista de Usuários -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-users me-2"></i>Usuários do Sistema
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Nível de Acesso</th>
+                                    <th>Hierarquia</th>
+                                    <th>Categoria</th>
+                                    <th>Status</th>
+                                    <th>Último Login</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for usuario in usuarios %}
+                                <tr data-nivel="{{ usuario.nivel_acesso }}" data-status="{{ usuario.ativo|lower }}" data-search="{{ (usuario.nome_completo + ' ' + usuario.username + ' ' + usuario.email)|lower }}">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar-sm me-2">
+                                                <div class="avatar-title bg-primary rounded-circle">
+                                                    {{ usuario.nome_completo.split()[0][0] }}{{ usuario.nome_completo.split()[-1][0] if usuario.nome_completo.split()|length > 1 else '' }}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="fw-bold">{{ usuario.nome_completo }}</div>
+                                                <small class="text-muted">ID: {{ usuario.id }}</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>{{ usuario.username }}</td>
+                                    <td>{{ usuario.email }}</td>
+                                    <td>
+                                        {% if usuario.nivel_acesso == 'super_admin' %}
+                                            <span class="badge bg-danger">Super Admin</span>
+                                        {% elif usuario.nivel_acesso == 'admin_central' %}
+                                            <span class="badge bg-warning">Admin Central</span>
+                                        {% elif usuario.nivel_acesso == 'gerente_almox' %}
+                                            <span class="badge bg-info">Gerente Almox</span>
+                                        {% elif usuario.nivel_acesso == 'resp_sub_almox' %}
+                                            <span class="badge bg-success">Resp. Sub-Almox</span>
+                                        {% elif usuario.nivel_acesso == 'operador_setor' %}
+                                            <span class="badge bg-secondary">Operador Setor</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">{{ usuario.get_hierarchy_path() }}</small>
+                                    </td>
+                                    <td>
+                                        {% set cat_display = usuario.get_categorias_display() %}
+                                        {% if cat_display.tipo == 'todas' %}
+                                            <small class="text-muted">Todas</small>
+                                        {% elif cat_display.tipo == 'especifica' or cat_display.tipo == 'principal' %}
+                                            {% set categoria = cat_display.categorias[0] %}
+                                            <span class="badge badge-dynamic" data-color="{{ (categoria.cor if categoria.cor else '#6c757d') }}">
+                                                {{ categoria.codigo }}
+                                            </span>
+                                            <small class="text-muted d-block">{{ categoria.nome }}</small>
+                                        {% elif cat_display.tipo == 'multiplas' %}
+                                            <span class="badge bg-info text-white">
+                                                {{ cat_display.texto }}
+                                            </span>
+                                            <small class="text-muted d-block">
+                                                {% for categoria in cat_display.categorias[:2] %}
+                                                    {{ categoria.codigo }}{% if not loop.last %}, {% endif %}
+                                                {% endfor %}
+                                                {% if cat_display.categorias|length > 2 %}...{% endif %}
+                                            </small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if usuario.ativo %}
+                                            <span class="badge bg-success">Ativo</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">Inativo</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if usuario.ultimo_login %}
+                                            <small class="text-muted">{{ usuario.ultimo_login.strftime('%d/%m/%Y %H:%M') }}</small>
+                                        {% else %}
+                                            <small class="text-muted">Nunca</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            {% if is_super_admin or (usuario.id == current_user.id) %}
+                                            <button type="button" class="btn btn-outline-primary btn-edit" data-user-id="{{ usuario.id }}" title="Editar">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            {% endif %}
+                                            {% if is_super_admin %}
+                                                {% if usuario.ativo %}
+                                                    <button type="button" class="btn btn-outline-warning btn-toggle-status" data-user-id="{{ usuario.id }}" title="Desativar">
+                                                        <i class="fas fa-user-slash"></i>
+                                                    </button>
+                                                {% else %}
+                                                    <button type="button" class="btn btn-outline-success btn-toggle-status" data-user-id="{{ usuario.id }}" title="Ativar">
+                                                        <i class="fas fa-user-check"></i>
+                                                    </button>
+                                                {% endif %}
+                                            {% endif %}
+                                            {% if is_super_admin or (usuario.id == current_user.id) %}
+                                                {% if not (usuario.nivel_acesso == 'super_admin' and not is_super_admin) %}
+                                                <button type="button" class="btn btn-outline-info btn-reset-password" data-user-id="{{ usuario.id }}" title="Resetar Senha">
+                                                    <i class="fas fa-key"></i>
+                                                </button>
+                                                {% endif %}
+                                            {% endif %}
+                                            {% if is_super_admin and usuario.nivel_acesso != 'super_admin' %}
+                                                <button type="button" class="btn btn-outline-danger btn-delete" data-user-id="{{ usuario.id }}" title="Excluir">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Usuário -->
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="userModalTitle">Novo Usuário</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="userForm">
+                <div class="modal-body">
+                    <input type="hidden" id="user-id" name="id">
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="user-nome" class="form-label">Nome Completo *</label>
+                            <input type="text" class="form-control" id="user-nome" name="nome_completo" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="user-username" class="form-label">Username *</label>
+                            <input type="text" class="form-control" id="user-username" name="username" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="user-email" class="form-label">Email *</label>
+                            <input type="email" class="form-control" id="user-email" name="email" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="user-nivel" class="form-label">Nível de Acesso *</label>
+                            <select class="form-select" id="user-nivel" name="nivel_acesso" required onchange="updateHierarchyFields()">
+                                <option value="">Selecione...</option>
+                                <option value="super_admin">Super Administrador</option>
+                                <option value="admin_central">Admin Central</option>
+                                <option value="gerente_almox">Gerente Almoxarifado</option>
+                                <option value="resp_sub_almox">Responsável Sub-Almoxarifado</option>
+                                <option value="operador_setor">Operador Setor</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Campos de Hierarquia -->
+                        <div class="col-md-6" id="central-field" style="display: none;">
+                            <label for="user-central" class="form-label">Central</label>
+                            <select class="form-select" id="user-central" name="central_id">
+                                <option value="">Selecione...</option>
+                                {% for central in centrais %}
+                                    <option value="{{ central.id }}">{{ central.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6" id="almoxarifado-field" style="display: none;">
+                            <label for="user-almoxarifado" class="form-label">Almoxarifado</label>
+                            <select class="form-select" id="user-almoxarifado" name="almoxarifado_id">
+                                <option value="">Selecione...</option>
+                                {% for almoxarifado in almoxarifados %}
+                                    <option value="{{ almoxarifado.id }}" data-central="{{ almoxarifado.central_id }}">{{ almoxarifado.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6" id="sub-almoxarifado-field" style="display: none;">
+                            <label for="user-sub-almoxarifado" class="form-label">Sub-Almoxarifado</label>
+                            <select class="form-select" id="user-sub-almoxarifado" name="sub_almoxarifado_id">
+                                <option value="">Selecione...</option>
+                                {% for sub_almoxarifado in sub_almoxarifados %}
+                                    <option value="{{ sub_almoxarifado.id }}" data-almoxarifado="{{ sub_almoxarifado.almoxarifado_id }}">{{ sub_almoxarifado.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6" id="setor-field" style="display: none;">
+                            <label for="user-setor" class="form-label">Setor</label>
+                            <select class="form-select" id="user-setor" name="setor_id">
+                                <option value="">Selecione...</option>
+                                {% for setor in setores %}
+                                    <option value="{{ setor.id }}" data-sub-almoxarifado="{{ setor.sub_almoxarifado_id }}">{{ setor.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6" id="password-field">
+                            <label for="user-password" class="form-label">Senha *</label>
+                            <input type="password" class="form-control" id="user-password" name="password" required>
+                            <div class="form-text">Mínimo 6 caracteres</div>
+                        </div>
+                        
+                        {% if is_super_admin %}
+                        <div class="col-12" id="categorias-especificas-section">
+                            <label class="form-label">Categorias Específicas</label>
+                            <div class="border rounded p-3">
+                                <div class="row mb-3">
+                                    <div class="col-md-8">
+                                        <select class="form-select" id="categoria-adicionar">
+                                            <option value="">Selecione uma categoria para adicionar...</option>
+                                            {% for categoria in categorias %}
+                                                <option value="{{ categoria.id }}">
+                                                    {{ categoria.codigo }} - {{ categoria.nome }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button type="button" class="btn btn-outline-primary" onclick="adicionarCategoriaEspecifica()">
+                                            <i class="fas fa-plus"></i> Adicionar
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="categorias-especificas-lista">
+                                    <!-- Lista de categorias específicas será carregada aqui -->
+                                </div>
+                                <div class="form-text">
+                                    Defina as categorias que o usuário terá acesso. Se nenhuma categoria for selecionada, 
+                                    o usuário terá acesso a todas as categorias (apenas para administradores).
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        <div class="col-md-6">
+                            <label for="user-ativo" class="form-label">Status</label>
+                            <select class="form-select" id="user-ativo" name="ativo">
+                                <option value="true">Ativo</option>
+                                <option value="false">Inativo</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let isEditMode = false;
+
+// Filtros
+function applyFilters() {
+    const nivelFilter = document.getElementById('filter-nivel').value;
+    const statusFilter = document.getElementById('filter-status').value;
+    const searchFilter = document.getElementById('filter-search').value.toLowerCase();
+    
+    const rows = document.querySelectorAll('#users-table tbody tr');
+    
+    rows.forEach(row => {
+        const nivel = row.getAttribute('data-nivel');
+        const status = row.getAttribute('data-status');
+        const searchText = row.getAttribute('data-search');
+        
+        let show = true;
+        
+        if (nivelFilter && nivel !== nivelFilter) show = false;
+        if (statusFilter && status !== statusFilter) show = false;
+        if (searchFilter && !searchText.includes(searchFilter)) show = false;
+        
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+function clearFilters() {
+    document.getElementById('filter-nivel').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-search').value = '';
+    applyFilters();
+}
+
+// Event listeners para filtros
+document.getElementById('filter-nivel').addEventListener('change', applyFilters);
+document.getElementById('filter-status').addEventListener('change', applyFilters);
+document.getElementById('filter-search').addEventListener('input', applyFilters);
+
+// Modal de usuário
+const IS_SUPER_ADMIN = "{{ 'true' if is_super_admin else 'false' }}" === 'true';
+function openUserModal(userId = null) {
+    isEditMode = !!userId;
+    const modal = document.getElementById('userModal');
+    const title = document.getElementById('userModalTitle');
+    const form = document.getElementById('userForm');
+    const passwordField = document.getElementById('password-field');
+    
+    // Reset form
+    form.reset();
+    document.getElementById('user-id').value = '';
+    
+    // Limpar categorias temporárias e reexibir todas as opções
+    categoriasSelecionadas = [];
+    const select = document.getElementById('categoria-adicionar');
+    const options = select.querySelectorAll('option');
+    options.forEach(option => {
+        if (option.value) option.style.display = '';
+    });
+    
+    if (isEditMode) {
+        title.textContent = 'Editar Usuário';
+        passwordField.style.display = 'none';
+        document.getElementById('user-password').required = false;
+        // Carregar dados do usuário via AJAX
+        loadUserData(userId);
+    } else {
+        title.textContent = 'Novo Usuário';
+        passwordField.style.display = 'block';
+        document.getElementById('user-password').required = true;
+        // Limpar lista de categorias para novo usuário
+        carregarCategoriasEspecificas();
+    }
+    
+    // Se não for super admin, desabilitar campos sensíveis
+    if (!IS_SUPER_ADMIN) {
+        document.getElementById('user-nivel').setAttribute('disabled', 'disabled');
+        document.getElementById('user-ativo').setAttribute('disabled', 'disabled');
+        // Também esconder campos de hierarquia e categorias específicas
+        document.getElementById('central-field').style.display = 'none';
+        document.getElementById('almoxarifado-field').style.display = 'none';
+        document.getElementById('sub-almoxarifado-field').style.display = 'none';
+        document.getElementById('setor-field').style.display = 'none';
+    }
+
+    updateHierarchyFields();
+    
+    // Abrir o modal
+    const modalInstance = new bootstrap.Modal(modal);
+    modalInstance.show();
+}
+
+function updateHierarchyFields() {
+    const nivel = document.getElementById('user-nivel').value;
+    
+    // Sempre esconder todos os campos inicialmente
+    document.getElementById('central-field').style.display = 'none';
+    document.getElementById('almoxarifado-field').style.display = 'none';
+    document.getElementById('sub-almoxarifado-field').style.display = 'none';
+    document.getElementById('setor-field').style.display = 'none';
+    
+    // Se não for super admin, manter oculto e sair
+    if (!IS_SUPER_ADMIN) {
+        return;
+    }
+    
+    // Mostrar campos baseado no nível
+    switch(nivel) {
+        case 'admin_central':
+            document.getElementById('central-field').style.display = 'block';
+            break;
+        case 'gerente_almox':
+            document.getElementById('central-field').style.display = 'block';
+            document.getElementById('almoxarifado-field').style.display = 'block';
+            break;
+        case 'resp_sub_almox':
+            document.getElementById('central-field').style.display = 'block';
+            document.getElementById('almoxarifado-field').style.display = 'block';
+            document.getElementById('sub-almoxarifado-field').style.display = 'block';
+            break;
+        case 'operador_setor':
+            document.getElementById('central-field').style.display = 'block';
+            document.getElementById('almoxarifado-field').style.display = 'block';
+            document.getElementById('sub-almoxarifado-field').style.display = 'block';
+            document.getElementById('setor-field').style.display = 'block';
+            break;
+    }
+}
+
+// Funções CRUD
+function editUser(userId) {
+    openUserModal(userId);
+}
+
+function loadUserData(userId) {
+    fetch(`/api/usuarios/${userId}`)
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            } else {
+                throw new Error('Erro na resposta do servidor');
+            }
+        })
+        .then(user => {
+            document.getElementById('user-id').value = user.id;
+            document.getElementById('user-nome').value = user.nome_completo;
+            document.getElementById('user-username').value = user.username;
+            document.getElementById('user-email').value = user.email;
+            document.getElementById('user-nivel').value = user.nivel_acesso;
+            document.getElementById('user-ativo').value = user.ativo.toString();
+            
+            // Definir hierarquia
+            if (user.central_id) document.getElementById('user-central').value = user.central_id;
+            if (user.almoxarifado_id) document.getElementById('user-almoxarifado').value = user.almoxarifado_id;
+            if (user.sub_almoxarifado_id) document.getElementById('user-sub-almoxarifado').value = user.sub_almoxarifado_id;
+            if (user.setor_id) document.getElementById('user-setor').value = user.setor_id;
+            
+            updateHierarchyFields();
+            
+            // Carregar categorias específicas
+            carregarCategoriasEspecificas();
+        })
+        .catch(error => {
+            console.error('Erro ao carregar usuário:', error);
+            alert('Erro ao carregar dados do usuário');
+        });
+}
+
+function toggleUserStatus(userId) {
+    if (confirm('Tem certeza que deseja alterar o status deste usuário?')) {
+        fetch(`/api/usuarios/${userId}/toggle-status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            } else {
+                throw new Error('Erro na resposta do servidor');
+            }
+        })
+        .then(data => {
+            alert(data.message || 'Status alterado com sucesso');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Erro:', error);
+            alert('Erro ao alterar status do usuário');
+        });
+    }
+}
+
+function resetPassword(userId) {
+    openResetPasswordModal(userId);
+}
+
+// CSS para modal de reset de senha injetado via JS
+const resetPwdModalStyle = document.createElement('style');
+resetPwdModalStyle.textContent = `
+    .custom-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 2000; }
+    .custom-modal.show { display: flex; }
+    .custom-modal-content { background: #fff; border-radius: 8px; padding: 16px; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+`;
+document.head.appendChild(resetPwdModalStyle);
+
+// Criar modal de reset de senha via DOM
+const resetPasswordModal = document.createElement('div');
+resetPasswordModal.id = 'resetPasswordModal';
+resetPasswordModal.className = 'custom-modal';
+resetPasswordModal.innerHTML = `
+    <div class="custom-modal-content">
+        <h5 class="mb-2">Resetar senha do usuário</h5>
+        <div class="mb-2">
+            <input type="password" id="novaSenhaInput" class="form-control" placeholder="Nova senha" autocomplete="new-password">
+        </div>
+        <div class="d-flex gap-2 justify-content-end">
+            <button type="button" class="btn btn-secondary" id="cancelResetBtn">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="confirmResetBtn">Confirmar</button>
+        </div>
+    </div>
+`;
+document.body.appendChild(resetPasswordModal);
+
+let currentResetUserId = null;
+function openResetPasswordModal(userId) {
+    currentResetUserId = userId;
+    const input = document.getElementById('novaSenhaInput');
+    if (input) input.value = '';
+    resetPasswordModal.classList.add('show');
+    setTimeout(() => input && input.focus(), 0);
+}
+
+function closeResetPasswordModal() {
+    resetPasswordModal.classList.remove('show');
+    currentResetUserId = null;
+}
+
+// Handlers do modal
+document.addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'cancelResetBtn') {
+        closeResetPasswordModal();
+    } else if (e.target && e.target.id === 'confirmResetBtn') {
+        const novaSenha = (document.getElementById('novaSenhaInput').value || '').trim();
+        if (!novaSenha) {
+            alert('Nova senha é obrigatória');
+            return;
+        }
+        fetch(`/api/usuarios/${currentResetUserId}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nova_senha: novaSenha })
+        })
+        .then(response => {
+            if (response.ok) return response.json();
+            throw new Error('Erro na resposta do servidor');
+        })
+        .then(data => {
+            alert(data.message || 'Senha resetada com sucesso!');
+            closeResetPasswordModal();
+        })
+        .catch(error => {
+            console.error('Erro:', error);
+            alert('Erro ao resetar senha');
+        });
+    }
+});
+
+// Fechar ao clicar fora do conteúdo
+resetPasswordModal.addEventListener('click', function(e) {
+    if (e.target === resetPasswordModal) {
+        closeResetPasswordModal();
+    }
+});
+
+// Submit com Enter
+document.addEventListener('keydown', function(e) {
+    const isOpen = resetPasswordModal.classList.contains('show');
+    if (isOpen && e.key === 'Enter') {
+        const confirmBtn = document.getElementById('confirmResetBtn');
+        if (confirmBtn) confirmBtn.click();
+    }
+});
+
+function deleteUser(userId) {
+    if (confirm('Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.')) {
+        fetch(`/api/usuarios/${userId}`, {
+            method: 'DELETE'
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            } else {
+                throw new Error('Erro na resposta do servidor');
+            }
+        })
+        .then(data => {
+            alert(data.message || 'Usuário excluído com sucesso');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Erro:', error);
+            alert('Erro ao excluir usuário');
+        });
+    }
+}
+
+// Submit do formulário
+document.getElementById('userForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData.entries());
+    
+    // Converter valores
+    data.ativo = data.ativo === 'true';
+    
+    // Mapear campos do formulário para API
+    const apiData = {
+        nome: data.nome_completo,
+        email: data.email,
+        login: data.username,
+        nivel: data.nivel_acesso,
+        ativo: data.ativo,
+        central_id: data.central_id || null,
+        almoxarifado_id: data.almoxarifado_id || null,
+        sub_almoxarifado_id: data.sub_almoxarifado_id || null,
+        setor_id: data.setor_id || null,
+        categoria_id: data.categoria_id || null
+    };
+    
+    // Adicionar senha (obrigatória na criação, opcional na edição)
+    if (!isEditMode) {
+        // Na criação, senha é obrigatória
+        if (!data.password) {
+            alert('Senha é obrigatória para novos usuários');
+            return;
+        }
+        apiData.senha = data.password;
+    } else {
+        // Na edição, senha é opcional
+        if (data.password) {
+            apiData.senha = data.password;
+        }
+    }
+    
+    const url = isEditMode ? `/api/usuarios/${data.id}` : '/api/usuarios';
+    const method = isEditMode ? 'PUT' : 'POST';
+    
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(apiData)
+    })
+    .then(response => {
+        if (response.ok) {
+            return response.json();
+        } else {
+            return response.json().then(err => Promise.reject(err));
+        }
+    })
+    .then(data => {
+        // Se é criação de usuário e há categorias selecionadas, adicioná-las
+        if (!isEditMode && categoriasSelecionadas.length > 0) {
+            return adicionarCategoriasAposCreacao(data.id);
+        } else {
+            alert('Usuário salvo com sucesso!');
+            location.reload();
+        }
+    })
+    .catch(error => {
+        console.error('Erro:', error);
+        alert(error.error || 'Erro ao salvar usuário');
+    });
+});
+
+// CSS para avatar
+const style = document.createElement('style');
+style.textContent = `
+    .avatar-sm {
+        width: 32px;
+        height: 32px;
+    }
+    .avatar-title {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: bold;
+        color: white;
+    }
+`;
+document.head.appendChild(style);
+
+// Funções para gerenciar categorias específicas
+
+// Array para armazenar categorias temporariamente durante criação
+let categoriasSelecionadas = [];
+
+function carregarCategoriasEspecificas() {
+    const userId = document.getElementById('user-id').value;
+    if (!userId) {
+        // Se não há userId (novo usuário), limpar lista temporária
+        categoriasSelecionadas = [];
+        const lista = document.getElementById('categorias-especificas-lista');
+        lista.innerHTML = '<div class="text-muted">Nenhuma categoria específica configurada</div>';
+        return;
+    }
+    
+    fetch(`/api/usuarios/${userId}/categorias-especificas`)
+        .then(response => response.json())
+        .then(data => {
+            const lista = document.getElementById('categorias-especificas-lista');
+            lista.innerHTML = '';
+            
+            if (data.categorias_especificas && data.categorias_especificas.length > 0) {
+                data.categorias_especificas.forEach(categoria => {
+                    adicionarCategoriaLista(categoria);
+                });
+            } else {
+                lista.innerHTML = '<div class="text-muted">Nenhuma categoria específica configurada</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar categorias específicas:', error);
+        });
+}
+
+function adicionarCategoriaEspecifica() {
+    const select = document.getElementById('categoria-adicionar');
+    const categoriaId = select.value;
+    const userId = document.getElementById('user-id').value;
+    
+    if (!categoriaId) {
+        alert('Selecione uma categoria para adicionar');
+        return;
+    }
+    
+    // Se é um usuário existente, usar API
+    if (userId) {
+        fetch(`/api/usuarios/${userId}/categorias-especificas`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ categoria_id: categoriaId })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+            } else {
+                adicionarCategoriaLista(data.categoria);
+                select.value = '';
+                // Remover opção do select temporariamente
+                const option = select.querySelector(`option[value="${categoriaId}"]`);
+                if (option) option.style.display = 'none';
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao adicionar categoria:', error);
+            alert('Erro ao adicionar categoria específica');
+        });
+    } else {
+        // Se é novo usuário, armazenar temporariamente
+        const option = select.querySelector(`option[value="${categoriaId}"]`);
+        if (option) {
+            const categoria = {
+                id: categoriaId,
+                nome: option.textContent.trim()
+            };
+            
+            // Verificar se já foi adicionada
+            if (!categoriasSelecionadas.find(c => c.id === categoria.id)) {
+                categoriasSelecionadas.push(categoria);
+                adicionarCategoriaLista(categoria, true); // true indica que é temporário
+                select.value = '';
+                option.style.display = 'none';
+            } else {
+                alert('Esta categoria já foi adicionada');
+            }
+        }
+    }
+}
+
+function adicionarCategoriaLista(categoria, isTemporary = false) {
+    const lista = document.getElementById('categorias-especificas-lista');
+    
+    // Remover mensagem de "nenhuma categoria"
+    const emptyMessage = lista.querySelector('.text-muted');
+    if (emptyMessage) emptyMessage.remove();
+    
+    const div = document.createElement('div');
+    div.className = 'badge bg-primary me-2 mb-2 d-inline-flex align-items-center';
+    div.setAttribute('data-categoria-id', categoria.id);
+    
+    if (isTemporary) {
+        div.innerHTML = `
+            ${categoria.nome}
+            <button type="button" class="btn-close btn-close-white ms-2" 
+                    onclick="removerCategoriaTemporaria('${categoria.id}', this)" 
+                    aria-label="Remover"></button>
+        `;
+    } else {
+        div.innerHTML = `
+            ${categoria.nome}
+            <button type="button" class="btn-close btn-close-white ms-2" 
+                    onclick="removerCategoriaEspecifica('${categoria.id}', this)" 
+                    aria-label="Remover"></button>
+        `;
+    }
+    
+    lista.appendChild(div);
+}
+
+function removerCategoriaTemporaria(categoriaId, button) {
+    // Remover da lista temporária
+    categoriasSelecionadas = categoriasSelecionadas.filter(c => c.id !== categoriaId);
+    
+    // Remover da lista visual
+    button.parentElement.remove();
+    
+    // Reexibir opção no select
+    const select = document.getElementById('categoria-adicionar');
+    const option = select.querySelector(`option[value="${categoriaId}"]`);
+    if (option) option.style.display = '';
+    
+    // Se não há mais categorias, mostrar mensagem
+    const lista = document.getElementById('categorias-especificas-lista');
+    if (lista.children.length === 0) {
+        lista.innerHTML = '<div class="text-muted">Nenhuma categoria específica configurada</div>';
+    }
+}
+
+function removerCategoriaEspecifica(categoriaId, button) {
+    const userId = document.getElementById('user-id').value;
+    
+    fetch(`/api/usuarios/${userId}/categorias-especificas/${categoriaId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert(data.error);
+        } else {
+            // Remover da lista
+            button.parentElement.remove();
+            
+            // Reexibir opção no select
+            const select = document.getElementById('categoria-adicionar');
+            const option = select.querySelector(`option[value="${categoriaId}"]`);
+            if (option) option.style.display = '';
+            
+            // Se não há mais categorias, mostrar mensagem
+            const lista = document.getElementById('categorias-especificas-lista');
+            if (lista.children.length === 0) {
+                lista.innerHTML = '<div class="text-muted">Nenhuma categoria específica configurada</div>';
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Erro ao remover categoria:', error);
+        alert('Erro ao remover categoria específica');
+    });
+}
+
+function adicionarCategoriasAposCreacao(userId) {
+    // Adicionar cada categoria selecionada via API
+    const promises = categoriasSelecionadas.map(categoria => {
+        return fetch(`/api/usuarios/${userId}/categorias-especificas`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ categoria_id: categoria.id })
+        }).then(response => {
+            if (!response.ok) {
+                throw new Error(`Erro ao adicionar categoria ${categoria.nome}`);
+            }
+            return response.json();
+        });
+    });
+    
+    return Promise.all(promises)
+        .then(results => {
+            alert('Usuário criado com sucesso e categorias específicas adicionadas!');
+            // Aguardar um pouco antes de recarregar para evitar cancelamento de requisições
+            setTimeout(() => {
+                location.reload();
+            }, 100);
+        })
+        .catch(error => {
+            console.error('Erro ao adicionar categorias:', error);
+            alert('Usuário criado, mas houve erro ao adicionar categorias específicas. Edite o usuário para configurar as categorias.');
+            setTimeout(() => {
+                location.reload();
+            }, 100);
+        });
+}
+
+// Event listeners para os botões
+document.addEventListener('DOMContentLoaded', function() {
+    // Botões de editar
+    document.querySelectorAll('.btn-edit').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            editUser(userId);
+        });
+    });
+
+    // Botões de toggle status
+    document.querySelectorAll('.btn-toggle-status').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            toggleUserStatus(userId);
+        });
+    });
+
+    // Botões de reset password
+    document.querySelectorAll('.btn-reset-password').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            resetPassword(userId);
+        });
+    });
+
+    // Botões de delete
+    document.querySelectorAll('.btn-delete').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            deleteUser(userId);
+        });
+    });
+});
+</script>
+{% endblock %}
+
+// CSS para modal de reset de senha injetado via JS
+const resetPwdModalStyle = document.createElement('style');
+resetPwdModalStyle.textContent = `
+    .custom-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 2000; }
+    .custom-modal.show { display: flex; }
+    .custom-modal-content { background: #fff; border-radius: 8px; padding: 16px; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+`;
+document.head.appendChild(resetPwdModalStyle);
+
+// Criar modal de reset de senha via DOM
+const resetPasswordModal = document.createElement('div');
+resetPasswordModal.id = 'resetPasswordModal';
+resetPasswordModal.className = 'custom-modal';
+resetPasswordModal.innerHTML = `
+    <div class="custom-modal-content">
+        <h5 class="mb-2">Resetar senha do usuário</h5>
+        <div class="mb-2">
+            <input type="password" id="novaSenhaInput" class="form-control" placeholder="Nova senha" autocomplete="new-password">
+        </div>
+        <div class="d-flex gap-2 justify-content-end">
+            <button type="button" class="btn btn-secondary" id="cancelResetBtn">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="confirmResetBtn">Confirmar</button>
+        </div>
+    </div>
+`;
+document.body.appendChild(resetPasswordModal);
+
+let currentResetUserId = null;
+function openResetPasswordModal(userId) {
+    currentResetUserId = userId;
+    const input = document.getElementById('novaSenhaInput');
+    if (input) input.value = '';
+    resetPasswordModal.classList.add('show');
+    setTimeout(() => input && input.focus(), 0);
+}
+function closeResetPasswordModal() {
+    resetPasswordModal.classList.remove('show');
+    currentResetUserId = null;
+}
+
+// Handlers do modal
+document.addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'cancelResetBtn') {
+        closeResetPasswordModal();
+    } else if (e.target && e.target.id === 'confirmResetBtn') {
+        const novaSenha = (document.getElementById('novaSenhaInput').value || '').trim();
+        if (!novaSenha) {
+            alert('Nova senha é obrigatória');
+            return;
+        }
+        fetch(`/api/usuarios/${currentResetUserId}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nova_senha: novaSenha })
+        })
+        .then(response => {
+            if (response.ok) return response.json();
+            throw new Error('Erro na resposta do servidor');
+        })
+        .then(data => {
+            alert(data.message || 'Senha resetada com sucesso!');
+            closeResetPasswordModal();
+        })
+        .catch(error => {
+            console.error('Erro:', error);
+            alert('Erro ao resetar senha');
+        });
+    }
+});
+
+// Fechar ao clicar fora do conteúdo
+resetPasswordModal.addEventListener('click', function(e) {
+    if (e.target === resetPasswordModal) {
+        closeResetPasswordModal();
+    }
+});
+
+// Submit com Enter
+document.addEventListener('keydown', function(e) {
+    const isOpen = resetPasswordModal.classList.contains('show');
+    if (isOpen && e.key === 'Enter') {
+        const confirmBtn = document.getElementById('confirmResetBtn');
+        if (confirmBtn) confirmBtn.click();
+    }
+});

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: almox-sms
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
+    autoDeploy: true

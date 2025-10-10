@@ -1,0 +1,53 @@
+<!-- Blocos de Menu Personalizáveis por Nível de Acesso -->
+
+{# Macro para renderizar um item de menu simples #}
+{% macro render_menu_item(block) %}
+<li class="nav-item">
+    <a class="nav-link menu-item {% if request.endpoint in block.active_endpoints %}active{% endif %}" 
+       href="{% if block.url %}{{ url_for(block.url) }}{% else %}#{% endif %}"
+       title="{{ block.label }}">
+        <i class="{{ block.icon }}"></i>
+        <span class="menu-text">{{ block.label }}</span>
+    </a>
+</li>
+{% endmacro %}
+
+
+
+{# Macro para renderizar um item de menu com submenu #}
+{% macro render_menu_with_submenu(block) %}
+<li class="nav-item">
+    <a class="nav-link menu-item" 
+       data-bs-toggle="collapse" 
+       href="#submenu-{{ block.label|lower|replace(' ', '-') }}" 
+       role="button" 
+       aria-expanded="false" 
+       aria-controls="submenu-{{ block.label|lower|replace(' ', '-') }}">
+        <i class="{{ block.icon }}"></i>
+        <span class="menu-text">{{ block.label }}</span>
+        <i class="fas fa-chevron-down ms-auto"></i>
+    </a>
+    <div class="collapse" id="submenu-{{ block.label|lower|replace(' ', '-') }}">
+        <ul class="navbar-nav ps-3">
+            {% for child in block.children %}
+                {{ render_menu_item(child) }}
+            {% endfor %}
+        </ul>
+    </div>
+</li>
+{% endmacro %}
+
+
+
+{# Macro principal para renderizar menu personalizado #}
+{% macro render_personalized_menu(blocks) %}
+<ul class="navbar-nav">
+    {% for block in blocks %}
+        {% if block.children %}
+            {{ render_menu_with_submenu(block) }}
+        {% else %}
+            {{ render_menu_item(block) }}
+        {% endif %}
+    {% endfor %}
+</ul>
+{% endmacro %}

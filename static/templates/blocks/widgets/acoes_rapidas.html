@@ -1,0 +1,112 @@
+<!-- Widget de Ações Rápidas -->
+<div class="card h-100">
+    <div class="card-header bg-dark text-white">
+        <h6 class="card-title mb-0">
+            <i class="fas fa-bolt me-2"></i>
+            Ações Rápidas
+        </h6>
+    </div>
+    <div class="card-body">
+        <div class="row g-2">
+            <!-- Ações para Super Admin e Admin Central -->
+            {% if is_super_admin or is_admin_central %}
+            <div class="col-6">
+                <a href="{{ url_for('main.configuracoes_hierarquia') }}" class="btn btn-outline-primary btn-sm w-100">
+                    <i class="fas fa-sitemap d-block mb-1"></i>
+                    <small>Hierarquia</small>
+                </a>
+            </div>
+            <div class="col-6">
+                <a href="{{ url_for('main.users') }}" class="btn btn-outline-success btn-sm w-100">
+                    <i class="fas fa-users d-block mb-1"></i>
+                    <small>Usuários</small>
+                </a>
+            </div>
+            {% endif %}
+
+            <!-- Ações para Gerentes e Responsáveis -->
+            {% if is_super_admin or is_admin_central or is_gerente_almox %}
+            <div class="col-6">
+                <a href="{{ url_for('main.produtos') }}" class="btn btn-outline-info btn-sm w-100">
+                    <i class="fas fa-plus d-block mb-1"></i>
+                    <small>Produto</small>
+                </a>
+            </div>
+            {% endif %}
+
+            <!-- Ações para todos os usuários -->
+            <div class="col-6">
+                <a href="{{ url_for('main.movimentacoes') }}" class="btn btn-outline-warning btn-sm w-100">
+                    <i class="fas fa-exchange-alt d-block mb-1"></i>
+                    <small>Movimentação</small>
+                </a>
+            </div>
+
+            <div class="col-6">
+                <a href="{{ url_for('main.estoque') }}" class="btn btn-outline-secondary btn-sm w-100">
+                    <i class="fas fa-search d-block mb-1"></i>
+                    <small>Consultar</small>
+                </a>
+            </div>
+
+            <!-- Ações para Gerentes -->
+            {% if is_super_admin or is_admin_central or is_gerente_almox %}
+            <div class="col-6">
+                <a href="#" onclick="showRelatoriosModal()" class="btn btn-outline-dark btn-sm w-100">
+                    <i class="fas fa-chart-bar d-block mb-1"></i>
+                    <small>Relatórios</small>
+                </a>
+            </div>
+            {% endif %}
+
+            <div class="col-6">
+                <a href="{{ url_for('main.configuracoes') }}" class="btn btn-outline-primary btn-sm w-100">
+                    <i class="fas fa-cog d-block mb-1"></i>
+                    <small>Config.</small>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Relatórios -->
+{% if is_super_admin or is_admin_central or is_gerente_almox %}
+<div class="modal fade" id="relatoriosModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    Relatórios Disponíveis
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="list-group">
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="fas fa-warehouse me-2"></i>
+                        Relatório de Estoque
+                    </a>
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="fas fa-exchange-alt me-2"></i>
+                        Relatório de Movimentações
+                    </a>
+                    {% if is_super_admin or is_admin_central %}
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="fas fa-users me-2"></i>
+                        Relatório de Usuários
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showRelatoriosModal() {
+    const modal = new bootstrap.Modal(document.getElementById('relatoriosModal'));
+    modal.show();
+}
+</script>
+{% endif %}

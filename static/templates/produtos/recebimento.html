@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+
+{% block title %}Recebimento de Produto - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-plus-circle"></i> Recebimento de Produto</h2>
+                <div>
+                    <a href="{{ url_for('main.produtos') }}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-list"></i> Lista de Produtos
+                    </a>
+                    <button class="btn btn-outline-primary" id="btnDetalhes" style="display: none;">
+                        <i class="fas fa-eye"></i> Ver Detalhes
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <!-- Seleção do Produto -->
+                <div class="col-lg-4">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-search"></i> Selecionar Produto</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="buscarProduto" class="form-label">Buscar Produto</label>
+                                <input type="text" class="form-control" id="buscarProduto" 
+                                       placeholder="Digite código ou nome do produto...">
+                                <div class="form-text">Digite pelo menos 2 caracteres</div>
+                            </div>
+                            
+                            <div id="resultadosBusca" style="display: none;">
+                                <label class="form-label">Resultados:</label>
+                                <div class="list-group" id="listaProdutos">
+                                    <!-- Produtos serão carregados aqui -->
+                                </div>
+                            </div>
+                            
+                            <div id="produtoSelecionado" style="display: none;">
+                                <div class="alert alert-success">
+                                    <h6><i class="fas fa-check-circle"></i> Produto Selecionado</h6>
+                                    <div id="infoProdutoSelecionado"></div>
+                                    <button class="btn btn-sm btn-outline-secondary mt-2" onclick="limparSelecao()">
+                                        <i class="fas fa-times"></i> Alterar Produto
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Formulário de Recebimento -->
+                <div class="col-lg-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-clipboard-list"></i> Dados do Recebimento</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="recebimentoForm" style="display: none;">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="quantidade" class="form-label">Quantidade Recebida *</label>
+                                            <div class="input-group">
+                                                <input type="number" class="form-control" id="quantidade" name="quantidade" 
+                                                       min="0.01" step="0.01" required>
+                                                <span class="input-group-text" id="unidadeMedida">UN</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="preco_unitario" class="form-label">Preço Unitário</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text">R$</span>
+                                                <input type="number" class="form-control" id="preco_unitario" name="preco_unitario" 
+                                                       min="0" step="0.01">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="almoxarifado_id" class="form-label">Almoxarifado *</label>
+                                            <select class="form-control" id="almoxarifado_id" name="almoxarifado_id" required disabled>
+                                                <option value="">Selecione um produto primeiro</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="lote" class="form-label">Número do Lote</label>
+                                            <input type="text" class="form-control" id="lote" name="lote" 
+                                                   placeholder="Ex: L2024001">
+                                            <div class="form-text">Identificação do lote do fornecedor</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="fornecedor" class="form-label">Fornecedor</label>
+                                            <input type="text" class="form-control" id="fornecedor" name="fornecedor" 
+                                                   placeholder="Nome do fornecedor">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="data_fabricacao" class="form-label">Data de Fabricação</label>
+                                            <input type="date" class="form-control" id="data_fabricacao" name="data_fabricacao">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="data_vencimento" class="form-label">Data de Vencimento</label>
+                                            <input type="date" class="form-control" id="data_vencimento" name="data_vencimento">
+                                            <div class="form-text" id="alertaVencimento"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="nota_fiscal" class="form-label">Nota Fiscal</label>
+                                    <input type="text" class="form-control" id="nota_fiscal" name="nota_fiscal" 
+                                           placeholder="Número da nota fiscal">
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="observacoes" class="form-label">Observações</label>
+                                    <textarea class="form-control" id="observacoes" name="observacoes" rows="3" 
+                                              placeholder="Informações adicionais sobre o recebimento..."></textarea>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">Valor Total</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text">R$</span>
+                                                <input type="text" class="form-control" id="valor_total" readonly>
+                                            </div>
+                                            <div class="form-text">Calculado automaticamente</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="data_recebimento" class="form-label">Data do Recebimento</label>
+                                            <input type="datetime-local" class="form-control" id="data_recebimento" name="data_recebimento">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                    <button type="button" class="btn btn-outline-secondary me-md-2" onclick="limparFormulario()">
+                                        <i class="fas fa-eraser"></i> Limpar
+                                    </button>
+                                    <button type="submit" class="btn btn-success" id="submitBtn">
+                                        <i class="fas fa-check"></i> Registrar Recebimento
+                                    </button>
+                                </div>
+                            </form>
+
+                            <div id="mensagemSelecao" class="text-center py-5">
+                                <i class="fas fa-arrow-left fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">Selecione um produto para continuar</h5>
+                                <p class="text-muted">Use a busca ao lado para encontrar o produto que deseja receber</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Confirmação -->
+<div class="modal fade" id="confirmacaoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-check-circle"></i> Recebimento Registrado
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="resumoRecebimento"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" onclick="novoRecebimento()">
+                    <i class="fas fa-plus"></i> Novo Recebimento
+                </button>
+                <button type="button" class="btn btn-primary" id="verDetalhesBtn">
+                    <i class="fas fa-eye"></i> Ver Detalhes do Produto
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let produtoSelecionado = null;
+let timeoutBusca = null;
+
+// Buscar produtos
+document.getElementById('buscarProduto').addEventListener('input', function() {
+    const termo = this.value.trim();
+    
+    clearTimeout(timeoutBusca);
+    
+    if (termo.length < 2) {
+        document.getElementById('resultadosBusca').style.display = 'none';
+        return;
+    }
+    
+    timeoutBusca = setTimeout(() => {
+        buscarProdutos(termo);
+    }, 300);
+});
+
+function buscarProdutos(termo) {
+    fetchJson(`/api/produtos?search=${encodeURIComponent(termo)}&limit=10`)
+        .then(data => {
+            const lista = document.getElementById('listaProdutos');
+            lista.innerHTML = '';
+            
+            if (!data.items || data.items.length === 0) {
+                lista.innerHTML = `
+                    <div class="list-group-item text-muted">
+                        <i class="fas fa-search"></i> Nenhum produto encontrado
+                    </div>
+                `;
+            } else {
+                data.items.forEach(produto => {
+                    const item = document.createElement('a');
+                    item.className = 'list-group-item list-group-item-action';
+                    item.href = '#';
+                    item.innerHTML = `
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">${produto.nome}</h6>
+                            <small class="badge bg-primary">${produto.codigo}</small>
+                        </div>
+                        <p class="mb-1">${produto.descricao || 'Sem descrição'}</p>
+                        <small>Unidade: ${produto.unidade_medida}</small>
+                    `;
+                    
+                    item.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        selecionarProduto(produto);
+                    });
+                    
+                    lista.appendChild(item);
+                });
+            }
+            
+            document.getElementById('resultadosBusca').style.display = 'block';
+        })
+        .catch(error => {
+            console.error('Erro ao buscar produtos:', error);
+            document.getElementById('listaProdutos').innerHTML = `
+                <div class="list-group-item text-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Erro ao buscar produtos
+                </div>
+            `;
+        });
+}
+
+// Selecionar produto
+function selecionarProduto(produto) {
+    produtoSelecionado = produto;
+    
+    // Mostrar produto selecionado
+    document.getElementById('infoProdutoSelecionado').innerHTML = `
+        <strong>${produto.nome}</strong><br>
+        <small>Código: ${produto.codigo} | Unidade: ${produto.unidade_medida}</small>
+    `;
+    
+    document.getElementById('produtoSelecionado').style.display = 'block';
+    document.getElementById('resultadosBusca').style.display = 'none';
+    document.getElementById('buscarProduto').value = produto.nome;
+    
+    // Carregar almoxarifados do produto
+    carregarAlmoxarifados(produto.id);
+    
+    // Mostrar formulário
+    document.getElementById('recebimentoForm').style.display = 'block';
+    document.getElementById('mensagemSelecao').style.display = 'none';
+    
+    // Atualizar unidade de medida
+    document.getElementById('unidadeMedida').textContent = produto.unidade_medida;
+    
+    // Configurar data atual
+    const agora = new Date();
+    agora.setMinutes(agora.getMinutes() - agora.getTimezoneOffset());
+    document.getElementById('data_recebimento').value = agora.toISOString().slice(0, 16);
+    
+    // Mostrar botão de detalhes
+    const btnDetalhes = document.getElementById('btnDetalhes');
+    btnDetalhes.style.display = 'inline-block';
+    btnDetalhes.onclick = () => {
+        window.location.href = `/produtos/${produto.id}`;
+    };
+    
+    // Focar na quantidade
+    document.getElementById('quantidade').focus();
+}
+
+function carregarAlmoxarifados(produtoId) {
+    const selectAlmoxarifado = document.getElementById('almoxarifado_id');
+    
+    selectAlmoxarifado.disabled = true;
+    selectAlmoxarifado.innerHTML = '<option value="">Carregando...</option>';
+    
+    fetchJson(`/api/produtos/${produtoId}/almoxarifados`)
+        .then(data => {
+            if (data.success) {
+                selectAlmoxarifado.innerHTML = '<option value="">Selecione um almoxarifado</option>';
+                
+                data.almoxarifados.forEach(almoxarifado => {
+                    const option = document.createElement('option');
+                    option.value = almoxarifado.id;
+                    option.textContent = almoxarifado.nome;
+                    if (almoxarifado.tem_estoque) {
+                        option.textContent += ` - Estoque: ${almoxarifado.quantidade_atual}`;
+                    }
+                    selectAlmoxarifado.appendChild(option);
+                });
+                
+                selectAlmoxarifado.disabled = false;
+            } else {
+                selectAlmoxarifado.innerHTML = '<option value="">Erro ao carregar almoxarifados</option>';
+                console.error('Erro ao carregar almoxarifados:', data.error);
+            }
+        })
+        .catch(error => {
+            selectAlmoxarifado.innerHTML = '<option value="">Erro ao carregar almoxarifados</option>';
+            console.error('Erro ao carregar almoxarifados:', error);
+        });
+}
+
+// Limpar seleção
+function limparSelecao() {
+    produtoSelecionado = null;
+    document.getElementById('produtoSelecionado').style.display = 'none';
+    document.getElementById('recebimentoForm').style.display = 'none';
+    document.getElementById('mensagemSelecao').style.display = 'block';
+    document.getElementById('btnDetalhes').style.display = 'none';
+    document.getElementById('buscarProduto').value = '';
+    document.getElementById('buscarProduto').focus();
+    
+    // Limpar e desabilitar campo de almoxarifado
+    const selectAlmoxarifado = document.getElementById('almoxarifado_id');
+    selectAlmoxarifado.innerHTML = '<option value="">Selecione um produto primeiro</option>';
+    selectAlmoxarifado.disabled = true;
+    
+    limparFormulario();
+}
+
+// Calcular valor total
+function calcularValorTotal() {
+    const quantidade = parseFloat(document.getElementById('quantidade').value) || 0;
+    const precoUnitario = parseFloat(document.getElementById('preco_unitario').value) || 0;
+    const valorTotal = quantidade * precoUnitario;
+    
+    document.getElementById('valor_total').value = valorTotal.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+// Verificar data de vencimento
+function verificarVencimento() {
+    const dataVencimento = document.getElementById('data_vencimento').value;
+    const alertaDiv = document.getElementById('alertaVencimento');
+    
+    if (!dataVencimento) {
+        alertaDiv.innerHTML = '';
+        return;
+    }
+    
+    const hoje = new Date();
+    const vencimento = new Date(dataVencimento);
+    const diasVencimento = Math.ceil((vencimento - hoje) / (1000 * 60 * 60 * 24));
+    
+    if (diasVencimento < 0) {
+        alertaDiv.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Produto já vencido!</span>';
+    } else if (diasVencimento <= 30) {
+        alertaDiv.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> Vence em breve!</span>';
+    } else if (diasVencimento <= 90) {
+        alertaDiv.innerHTML = '<span class="text-info"><i class="fas fa-info-circle"></i> Vencimento próximo</span>';
+    } else {
+        alertaDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Validade adequada</span>';
+    }
+}
+
+// Limpar formulário
+function limparFormulario() {
+    document.getElementById('recebimentoForm').reset();
+    document.getElementById('valor_total').value = '';
+    document.getElementById('alertaVencimento').innerHTML = '';
+    
+    if (produtoSelecionado) {
+        const agora = new Date();
+        agora.setMinutes(agora.getMinutes() - agora.getTimezoneOffset());
+        document.getElementById('data_recebimento').value = agora.toISOString().slice(0, 16);
+    }
+}
+
+// Novo recebimento
+function novoRecebimento() {
+    bootstrap.Modal.getInstance(document.getElementById('confirmacaoModal')).hide();
+    limparFormulario();
+    document.getElementById('quantidade').focus();
+}
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    // Verificar se há ID do produto na URL
+    const path = window.location.pathname;
+    // Extract segment after /produtos/
+    const after = path.split('/produtos/')[1] || '';
+    const idSegment = (after.split('/')[0] || '').trim();
+    if (idSegment) {
+        const produtoId = (/^[a-fA-F0-9]{24}$/.test(idSegment)) ? idSegment : (/^\d+$/.test(idSegment) ? parseInt(idSegment, 10) : idSegment);
+        fetchJson(`/api/produtos/${produtoId}`)
+            .then(produto => {
+                if (!produto.error) {
+                    selecionarProduto(produto);
+                }
+            })
+            .catch(error => {
+                console.error('Erro ao carregar produto:', error);
+            });
+    }
+    
+    // Cálculo automático do valor total
+    document.getElementById('quantidade').addEventListener('input', calcularValorTotal);
+    document.getElementById('preco_unitario').addEventListener('input', calcularValorTotal);
+    
+    // Verificação de vencimento
+    document.getElementById('data_vencimento').addEventListener('change', verificarVencimento);
+    
+    // Submissão do formulário
+    document.getElementById('recebimentoForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        if (!produtoSelecionado) {
+            alert('Selecione um produto primeiro');
+            return;
+        }
+        
+        const formData = new FormData(this);
+        const data = {
+            produto_id: produtoSelecionado.id,
+            quantidade: parseFloat(formData.get('quantidade')),
+            preco_unitario: parseFloat(formData.get('preco_unitario')) || null,
+            lote: formData.get('lote').trim() || null,
+            fornecedor: formData.get('fornecedor').trim() || null,
+            data_fabricacao: formData.get('data_fabricacao') || null,
+            data_vencimento: formData.get('data_vencimento') || null,
+            nota_fiscal: formData.get('nota_fiscal').trim() || null,
+            observacoes: formData.get('observacoes').trim() || null,
+            data_recebimento: formData.get('data_recebimento')
+        };
+        
+        if (!data.quantidade || data.quantidade <= 0) {
+            alert('Quantidade deve ser maior que zero');
+            return;
+        }
+        
+        const almoxarifadoId = formData.get('almoxarifado_id');
+        if (!almoxarifadoId) {
+            alert('Selecione um almoxarifado');
+            return;
+        }
+        
+        // Enviar ID robusto (numérico ou ObjectId string) sem parseInt obrigatório
+        data.almoxarifado_id = (/^\d+$/.test(almoxarifadoId)) ? parseInt(almoxarifadoId, 10) : almoxarifadoId;
+        
+        const submitBtn = document.getElementById('submitBtn');
+        const originalText = submitBtn.innerHTML;
+        
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
+        
+        fetchJson(`/api/produtos/${produtoSelecionado.id}/recebimento`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(result => {
+            if (result.error) {
+                throw new Error(result.error);
+            }
+            
+            const valorTotal = data.quantidade * (data.preco_unitario || 0);
+            document.getElementById('resumoRecebimento').innerHTML = `
+                <div class="row">
+                    <div class="col-12 mb-3">
+                        <h6><strong>${produtoSelecionado.nome}</strong></h6>
+                        <small class="text-muted">Código: ${produtoSelecionado.codigo}</small>
+                    </div>
+                    <div class="col-6">
+                        <strong>Quantidade:</strong><br>
+                        ${data.quantidade} ${produtoSelecionado.unidade_medida}
+                    </div>
+                    <div class="col-6">
+                        <strong>Lote:</strong><br>
+                        ${data.lote || '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Preço Unitário:</strong><br>
+                        ${data.preco_unitario ? data.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Valor Total:</strong><br>
+                        ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div class="col-6">
+                        <strong>Fornecedor:</strong><br>
+                        ${data.fornecedor || '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Nota Fiscal:</strong><br>
+                        ${data.nota_fiscal || '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Data de Fabricação:</strong><br>
+                        ${data.data_fabricacao ? new Date(data.data_fabricacao).toLocaleDateString('pt-BR') : '-'}
+                    </div>
+                    <div class="col-6">
+                        <strong>Data de Vencimento:</strong><br>
+                        ${data.data_vencimento ? new Date(data.data_vencimento).toLocaleDateString('pt-BR') : '-'}
+                    </div>
+                    <div class="col-12">
+                        <strong>Observações:</strong><br>
+                        ${data.observacoes || '-'}
+                    </div>
+                </div>
+            `;
+            
+            const modal = new bootstrap.Modal(document.getElementById('confirmacaoModal'));
+            modal.show();
+        })
+        .catch(error => {
+            console.error('Erro ao registrar recebimento:', error);
+            alert('Erro ao registrar recebimento: ' + (error.message || error));
+        })
+        .finally(() => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        });
+    });
+    
+    // Handler do botão do modal "Ver Detalhes do Produto"
+    const verDetalhesBtn = document.getElementById('verDetalhesBtn');
+    if (verDetalhesBtn) {
+        verDetalhesBtn.addEventListener('click', function() {
+            // Fechar o modal de confirmação, se estiver aberto
+            const modalEl = document.getElementById('confirmacaoModal');
+            const instance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            try { instance.hide(); } catch (e) {}
+            
+            // Determinar o ID do produto: preferir selecionado, senão usar o da URL
+            let destinoId = produtoSelecionado && produtoSelecionado.id ? produtoSelecionado.id : null;
+            if (!destinoId) {
+                const path = window.location.pathname;
+                const after = path.split('/produtos/')[1] || '';
+                const fromUrl = (after.split('/')[0] || '').trim();
+                if (fromUrl) destinoId = fromUrl;
+            }
+            
+            if (destinoId) {
+                window.location.href = `/produtos/${destinoId}`;
+            } else {
+                console.warn('Não foi possível determinar o produto para exibir detalhes.');
+            }
+        });
+    }
+    
+    // Focar na busca
+    document.getElementById('buscarProduto').focus();
+});
+</script>
+{% endblock %}

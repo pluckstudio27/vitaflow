@@ -1,0 +1,55 @@
+<!-- Widget de Estatísticas Gerais -->
+<div class="card h-100">
+    <div class="card-header bg-primary text-white">
+        <h6 class="card-title mb-0">
+            <i class="fas fa-chart-line me-2"></i>
+            Estatísticas Gerais
+        </h6>
+    </div>
+    <div class="card-body">
+        <div class="row text-center">
+            <div class="col-6 mb-3">
+                <div class="border-end">
+                    <h4 class="text-primary mb-1" id="total-produtos">-</h4>
+                    <small class="text-muted">Produtos</small>
+                </div>
+            </div>
+            <div class="col-6 mb-3">
+                <h4 class="text-success mb-1" id="total-movimentacoes">-</h4>
+                <small class="text-muted">Movimentações</small>
+            </div>
+            <div class="col-6">
+                <div class="border-end">
+                    <h4 class="text-info mb-1" id="total-usuarios">-</h4>
+                    <small class="text-muted">Usuários</small>
+                </div>
+            </div>
+            <div class="col-6">
+                <h4 class="text-warning mb-1" id="total-setores">-</h4>
+                <small class="text-muted">Setores</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Carrega estatísticas gerais
+function loadStatsGeneral() {
+    fetch('/api/dashboard/stats-general')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('total-produtos').textContent = data.total_produtos || 0;
+                document.getElementById('total-movimentacoes').textContent = data.total_movimentacoes || 0;
+                document.getElementById('total-usuarios').textContent = data.total_usuarios || 0;
+                document.getElementById('total-setores').textContent = data.total_setores || 0;
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar estatísticas gerais:', error);
+        });
+}
+
+// Carrega ao inicializar
+document.addEventListener('DOMContentLoaded', loadStatsGeneral);
+</script>
