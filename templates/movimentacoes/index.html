@@ -233,14 +233,7 @@
                                 <label class="form-label">Selecione os setores:</label>
                                 <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
                                     <div id="setoresDistribuicao">
-                                        {% for setor in setores %}
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" value="{{ setor.id }}" id="setor{{ setor.id }}">
-                                            <label class="form-check-label" for="setor{{ setor.id }}">
-                                                {{ setor.nome }}
-                                            </label>
-                                        </div>
-                                        {% endfor %}
+                                        <div class="text-muted">Selecione o tipo e o local de origem para listar os setores disponíveis conforme a hierarquia.</div>
                                     </div>
                                 </div>
                             </div>
@@ -294,6 +287,11 @@ locaisData.setores = JSON.parse((setoresEl && setoresEl.textContent) ? setoresEl
 
 // Indica se estamos em modo MongoDB (IDs são strings)
 const USE_MONGO = (document.getElementById('use-mongo-flag') && document.getElementById('use-mongo-flag').textContent === 'true');
+
+// Comparação segura de IDs (suporta números e strings)
+function idEq(a, b) {
+    return String(a) === String(b);
+}
 
 // Carregar movimentações
 function carregarMovimentacoes(page = 1) {
@@ -355,7 +353,9 @@ function renderizarMovimentacoes(movimentacoes) {
     const tipoIcons = {
         'entrada': 'fas fa-arrow-down text-success',
         'saida': 'fas fa-arrow-up text-danger',
-        'transferencia': 'fas fa-exchange-alt text-primary'
+        'transferencia': 'fas fa-exchange-alt text-primary',
+        'distribuicao': 'fas fa-share-alt text-info',
+        'distribuição': 'fas fa-share-alt text-info'
     };
     
     tbody.innerHTML = movimentacoes.map(mov => `
@@ -744,6 +744,56 @@ function carregarLocaisOrigemDistribuicao() {
     }
 }
 
+// Renderiza a lista de setores (checkboxes) no container
+function renderSetoresDistribuicao(setores) {
+    const container = document.getElementById('setoresDistribuicao');
+    if (!container) return;
+    if (!Array.isArray(setores) || setores.length === 0) {
+        container.innerHTML = '<div class="text-muted">Nenhum setor disponível para a origem selecionada.</div>';
+        return;
+    }
+    const html = setores.map(s => `
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" value="${s.id}" id="setor${s.id}">
+            <label class="form-check-label" for="setor${s.id}">${s.nome}</label>
+        </div>
+    `).join('');
+    container.innerHTML = html;
+}
+
+// Filtra setores obedecendo a hierarquia da origem selecionada
+function filtrarSetoresDistribuicao() {
+    const tipo = document.getElementById('tipoOrigemDistribuicao')?.value;
+    const origemId = document.getElementById('localOrigemDistribuicao')?.value;
+    const todosSetores = locaisData.setores || [];
+    if (!tipo || !origemId) {
+        renderSetoresDistribuicao([]);
+        return;
+    }
+
+    let setoresFiltrados = [];
+    if (tipo === 'central') {
+        const almoxDaCentral = (locaisData.almoxarifados || [])
+            .filter(a => idEq(a.central_id, origemId))
+            .map(a => String(a.id));
+        const subDaCentral = (locaisData.sub_almoxarifados || [])
+            .filter(sa => almoxDaCentral.includes(String(sa.almoxarifado_id)))
+            .map(sa => String(sa.id));
+        setoresFiltrados = todosSetores.filter(s => subDaCentral.includes(String(s.sub_almoxarifado_id)));
+    } else if (tipo === 'almoxarifado') {
+        const subsDoAlmox = (locaisData.sub_almoxarifados || [])
+            .filter(sa => idEq(sa.almoxarifado_id, origemId))
+            .map(sa => String(sa.id));
+        setoresFiltrados = todosSetores.filter(s => subsDoAlmox.includes(String(s.sub_almoxarifado_id)));
+    } else if (tipo === 'sub_almoxarifado') {
+        setoresFiltrados = todosSetores.filter(s => idEq(s.sub_almoxarifado_id, origemId));
+    } else {
+        setoresFiltrados = [];
+    }
+
+    renderSetoresDistribuicao(setoresFiltrados);
+}
+
 // Carregar locais onde o produto está disponível para distribuição
 function carregarLocaisProdutoDistribuicao() {
     const produtoId = document.getElementById('produtoDistribuicao').value;
@@ -1115,6 +1165,20 @@ function debounce(func, wait) {
 document.addEventListener('DOMContentLoaded', () => {
     carregarMovimentacoes(1);
     carregarProdutos();
+    // Limpa a lista de setores inicialmente
+    renderSetoresDistribuicao([]);
+    // Atualiza setores quando origem (tipo/local) mudar
+    const tipoOrigemSelect = document.getElementById('tipoOrigemDistribuicao');
+    const localOrigemSelect = document.getElementById('localOrigemDistribuicao');
+    if (tipoOrigemSelect) {
+        tipoOrigemSelect.addEventListener('change', () => {
+            // ao mudar o tipo, o select de local é repovoado; a lista de setores será atualizada quando o local for escolhido
+            renderSetoresDistribuicao([]);
+        });
+    }
+    if (localOrigemSelect) {
+        localOrigemSelect.addEventListener('change', filtrarSetoresDistribuicao);
+    }
     window.addEventListener('DOMContentLoaded', () => {
         if (USE_MONGO) {
             const tipoOrigemDist = document.getElementById('tipoOrigemDistribuicao');

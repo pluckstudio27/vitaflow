@@ -137,22 +137,27 @@
             <div class="modal-body">
                 <form id="recebimentoForm">
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label for="quantidade" class="form-label">Quantidade *</label>
-                                <input type="number" class="form-control" id="quantidade" name="quantidade" 
-                                       min="0.01" step="0.01" required>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="quantidade" name="quantidade" 
+                                           min="0.01" step="0.01" required>
+                                    <span class="input-group-text" id="unidadeMedidaRecebimento">UN</span>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
-                                <label for="lote" class="form-label">Lote</label>
-                                <input type="text" class="form-control" id="lote" name="lote">
+                                <label for="preco_unitario" class="form-label">Preço Unitário</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">R$</span>
+                                    <input type="number" class="form-control" id="preco_unitario" name="preco_unitario" 
+                                           min="0" step="0.01">
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-12">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label for="almoxarifado_id" class="form-label">Almoxarifado *</label>
                                 <select class="form-select" id="almoxarifado_id" name="almoxarifado_id" required>
@@ -161,6 +166,23 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="lote" class="form-label">Número do Lote</label>
+                                <input type="text" class="form-control" id="lote" name="lote" placeholder="Ex: L2024001">
+                                <div class="form-text">Identificação do lote do fornecedor</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="fornecedor" class="form-label">Fornecedor</label>
+                                <input type="text" class="form-control" id="fornecedor" name="fornecedor" placeholder="Nome do fornecedor">
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -172,12 +194,38 @@
                             <div class="mb-3">
                                 <label for="data_vencimento" class="form-label">Data de Vencimento</label>
                                 <input type="date" class="form-control" id="data_vencimento" name="data_vencimento">
+                                <div class="form-text" id="alertaVencimentoModal"></div>
                             </div>
                         </div>
                     </div>
+
+                    <div class="mb-3">
+                        <label for="nota_fiscal" class="form-label">Nota Fiscal</label>
+                        <input type="text" class="form-control" id="nota_fiscal" name="nota_fiscal" placeholder="Número da nota fiscal">
+                    </div>
+
                     <div class="mb-3">
                         <label for="observacoes" class="form-label">Observações</label>
-                        <textarea class="form-control" id="observacoes" name="observacoes" rows="3"></textarea>
+                        <textarea class="form-control" id="observacoes" name="observacoes" rows="3" placeholder="Informações adicionais sobre o recebimento..."></textarea>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Valor Total</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">R$</span>
+                                    <input type="text" class="form-control" id="valor_total" readonly>
+                                </div>
+                                <div class="form-text">Calculado automaticamente</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="data_recebimento" class="form-label">Data do Recebimento</label>
+                                <input type="datetime-local" class="form-control" id="data_recebimento" name="data_recebimento">
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -193,6 +241,7 @@
 
 <script>
 let produtoId = null;
+let produtoDetalhes = null;
 
 // Extrair ID do produto da URL
 function obterProdutoId() {
@@ -220,6 +269,7 @@ function carregarProduto() {
             if (data.error) {
                 throw new Error(data.error);
             }
+            produtoDetalhes = data;
             renderizarProduto(data);
         })
         .catch(error => {
@@ -284,11 +334,12 @@ function carregarResumoEstoque() {
         .then(data => {
             const resumo = data.resumo || {};
             const total = resumo.total_disponivel || 0;
+            const unidade = (produtoDetalhes && produtoDetalhes.unidade_medida) || '';
             document.getElementById('resumoEstoque').innerHTML = `
                 <div class="text-center">
                     <div class="row">
                         <div class="col-12 mb-3">
-                            <h3 class="text-primary">${total.toFixed(2)}</h3>
+                            <h3 class="text-primary">${formatQuantidade(total, unidade)}</h3>
                             <small class="text-muted">Total Disponível</small>
                         </div>
                     </div>
@@ -350,8 +401,8 @@ function carregarEstoqueHierarquia() {
                         <td>
                             <span class="badge bg-secondary">${item.tipo}</span>
                         </td>
-                        <td><strong>${parseFloat(item.quantidade || 0).toFixed(2)}</strong></td>
-                        <td class="text-success">${parseFloat(item.quantidade_disponivel || 0).toFixed(2)}</td>
+                        <td><strong>${formatQuantidade(item.quantidade)}</strong></td>
+                        <td class="text-success">${formatQuantidade(item.quantidade_disponivel)}</td>
                         <td class="text-muted">
                             ${item.data_atualizacao ? new Date(item.data_atualizacao).toLocaleString('pt-BR', {
                                 day: '2-digit',
@@ -423,7 +474,7 @@ function carregarLotes() {
                 html += `
                     <tr>
                         <td><strong>${lote.numero_lote || '-'}</strong></td>
-                        <td>${parseFloat(lote.quantidade_atual || 0).toFixed(2)}</td>
+                        <td>${formatQuantidade(lote.quantidade_atual)}</td>
                         <td>${lote.data_fabricacao ? new Date(lote.data_fabricacao).toLocaleDateString('pt-BR') : '-'}</td>
                         <td>${lote.data_vencimento ? new Date(lote.data_vencimento).toLocaleDateString('pt-BR') : '-'}</td>
                         <td>${statusBadge}</td>
@@ -479,11 +530,13 @@ function carregarMovimentacoes() {
             `;
             
             data.items.forEach(mov => {
-                const tipoIcon = {
-                    'entrada': 'fas fa-arrow-down text-success',
-                    'saida': 'fas fa-arrow-up text-danger',
-                    'transferencia': 'fas fa-exchange-alt text-primary'
-                };
+    const tipoIcon = {
+        'entrada': 'fas fa-arrow-down text-success',
+        'saida': 'fas fa-arrow-up text-danger',
+        'transferencia': 'fas fa-exchange-alt text-primary',
+        'distribuicao': 'fas fa-share-alt text-info',
+        'distribuição': 'fas fa-share-alt text-info'
+    };
                 
                 html += `
                     <tr>
@@ -492,7 +545,7 @@ function carregarMovimentacoes() {
                             <i class="${tipoIcon[mov.tipo_movimentacao?.toLowerCase()] || 'fas fa-question'}"></i>
                             ${mov.tipo_movimentacao}
                         </td>
-                        <td><strong>${parseFloat(mov.quantidade).toFixed(2)}</strong></td>
+                        <td><strong>${formatQuantidade(mov.quantidade)}</strong></td>
                         <td>${mov.local || '-'}</td>
                         <td class="text-muted">${mov.usuario_responsavel || '-'}</td>
                         <td class="text-muted">${mov.observacoes || '-'}</td>
@@ -524,8 +577,24 @@ function atualizarEstoque() {
 // Botão de recebimento
 document.getElementById('btnRecebimento').addEventListener('click', function() {
     carregarAlmoxarifadosDetalhes();
+    // Preencher unidade de medida no campo de quantidade
+    const unidadeSpan = document.getElementById('unidadeMedidaRecebimento');
+    if (unidadeSpan) {
+        unidadeSpan.textContent = (produtoDetalhes && produtoDetalhes.unidade_medida) ? produtoDetalhes.unidade_medida : 'UN';
+    }
+    // Definir data do recebimento para agora
+    const agora = new Date();
+    agora.setMinutes(agora.getMinutes() - agora.getTimezoneOffset());
+    const dataRecInput = document.getElementById('data_recebimento');
+    if (dataRecInput) {
+        dataRecInput.value = agora.toISOString().slice(0, 16);
+    }
+    // Abrir modal
     const modal = new bootstrap.Modal(document.getElementById('recebimentoModal'));
     modal.show();
+    // Focar na quantidade
+    const qtdInput = document.getElementById('quantidade');
+    if (qtdInput) qtdInput.focus();
 });
 
 // Função para carregar almoxarifados no modal de recebimento
@@ -546,7 +615,7 @@ function carregarAlmoxarifadosDetalhes() {
             } else {
                 const options = ['<option value="">Selecione...</option>'];
                 lista.forEach(a => {
-                    const qtd = (a.quantidade_atual && a.quantidade_atual > 0) ? ` - ${parseFloat(a.quantidade_atual).toFixed(2)}` : '';
+                    const qtd = (a.quantidade_atual && a.quantidade_atual > 0) ? ` - ${formatQuantidade(a.quantidade_atual)}` : '';
                     options.push(`<option value="${a.id}">${a.nome}${qtd}</option>`);
                 });
                 select.innerHTML = options.join('');
@@ -571,10 +640,14 @@ document.getElementById('salvarRecebimento').addEventListener('click', function(
     const data = {
         produto_id: produtoId,
         quantidade: parseFloat(formData.get('quantidade')),
+        preco_unitario: parseFloat(formData.get('preco_unitario')) || null,
         lote: formData.get('lote'),
+        fornecedor: (formData.get('fornecedor') || '').trim() || null,
         data_fabricacao: formData.get('data_fabricacao'),
         data_vencimento: formData.get('data_vencimento'),
-        observacoes: formData.get('observacoes')
+        nota_fiscal: (formData.get('nota_fiscal') || '').trim() || null,
+        observacoes: formData.get('observacoes'),
+        data_recebimento: formData.get('data_recebimento')
     };
     
     if (!data.quantidade || data.quantidade <= 0) {
@@ -618,6 +691,60 @@ document.getElementById('salvarRecebimento').addEventListener('click', function(
 });
 document.addEventListener('DOMContentLoaded', function() {
     carregarProduto();
+    // Cálculo automático do valor total
+    const qtdEl = document.getElementById('quantidade');
+    const precoEl = document.getElementById('preco_unitario');
+    if (qtdEl) qtdEl.addEventListener('input', calcularValorTotalModal);
+    if (precoEl) precoEl.addEventListener('input', calcularValorTotalModal);
+    // Verificação de vencimento
+    const vencEl = document.getElementById('data_vencimento');
+    if (vencEl) vencEl.addEventListener('change', verificarVencimentoModal);
 });
+
+// Helper: formatar quantidade como inteiro + unidade
+function formatQuantidade(value, unidadeOverride) {
+    const unidade = unidadeOverride || (produtoDetalhes && produtoDetalhes.unidade_medida) || '';
+    let v = 0;
+    try { v = parseFloat(value || 0); } catch (e) { v = 0; }
+    const inteiro = Math.round(v);
+    return unidade ? `${inteiro} ${unidade}` : `${inteiro}`;
+}
+
+// Calcular valor total (modal)
+function calcularValorTotalModal() {
+    const quantidade = parseFloat(document.getElementById('quantidade')?.value) || 0;
+    const precoUnitario = parseFloat(document.getElementById('preco_unitario')?.value) || 0;
+    const valorTotal = quantidade * precoUnitario;
+    const valorEl = document.getElementById('valor_total');
+    if (valorEl) {
+        valorEl.value = valorTotal.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+}
+
+// Verificar vencimento (modal)
+function verificarVencimentoModal() {
+    const dataVencimento = document.getElementById('data_vencimento')?.value;
+    const alertaDiv = document.getElementById('alertaVencimentoModal');
+    if (!alertaDiv) return;
+    if (!dataVencimento) {
+        alertaDiv.innerHTML = '';
+        return;
+    }
+    const hoje = new Date();
+    const vencimento = new Date(dataVencimento);
+    const diasVencimento = Math.ceil((vencimento - hoje) / (1000 * 60 * 60 * 24));
+    if (diasVencimento < 0) {
+        alertaDiv.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Produto já vencido!</span>';
+    } else if (diasVencimento <= 30) {
+        alertaDiv.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> Vence em breve!</span>';
+    } else if (diasVencimento <= 90) {
+        alertaDiv.innerHTML = '<span class="text-info"><i class="fas fa-info-circle"></i> Vencimento próximo</span>';
+    } else {
+        alertaDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Validade adequada</span>';
+    }
+}
 </script>
 {% endblock %}

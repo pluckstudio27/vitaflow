@@ -2,9 +2,12 @@
 # This file makes the config directory a Python package
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Sempre carregar o .env da raiz do projeto para evitar confusão com diretórios duplicados
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=PROJECT_ROOT / '.env')
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'

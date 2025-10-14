@@ -141,23 +141,44 @@ def estoque():
 @main_bp.route('/movimentacoes')
 @require_any_level
 def movimentacoes():
-    """Página de movimentações e transferências (placeholders)"""
+    """Página de movimentações e transferências (MongoDB)"""
+    db = extensions.mongo_db
+
+    def norm_id(doc):
+        if doc.get('id') is not None:
+            return doc.get('id')
+        _id = doc.get('_id')
+        return str(_id) if _id is not None else None
+
+    def norm_ref(value):
+        try:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return int(value)
+        except Exception:
+            pass
+        return str(value) if value is not None else None
+
+    # Carregar listas de locais quando Mongo estiver disponível
     centrais = []
     almoxarifados = []
     sub_almoxarifados = []
     setores = []
-    
-    # Converter objetos para dicionários para serialização JSON
-    centrais_dict = [{'id': c.get('id'), 'nome': c.get('nome')} for c in centrais]
-    almoxarifados_dict = [{'id': a.get('id'), 'nome': a.get('nome'), 'central_id': a.get('central_id')} for a in almoxarifados]
-    sub_almoxarifados_dict = [{'id': s.get('id'), 'nome': s.get('nome'), 'almoxarifado_id': s.get('almoxarifado_id')} for s in sub_almoxarifados]
-    setores_dict = [{'id': s.get('id'), 'nome': s.get('nome')} for s in setores]
-    
+
+    if db is not None:
+        for c in db['centrais'].find({}, {'id': 1, '_id': 1, 'nome': 1}):
+            centrais.append({'id': norm_id(c), 'nome': c.get('nome')})
+        for a in db['almoxarifados'].find({}, {'id': 1, '_id': 1, 'nome': 1, 'central_id': 1}):
+            almoxarifados.append({'id': norm_id(a), 'nome': a.get('nome'), 'central_id': norm_ref(a.get('central_id'))})
+        for s in db['sub_almoxarifados'].find({}, {'id': 1, '_id': 1, 'nome': 1, 'almoxarifado_id': 1}):
+            sub_almoxarifados.append({'id': norm_id(s), 'nome': s.get('nome'), 'almoxarifado_id': norm_ref(s.get('almoxarifado_id'))})
+        for s in db['setores'].find({}, {'id': 1, '_id': 1, 'nome': 1, 'sub_almoxarifado_id': 1}):
+            setores.append({'id': norm_id(s), 'nome': s.get('nome'), 'sub_almoxarifado_id': norm_ref(s.get('sub_almoxarifado_id'))})
+
     return render_template('movimentacoes/index.html',
-                         centrais=centrais_dict,
-                         almoxarifados=almoxarifados_dict,
-                         sub_almoxarifados=sub_almoxarifados_dict,
-                         setores=setores_dict,
+                         centrais=centrais,
+                         almoxarifados=almoxarifados,
+                         sub_almoxarifados=sub_almoxarifados,
+                         setores=setores,
                          use_mongo=True)
 
 # ==================== USUÁRIOS ====================
@@ -2087,6 +2108,13 @@ def api_produto_detalhe(produto_id):
         'descricao': doc.get('descricao'),
         'unidade_medida': doc.get('unidade_medida'),
         'ativo': bool(doc.get('ativo', True)),
+        # Normaliza central_id para uso no frontend (int ou string de ObjectId)
+        'central_id': (
+            (lambda v: (
+                int(v) if isinstance(v, (int, float)) and not isinstance(v, bool)
+                else (str(v) if v is not None else None)
+            ))(doc.get('central_id'))
+        ),
         # Campo simples esperado pelo modal de edição (texto)
         'categoria': categoria_nome
     })
@@ -2371,6 +2399,7 @@ def api_estoque_hierarquia():
                 prod_cache[str(raw_pid)] = pdoc
             produto_nome = (pdoc or {}).get('nome') or '-'
             produto_codigo = (pdoc or {}).get('codigo') or '-'
+            produto_unidade = (pdoc or {}).get('unidade_medida')
             produto_id_out = (pdoc or {}).get('id')
             if produto_id_out is None and pdoc is not None:
                 produto_id_out = str(pdoc.get('_id'))
@@ -2428,6 +2457,7 @@ def api_estoque_hierarquia():
                 'produto_id': produto_id_out,
                 'produto_nome': produto_nome,
                 'produto_codigo': produto_codigo,
+                'unidade_medida': produto_unidade,
                 'local_tipo': tipo,
                 'local_id': local_id,
                 'local_nome': local_nome,
@@ -3135,3 +3165,205 @@ def api_movimentacoes_transferencia():
         })
     except Exception as e:
         return jsonify({'error': f'Falha ao executar transferência: {e}'}), 500
+
+@main_bp.route('/api/movimentacoes/distribuicao', methods=['POST'])
+@require_any_level
+def api_movimentacoes_distribuicao():
+    """Executa distribuição de estoque de uma origem para múltiplos setores.
+    Payload esperado:
+    {
+        produto_id: <id>,
+        quantidade_total: <float>,
+        motivo: <str|null>,
+        observacoes: <str|null>,
+        origem: { tipo: 'almoxarifado'|'sub_almoxarifado'|'setor'|'central', id: <id> },
+        setores_destino: [<id>, ...]
+    }
+    """
+    try:
+        db = extensions.mongo_db
+        produtos = db['produtos']
+        estoques = db['estoques']
+        movimentacoes = db['movimentacoes']
+
+        data = request.get_json(silent=True) or {}
+        quantidade_total = float(data.get('quantidade_total') or 0)
+        if quantidade_total <= 0:
+            return jsonify({'error': 'quantidade_total deve ser maior que zero'}), 400
+
+        # produto
+        raw_pid = data.get('produto_id')
+        if raw_pid is None:
+            return jsonify({'error': 'produto_id é obrigatório'}), 400
+        prod_doc = None
+        try:
+            if str(raw_pid).isdigit():
+                prod_doc = produtos.find_one({'id': int(raw_pid)})
+            if not prod_doc:
+                try:
+                    prod_doc = produtos.find_one({'_id': ObjectId(str(raw_pid))})
+                except Exception:
+                    prod_doc = None
+            if not prod_doc and isinstance(raw_pid, str):
+                prod_doc = produtos.find_one({'id': raw_pid}) or produtos.find_one({'_id': raw_pid})
+        except Exception:
+            prod_doc = None
+        if not prod_doc:
+            return jsonify({'error': 'Produto não encontrado'}), 404
+        pid_out = prod_doc.get('id') if prod_doc.get('id') is not None else str(prod_doc.get('_id'))
+
+        # helpers de tipo (locais)
+        def _coll_name_for_tipo(tipo: str):
+            t = str(tipo).lower()
+            if t in ('setor', 'setores'):
+                return 'setores'
+            if t in ('subalmoxarifado', 'sub_almoxarifado', 'sub_almoxarifados'):
+                return 'sub_almoxarifados'
+            if t in ('almoxarifado', 'almoxarifados'):
+                return 'almoxarifados'
+            if t in ('central', 'centrais'):
+                return 'centrais'
+            return None
+        def _nome_por_doc(doc, default='Local'):
+            return (doc or {}).get('nome') or (doc or {}).get('descricao') or default
+        def _id_out(doc, raw):
+            if doc is None:
+                return str(raw)
+            val = doc.get('id')
+            if val is None:
+                val = str(doc.get('_id'))
+            return val
+        def _field_by_tipo(tipo: str):
+            t = str(tipo).lower()
+            if t in ('setor', 'setores'):
+                return 'setor_id'
+            if t in ('subalmoxarifado', 'sub_almoxarifado', 'sub_almoxarifados'):
+                return 'sub_almoxarifado_id'
+            if t in ('almoxarifado', 'almoxarifados'):
+                return 'almoxarifado_id'
+            if t in ('central', 'centrais'):
+                return 'central_id'
+            return None
+
+        # origem e setores destino
+        origem = data.get('origem') or {}
+        setores_destino = data.get('setores_destino') or []
+        origem_tipo = origem.get('tipo')
+        origem_id_raw = origem.get('id')
+        if not origem_tipo or origem_id_raw is None:
+            return jsonify({'error': 'origem.tipo e origem.id são obrigatórios'}), 400
+        if not setores_destino or not isinstance(setores_destino, list):
+            return jsonify({'error': 'setores_destino deve ser uma lista com ao menos um setor'}), 400
+
+        ocoll = _coll_name_for_tipo(origem_tipo)
+        if not ocoll:
+            return jsonify({'error': 'Tipo de origem inválido'}), 400
+        origem_doc = _find_by_id(ocoll, origem_id_raw)
+        if origem_doc is None:
+            return jsonify({'error': 'Local de origem não encontrado'}), 400
+        origem_nome = _nome_por_doc(origem_doc, 'Origem')
+        origem_id_out = _id_out(origem_doc, origem_id_raw)
+
+        # validar setores destino
+        destino_setores_docs = []
+        for sid in setores_destino:
+            sdoc = _find_by_id('setores', sid)
+            if sdoc is None:
+                return jsonify({'error': 'Algum setor de destino não foi encontrado'}), 404
+            destino_setores_docs.append(sdoc)
+        if len(destino_setores_docs) == 0:
+            return jsonify({'error': 'Nenhum setor válido informado'}), 400
+
+        now = datetime.utcnow()
+
+        # localizar estoque na origem e validar disponibilidade
+        origem_filter1 = {'produto_id': pid_out, 'local_tipo': str(origem_tipo).lower(), 'local_id': origem_id_out}
+        origem_doc_estoque = estoques.find_one(origem_filter1)
+        if not origem_doc_estoque:
+            ofield = _field_by_tipo(origem_tipo)
+            if ofield:
+                origem_doc_estoque = estoques.find_one({'produto_id': pid_out, ofield: origem_id_out})
+        if not origem_doc_estoque:
+            return jsonify({'error': 'Não há estoque no local de origem para este produto'}), 400
+        disponivel = float(origem_doc_estoque.get('quantidade_disponivel', origem_doc_estoque.get('quantidade', 0)) or 0)
+        if disponivel < quantidade_total:
+            return jsonify({'error': 'Quantidade insuficiente na origem'}), 400
+
+        # cálculo igualitário por setor
+        qtd_setores = len(destino_setores_docs)
+        quantidade_por_setor = quantidade_total / qtd_setores
+        if quantidade_por_setor <= 0:
+            return jsonify({'error': 'Quantidade por setor calculada inválida'}), 400
+
+        # debitar origem
+        estoques.find_one_and_update(
+            origem_filter1,
+            {
+                '$inc': {
+                    'quantidade': -quantidade_total,
+                    'quantidade_disponivel': -quantidade_total
+                },
+                '$set': {
+                    'updated_at': now
+                }
+            }
+        )
+
+        movimentos_criados = 0
+        for sdoc in destino_setores_docs:
+            setor_id_out = _id_out(sdoc, sdoc.get('_id'))
+            setor_nome = _nome_por_doc(sdoc, 'Setor')
+
+            # incrementar destino (upsert)
+            dest_filter = {'produto_id': pid_out, 'local_tipo': 'setor', 'local_id': setor_id_out}
+            dest_update = {
+                '$inc': {
+                    'quantidade': quantidade_por_setor,
+                    'quantidade_disponivel': quantidade_por_setor
+                },
+                '$set': {
+                    'produto_id': pid_out,
+                    'local_tipo': 'setor',
+                    'local_id': setor_id_out,
+                    'nome_local': setor_nome,
+                    'updated_at': now
+                },
+                '$setOnInsert': {
+                    'created_at': now
+                }
+            }
+            estoques.find_one_and_update(
+                dest_filter,
+                dest_update,
+                return_document=ReturnDocument.AFTER,
+                upsert=True
+            )
+
+            # registrar movimentação
+            mov_doc = {
+                'produto_id': pid_out,
+                'tipo': 'distribuicao',
+                'quantidade': quantidade_por_setor,
+                'data_movimentacao': now,
+                'origem_tipo': str(origem_tipo).lower(),
+                'origem_id': origem_id_out,
+                'origem_nome': origem_nome,
+                'destino_tipo': 'setor',
+                'destino_id': setor_id_out,
+                'destino_nome': setor_nome,
+                'usuario_responsavel': getattr(current_user, 'username', None),
+                'motivo': data.get('motivo'),
+                'observacoes': data.get('observacoes'),
+                'created_at': now
+            }
+            movimentacoes.insert_one(mov_doc)
+            movimentos_criados += 1
+
+        return jsonify({
+            'success': True,
+            'movimentacoes_criadas': movimentos_criados,
+            'quantidade_por_setor': quantidade_por_setor,
+            'total_distribuida': quantidade_total
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha ao executar distribuição: {e}'}), 500

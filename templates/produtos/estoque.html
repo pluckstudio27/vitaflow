@@ -160,6 +160,13 @@
 let dadosEstoque = [];
 let dadosFiltrados = [];
 
+// Formata quantidade como inteiro e anexa unidade de medida
+function formatQuantidade(valor, unidade) {
+    const v = parseFloat(valor || 0);
+    const u = unidade ? ` ${unidade}` : '';
+    return `${Number.isFinite(v) ? v.toFixed(0) : '0'}${u}`;
+}
+
 // Carregar dados iniciais
 function carregarDados() {
     Promise.all([
@@ -363,8 +370,8 @@ function renderizarTabela() {
                 <td>
                     <span class="badge bg-secondary">${item.local_tipo}</span>
                 </td>
-                <td><strong>${total.toFixed(2)}</strong></td>
-                <td class="text-success"><strong>${quantidade.toFixed(2)}</strong></td>
+                <td><strong>${formatQuantidade(total, item.unidade_medida)}</strong></td>
+                <td class="text-success"><strong>${formatQuantidade(quantidade, item.unidade_medida)}</strong></td>
                 <td>${statusBadge}</td>
                 <td class="text-muted">
                     ${item.data_atualizacao ? new Date(item.data_atualizacao).toLocaleString('pt-BR', {
@@ -376,9 +383,12 @@ function renderizarTabela() {
                     }) : '-'}
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes('${item.produto_id}', '${item.local_id}')">
+                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes('${item.produto_id}', '${item.local_id}')" title="Detalhes">
                         <i class="fas fa-eye"></i>
                     </button>
+                    <a class="btn btn-sm btn-outline-success ms-1" href="/produtos/${item.produto_id}/recebimento" title="Receber">
+                        <i class="fas fa-plus-circle"></i>
+                    </a>
                 </td>
             </tr>
         `;
@@ -470,11 +480,13 @@ function verDetalhes(produtoId, localId) {
             `;
             
             movimentacoes.items.slice(0, 5).forEach(mov => {
-                const tipoIcon = {
-                    'entrada': 'fas fa-arrow-down text-success',
-                    'saida': 'fas fa-arrow-up text-danger',
-                    'transferencia': 'fas fa-exchange-alt text-primary'
-                };
+        const tipoIcon = {
+            'entrada': 'fas fa-arrow-down text-success',
+            'saida': 'fas fa-arrow-up text-danger',
+            'transferencia': 'fas fa-exchange-alt text-primary',
+            'distribuicao': 'fas fa-share-alt text-info',
+            'distribuição': 'fas fa-share-alt text-info'
+        };
                 
                 html += `
                     <tr>
