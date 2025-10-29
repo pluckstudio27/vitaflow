@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Gestão do Setor{% endblock %}
+{% block title %}PluckLog - Gestão do Setor{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -321,7 +321,7 @@ async function loadSetorLotes() {
     }
     if (!items.length) { el.textContent = 'Sem lotes cadastrados para este produto neste setor ou origem superior.'; return; }
     let html = '<div class="table-responsive"><table class="table table-sm mb-0">';
-    html += '<thead><tr><th>Origem</th><th>Lote</th><th>Quantidade</th><th>Data Fabricação</th><th>Data Vencimento</th><th>Status</th><th>Observações</th></tr></thead><tbody>';
+    html += '<thead><tr><th>Lote</th><th>Data de Vencimento</th><th>Status</th></tr></thead><tbody>';
     const hoje = new Date();
     items.forEach(l => {
       const qtdNum = Number(l.quantidade_atual || 0);
@@ -352,13 +352,9 @@ async function loadSetorLotes() {
         .replace('setor', 'Setor')
         .replace('produto', 'Produto');
       html += `<tr>
-        <td>${origemLabel}</td>
         <td>${l.numero_lote || '-'}</td>
-        <td>${qtd}</td>
-        <td>${fabStr}</td>
         <td>${vencStr}</td>
         <td>${status}</td>
-        <td>${obs}</td>
       </tr>`;
     });
     html += '</tbody></table></div>';

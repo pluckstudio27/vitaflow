@@ -4634,13 +4634,39 @@ def api_demandas_update(demanda_id):
         if not ddoc:
             return jsonify({'error': 'Demanda não encontrada'}), 404
 
-        # Checar escopo do usuário
+        # Checar escopo do usuário (tolerando diferenças de tipo/id sequencial vs ObjectId)
+        def _id_candidates(coll_name: str, raw_id):
+            cands = []
+            if raw_id is None:
+                return cands
+            try:
+                doc = _find_by_id(coll_name, raw_id)
+            except Exception:
+                doc = None
+            if doc:
+                if doc.get('id') is not None:
+                    cands.append(doc.get('id'))
+                if doc.get('_id') is not None:
+                    try:
+                        cands.append(str(doc.get('_id')))
+                    except Exception:
+                        pass
+            cands.append(raw_id)
+            # Normalizar tudo para string para comparação segura
+            return {str(v) for v in cands}
+
+        def _matches_scope(doc_value, coll_name, user_raw_id):
+            try:
+                return str(doc_value) in _id_candidates(coll_name, user_raw_id)
+            except Exception:
+                return False
+
         level = getattr(current_user, 'nivel_acesso', None)
-        if level == 'resp_sub_almox' and ddoc.get('sub_almoxarifado_id') != getattr(current_user, 'sub_almoxarifado_id', None):
+        if level == 'resp_sub_almox' and not _matches_scope(ddoc.get('sub_almoxarifado_id'), 'sub_almoxarifados', getattr(current_user, 'sub_almoxarifado_id', None)):
             return jsonify({'error': 'Acesso negado'}), 403
-        if level == 'gerente_almox' and ddoc.get('almoxarifado_id') != getattr(current_user, 'almoxarifado_id', None):
+        if level == 'gerente_almox' and not _matches_scope(ddoc.get('almoxarifado_id'), 'almoxarifados', getattr(current_user, 'almoxarifado_id', None)):
             return jsonify({'error': 'Acesso negado'}), 403
-        if level == 'admin_central' and ddoc.get('central_id') != getattr(current_user, 'central_id', None):
+        if level == 'admin_central' and not _matches_scope(ddoc.get('central_id'), 'centrais', getattr(current_user, 'central_id', None)):
             return jsonify({'error': 'Acesso negado'}), 403
 
         update = {

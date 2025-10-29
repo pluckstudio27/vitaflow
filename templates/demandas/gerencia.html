@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Demandas • Gerência - Almox SMS{% endblock %}
+{% block title %}PluckLog - Demandas • Gerência{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -33,12 +33,100 @@
             </div>
         </div>
     </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-check-circle"></i> Resolvidas</h5>
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandasResolvidas()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body" id="listaDemandasResolvidas">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visualmente-oculto">Carregando...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<!-- Modal Atender Demanda -->
+<div class="modal fade" id="atenderDemandaModal" tabindex="-1" aria-labelledby="atenderDemandaModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="atenderDemandaModalLabel">Atender Demanda</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="mb-2"><strong>Produto:</strong> <span id="modalProdutoNome">-</span></div>
+                        <div class="mb-2"><strong>Setor solicitante:</strong> <span id="modalSetorNome">-</span></div>
+                        <div class="mb-2"><strong>Qtd solicitada:</strong> <span id="modalQuantidadeSolicitada">0</span></div>
+                        <div class="mb-2"><strong>Disponível total:</strong> <span id="modalDisponivelTotal">-</span></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Locais disponíveis</label>
+                        <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+                            <ul class="list-group list-group-flush" id="listaLocaisDisponiveis">
+                                <li class="list-group-item text-muted">Carregando estoque...</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label for="tipoOrigemDemanda" class="form-label">Tipo de Origem *</label>
+                        <select class="form-select" id="tipoOrigemDemanda" onchange="carregarLocaisOrigemDemanda()">
+                            <option value="">Selecione...</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="localOrigemDemanda" class="form-label">Local de Origem *</label>
+                        <select class="form-select" id="localOrigemDemanda">
+                            <option value="">Selecione o tipo primeiro...</option>
+                        </select>
+                        <div class="form-text" id="infoDisponivelLocal">&nbsp;</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="quantidadeDemanda" class="form-label">Quantidade a enviar *</label>
+                        <input type="number" class="form-control" id="quantidadeDemanda" step="0.001" min="0.001" required>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <label for="observacoesDemanda" class="form-label">Observações</label>
+                    <textarea class="form-control" id="observacoesDemanda" rows="2" placeholder="Opcional"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="executarAtendimentoDemanda()">
+                    <i class="fas fa-paper-plane"></i> Enviar para setor
+                </button>
+            </div>
+        </div>
+    </div>
+    </div>
 
 <script>
 function htmlEscape(str) {
     return (str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
 }
+
+let demandaAtual = null;
+let locaisDisponiveisDemanda = {};
 
 async function carregarDemandasGerencia() {
     const el = document.getElementById('listaDemandasGerencia');
@@ -54,7 +142,9 @@ async function carregarDemandasGerencia() {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda pendente.</div>';
             return;
         }
-        const rows = data.items.map(d => `
+        const rows = data.items.map(d => {
+            const dataAttr = encodeURIComponent(JSON.stringify(d));
+            return `
             <tr>
                 <td>${htmlEscape(d.id)}</td>
                 <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
@@ -63,12 +153,12 @@ async function carregarDemandasGerencia() {
                 <td>${htmlEscape(d.destino_tipo || '')}</td>
                 <td>
                     <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-success" onclick="atualizarStatus('${htmlEscape(d.id)}','aprovado')"><i class="fas fa-check"></i> Aprovar</button>
-                        <button class="btn btn-danger" onclick="atualizarStatus('${htmlEscape(d.id)}','negado')"><i class="fas fa-times"></i> Negar</button>
+                        <button class="btn btn-primary" data-demanda="${dataAttr}" onclick="abrirModalAtenderDemanda(this)"><i class="fas fa-paper-plane"></i> Enviar</button>
+                        <button class="btn btn-outline-danger" onclick="atualizarStatus('${htmlEscape(d.id)}','negado')"><i class="fas fa-ban"></i> Rejeitar</button>
                     </div>
                 </td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
         el.innerHTML = `
             <div class="table-responsive">
                 <table class="table table-sm table-striped">
@@ -91,24 +181,258 @@ async function carregarDemandasGerencia() {
     }
 }
 
-async function atualizarStatus(id, status) {
+async function carregarDemandasResolvidas() {
+    const el = document.getElementById('listaDemandasResolvidas');
+    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
+    try {
+        const [resAtendido, resNegado] = await Promise.all([
+            fetch('/api/demandas?status=atendido&per_page=50'),
+            fetch('/api/demandas?status=negado&per_page=50')
+        ]);
+        const dataAt = await resAtendido.json().catch(() => ({ items: [] }));
+        const dataNeg = await resNegado.json().catch(() => ({ items: [] }));
+        const ok = resAtendido.ok || resNegado.ok;
+        if (!ok) {
+            const errMsg = (dataAt.error || dataNeg.error || 'Erro ao listar resolvidas');
+            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(errMsg)}</div>`;
+            return;
+        }
+        const items = [...(dataAt.items || []), ...(dataNeg.items || [])];
+        if (!items.length) {
+            el.innerHTML = '<div class="text-muted">Nenhuma demanda resolvida.</div>';
+            return;
+        }
+        const parseDate = (v) => {
+            try { return v ? Date.parse(v) : 0; } catch (_) { return 0; }
+        };
+        items.sort((a, b) => (parseDate(b.updated_at || b.created_at) - parseDate(a.updated_at || a.created_at)));
+        const rows = items.map(d => {
+            const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : 'secondary');
+            const when = htmlEscape(d.updated_at || d.created_at || '');
+            return `
+            <tr>
+                <td>${htmlEscape(d.id)}</td>
+                <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
+                <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
+                <td class="text-end">${Number(d.quantidade_solicitada || 0).toFixed(2)}</td>
+                <td>${htmlEscape(d.destino_tipo || '')}</td>
+                <td><span class="badge bg-${badgeClass}">${htmlEscape(d.status || '')}</span></td>
+                <td class="text-muted">${when}</td>
+            </tr>`;
+        }).join('');
+        el.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-sm table-striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Produto</th>
+                            <th>Setor</th>
+                            <th class="text-end">Qtd</th>
+                            <th>Destino</th>
+                            <th>Status</th>
+                            <th>Atualizado</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
+    }
+}
+
+async function atualizarStatus(id, status, quantidade_autorizada, opts = {}) {
+    const silent = !!opts.silent;
     try {
         const res = await fetch(`/api/demandas/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ status })
+            body: JSON.stringify(quantidade_autorizada != null ? { status, quantidade_autorizada } : { status })
         });
-        const data = await res.json();
+        let data = {};
+        try { data = await res.json(); } catch (_) { data = {}; }
         if (!res.ok) {
-            alert(data.error || 'Falha ao atualizar status');
-            return;
+            const msg = data.error || (res.status === 403 ? 'Acesso negado - escopo do usuário não corresponde à demanda' : 'Falha ao atualizar status');
+            if (!silent) alert(msg);
+            return { ok: false, message: msg };
         }
         carregarDemandasGerencia();
+        carregarDemandasResolvidas();
+        return { ok: true };
     } catch (e) {
-        alert('Erro: ' + e);
+        const msg = 'Erro: ' + (e && e.message ? e.message : String(e));
+        if (!silent) alert(msg);
+        return { ok: false, message: msg };
     }
 }
 
-window.addEventListener('DOMContentLoaded', carregarDemandasGerencia);
+function abrirModalAtenderDemanda(btnEl) {
+    try {
+        const d = JSON.parse(decodeURIComponent(btnEl.getAttribute('data-demanda')));
+        demandaAtual = d;
+        // Preencher cabeçalho
+        document.getElementById('modalProdutoNome').textContent = (d.produto_nome || d.produto_id);
+        document.getElementById('modalSetorNome').textContent = (d.setor_nome || d.setor_id);
+        document.getElementById('modalQuantidadeSolicitada').textContent = Number(d.quantidade_solicitada || 0).toLocaleString('pt-BR');
+        // Reset
+        document.getElementById('tipoOrigemDemanda').innerHTML = '<option value="">Selecione...</option>';
+        document.getElementById('localOrigemDemanda').innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        document.getElementById('infoDisponivelLocal').textContent = '';
+        document.getElementById('quantidadeDemanda').value = Number(d.quantidade_solicitada || 0);
+        document.getElementById('observacoesDemanda').value = '';
+        // Carregar estoque do produto e preencher listas
+        carregarLocaisProdutoDemanda(String(d.produto_id));
+        // Abrir modal
+        const modal = new bootstrap.Modal(document.getElementById('atenderDemandaModal'));
+        modal.show();
+    } catch (err) {
+        console.error('Falha ao abrir modal de demanda:', err);
+        alert('Erro ao abrir modal.');
+    }
+}
+
+function tipoLabel(t) {
+    const m = { 'almoxarifado': 'Almoxarifado', 'sub_almoxarifado': 'Sub-Almoxarifado', 'central': 'Central', 'setor': 'Setor' };
+    return m[String(t).toLowerCase()] || t;
+}
+
+async function carregarLocaisProdutoDemanda(produtoId) {
+    const listaEl = document.getElementById('listaLocaisDisponiveis');
+    const dispTotalEl = document.getElementById('modalDisponivelTotal');
+    const tipoSelect = document.getElementById('tipoOrigemDemanda');
+    const localSelect = document.getElementById('localOrigemDemanda');
+    listaEl.innerHTML = '<li class="list-group-item text-muted">Carregando estoque...</li>';
+    dispTotalEl.textContent = '-';
+    locaisDisponiveisDemanda = {};
+    try {
+        const res = await fetch(`/api/produtos/${encodeURIComponent(produtoId)}/estoque`);
+        const data = await res.json();
+        const estoques = (data && data.estoques) ? data.estoques : [];
+        const dispTotal = (data && data.resumo && data.resumo.total_disponivel) ? Number(data.resumo.total_disponivel || 0) : 0;
+        dispTotalEl.textContent = dispTotal.toLocaleString('pt-BR');
+        // Filtrar locais válidos para origem (exclui setor)
+        const validos = estoques.filter(e => String(e.tipo).toLowerCase() !== 'setor' && Number(e.quantidade_disponivel || 0) > 0);
+        if (!validos.length) {
+            listaEl.innerHTML = '<li class="list-group-item text-danger">Produto sem estoque disponível para envio.</li>';
+            tipoSelect.innerHTML = '<option value="">Sem estoque disponível</option>';
+            localSelect.innerHTML = '<option value="">Sem estoque disponível</option>';
+            return;
+        }
+        // Render lista
+        listaEl.innerHTML = validos.map(v => `<li class="list-group-item">${htmlEscape(tipoLabel(v.tipo))} • ${htmlEscape(v.nome_local)} <span class="float-end">Disponível: ${Number(v.quantidade_disponivel || 0).toLocaleString('pt-BR')}</span></li>`).join('');
+        // Agrupar por tipo
+        const tipos = {};
+        validos.forEach(v => {
+            const t = String(v.tipo).toLowerCase();
+            if (!tipos[t]) tipos[t] = [];
+            tipos[t].push({ id: String(v.local_id), nome: v.nome_local, quantidade: Number(v.quantidade_disponivel || 0) });
+        });
+        locaisDisponiveisDemanda = tipos;
+        // Preencher tipo
+        const tipoOptions = Object.keys(tipos).map(t => `<option value="${t}">${tipoLabel(t)}</option>`).join('');
+        tipoSelect.innerHTML = '<option value="">Selecione...</option>' + tipoOptions;
+        // Se apenas um tipo, selecionar e preencher locais
+        const tiposKeys = Object.keys(tipos);
+        if (tiposKeys.length === 1) {
+            tipoSelect.value = tiposKeys[0];
+            carregarLocaisOrigemDemanda();
+        } else {
+            localSelect.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        }
+    } catch (err) {
+        console.error('Erro ao carregar estoque:', err);
+        listaEl.innerHTML = '<li class="list-group-item text-danger">Erro ao carregar estoque</li>';
+        dispTotalEl.textContent = '-';
+    }
+}
+
+function carregarLocaisOrigemDemanda() {
+    const tipo = document.getElementById('tipoOrigemDemanda').value;
+    const localSelect = document.getElementById('localOrigemDemanda');
+    const infoDisp = document.getElementById('infoDisponivelLocal');
+    const qtdInput = document.getElementById('quantidadeDemanda');
+    infoDisp.textContent = '';
+    if (!tipo || !locaisDisponiveisDemanda[tipo]) {
+        localSelect.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        return;
+    }
+    const locais = locaisDisponiveisDemanda[tipo] || [];
+    const opts = locais.map(l => `<option value="${l.id}" data-quantidade="${l.quantidade}">${htmlEscape(l.nome)} (Disponível: ${l.quantidade})</option>`).join('');
+    localSelect.innerHTML = '<option value="">Selecione...</option>' + opts;
+    // Se apenas um local, selecionar e atualizar info
+    if (locais.length === 1) {
+        localSelect.value = locais[0].id;
+        infoDisp.textContent = `Disponível neste local: ${Number(locais[0].quantidade).toLocaleString('pt-BR')}`;
+        qtdInput.max = String(locais[0].quantidade);
+    }
+    // Atualizar ao mudar
+    localSelect.addEventListener('change', () => {
+        const sel = localSelect.options[localSelect.selectedIndex];
+        const disp = Number(sel && sel.getAttribute('data-quantidade') || 0);
+        infoDisp.textContent = sel && sel.value ? `Disponível neste local: ${disp.toLocaleString('pt-BR')}` : '';
+        qtdInput.max = sel && sel.value ? String(disp) : '';
+    }, { once: true });
+}
+
+async function executarAtendimentoDemanda() {
+    if (!demandaAtual) {
+        alert('Demanda não carregada');
+        return;
+    }
+    const tipo = document.getElementById('tipoOrigemDemanda').value;
+    const localId = document.getElementById('localOrigemDemanda').value;
+    const quantidade = document.getElementById('quantidadeDemanda').value;
+    const observacoes = document.getElementById('observacoesDemanda').value || null;
+    if (!tipo || !localId || !quantidade) {
+        alert('Preencha tipo, local e quantidade.');
+        return;
+    }
+    if (parseFloat(quantidade) <= 0) {
+        alert('Quantidade deve ser maior que zero');
+        return;
+    }
+    const payload = {
+        produto_id: String(demandaAtual.produto_id),
+        quantidade: parseFloat(quantidade),
+        origem: { tipo: tipo, id: String(localId) },
+        destino: { tipo: 'setor', id: String(demandaAtual.setor_id) },
+        motivo: `Atendimento de demanda ${demandaAtual.id}`,
+        observacoes: observacoes
+    };
+    try {
+        const res = await fetch('/api/movimentacoes/transferencia', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Falha ao enviar produto');
+            return;
+        }
+        // Atualizar demanda como atendida (somente sucesso completo mostra confirmação)
+        const upd = await atualizarStatus(demandaAtual.id, 'atendido', parseFloat(quantidade), { silent: true });
+        if (!upd.ok) {
+            alert('Transferência realizada, porém não foi possível atualizar a demanda: ' + upd.message);
+            return;
+        }
+        // Fechar modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('atenderDemandaModal'));
+        if (modal) modal.hide();
+        demandaAtual = null;
+        carregarDemandasResolvidas();
+        alert('Demanda atendida com sucesso!');
+    } catch (err) {
+        console.error('Erro ao atender demanda:', err);
+        alert('Erro ao atender demanda: ' + (err && err.message ? err.message : String(err)));
+    }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    carregarDemandasGerencia();
+    carregarDemandasResolvidas();
+});
 </script>
 {% endblock %}
