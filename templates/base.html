@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Almox SMS{% endblock %}</title>
+    <title>{% block title %}PluckLog{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <script>
         // Utilitário global para requisições JSON com tratamento de erros
         window.fetchJson = async function(url, options = {}) {
@@ -75,7 +76,7 @@
             min-width: 250px;
             height: calc(100vh - 60px);
             margin-top: 60px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: #2563eb;
             color: white;
             transition: all 0.3s ease;
             z-index: 1001;
@@ -199,10 +200,32 @@
         }
         
         .sidebar-brand {
-            padding: 20px;
+            padding: 16px;
             text-align: center;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             margin-bottom: 20px;
+        }
+        .sidebar.collapsed .sidebar-brand {
+            padding: 8px; /* reduz padding no estado colapsado para caber o ícone */
+        }
+        /* Logos de marca para estados expandido/colapsado */
+        .sidebar-brand .brand-logo-expanded {
+            display: block;
+            margin: 0 auto;
+            width: 200px; /* aumenta a logo conforme pedido */
+            height: auto;
+        }
+        .sidebar-brand .brand-logo {
+            display: none; /* ícone só aparece no estado colapsado */
+            margin: 0 auto;
+            width: 40px;
+            height: 40px;
+        }
+        .sidebar.collapsed .brand-logo-expanded {
+            display: none;
+        }
+        .sidebar.collapsed .brand-logo {
+            display: block;
         }
         
         .sidebar-brand h4 {
@@ -217,7 +240,7 @@
             left: 0;
             right: 0;
             height: 60px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: #2563eb;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 1002;
             display: flex;
@@ -318,7 +341,7 @@
         
         .user-dropdown-item:hover {
             background-color: #f8f9fa;
-            color: #667eea;
+            color: #2563eb;
             transform: translateX(5px);
         }
         
@@ -359,13 +382,19 @@
         }
         
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: #2563eb;
             border: none;
             border-radius: 8px;
         }
         
         .btn-primary:hover {
-            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+            background-color: #2563eb;
+            filter: brightness(0.95);
+        }
+
+        /* Remover caret da dropdown para manter só o avatar */
+        .avatar-dropdown.dropdown-toggle::after {
+            display: none !important;
         }
         
         @media (max-width: 768px) {
@@ -512,8 +541,8 @@
         <!-- Sidebar -->
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-brand">
-                <h4><i class="fas fa-boxes"></i> Almox SMS</h4>
-                <small>Sistema de Gerenciamento</small>
+                <img class="brand-logo-expanded" src="{{ url_for('static', filename='logo_pluck_branco.svg') }}" alt="Logo PluckLog">
+                <img class="brand-logo" src="{{ url_for('static', filename='icone_logo_pluck_branco.svg') }}" alt="Logo PluckLog">
             </div>
             
             {% from 'blocks/menu_blocks.html' import render_personalized_menu %}
@@ -664,7 +693,7 @@
         // Atualizar data e hora atual
         function updateDateTime() {
             const now = new Date();
-            const options = {
+            const fmt = new Intl.DateTimeFormat('pt-BR', {
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',
@@ -673,12 +702,23 @@
                 minute: '2-digit',
                 second: '2-digit',
                 timeZone: 'America/Sao_Paulo'
-            };
-            
-            const dateTimeString = now.toLocaleDateString('pt-BR', options);
+            });
+
+            const parts = fmt.formatToParts(now);
+            let weekday = parts.find(p => p.type === 'weekday')?.value || '';
+            let month = parts.find(p => p.type === 'month')?.value || '';
+            if (weekday) weekday = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+            if (month) month = month.charAt(0).toUpperCase() + month.slice(1);
+
+            const text = parts.map(p => {
+                if (p.type === 'weekday') return weekday;
+                if (p.type === 'month') return month;
+                return p.value;
+            }).join('');
+
             const dateTimeElement = document.getElementById('current-datetime');
             if (dateTimeElement) {
-                dateTimeElement.textContent = dateTimeString;
+                dateTimeElement.textContent = text;
             }
         }
         
