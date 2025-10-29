@@ -534,6 +534,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         ${data.nota_fiscal || '-'}
                     </div>
                     <div class="col-6">
+                        <strong>Data do Recebimento:</strong><br>
+                        ${data.data_recebimento ? new Date(data.data_recebimento).toLocaleDateString('pt-BR') : '-'}
+                        <small class="text-muted">${data.data_recebimento ? new Date(data.data_recebimento).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : ''}</small>
+                    </div>
+                    <div class="col-6">
                         <strong>Data de Fabricação:</strong><br>
                         ${data.data_fabricacao ? new Date(data.data_fabricacao).toLocaleDateString('pt-BR') : '-'}
                     </div>

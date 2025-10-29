@@ -149,7 +149,7 @@
                         <div class="tab-pane fade" id="setores" role="tabpanel" aria-labelledby="setores-tab">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h5 class="mb-0">Setores Cadastrados</h5>
-                                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#setorModal">
+                                <button type="button" class="btn btn-primary" id="newSetorBtn">
                                     <i class="fas fa-plus me-2"></i>Novo Setor
                                 </button>
                             </div>
@@ -305,16 +305,19 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label for="setor-almoxarifado" class="form-label">Almoxarifado *</label>
-                        <select class="form-select" id="setor-almoxarifado" name="almoxarifado_id" required>
-                            <option value="">Selecione um almoxarifado</option>
+                        <label for="setor-almoxarifado" class="form-label">Almoxarifados (múltiplos)</label>
+                        <select class="form-select" id="setor-almoxarifado" name="almoxarifado_ids" multiple>
+                            <option value="">Selecione um ou mais almoxarifados</option>
                         </select>
+                        <div class="form-text">Selecione um ou mais almoxarifados para compor os sub-almoxarifados disponíveis.</div>
                     </div>
                     <div class="mb-3">
-                        <label for="setor-sub-almoxarifado" class="form-label">Sub-Almoxarifado *</label>
-                        <select class="form-select" id="setor-sub-almoxarifado" name="sub_almoxarifado_id" required>
-                            <option value="">Selecione um sub-almoxarifado</option>
+                        <label for="setor-sub-almoxarifado" class="form-label">Sub-Almoxarifados (múltiplos) *</label>
+                        <select class="form-select" id="setor-sub-almoxarifado" name="sub_almoxarifado_ids" multiple required>
+                            <option value="">Selecione um ou mais sub-almoxarifados</option>
                         </select>
+                        <div id="setor-sub-selected-chips" class="mt-2"></div>
+                        <div class="form-text">Selecione sub-almoxarifados, inclusive de almoxarifados diferentes.</div>
                     </div>
                     <div class="mb-3">
                         <label for="setor-nome" class="form-label">Nome *</label>
@@ -342,6 +345,8 @@
 {% block extra_js %}
 <script>
 $(document).ready(function() {
+    // Cache local dos sub-almoxarifados da seleção atual
+    let setorSubCache = [];
     loadCentrais();
     loadAlmoxarifados();
     loadSubAlmoxarifados();
@@ -361,6 +366,29 @@ $(document).ready(function() {
     $('#sub-almoxarifado-central').on('change', onSubAlmoxCentralChange);
     $('#setor-central').on('change', onSetorCentralChange);
     $('#setor-almoxarifado').on('change', onSetorAlmoxarifadoChange);
+    $('#setor-sub-almoxarifado').on('change', renderSelectedSubChips);
+    $('#setor-sub-search').on('input', function(){
+        const term = ($(this).val() || '').toLowerCase();
+        rebuildSetorSubOptions(term);
+    });
+    $('#setor-sub-select-all').on('click', function(){
+        const select = $('#setor-sub-almoxarifado');
+        select.find('option:not(:first)').prop('selected', true);
+        select.trigger('change');
+    });
+    $('#setor-sub-clear').on('click', function(){
+        const select = $('#setor-sub-almoxarifado');
+        select.val([]).trigger('change');
+    });
+    $('#setor-sub-selected-chips').on('click', 'button[data-id]', function(){
+        const id = $(this).data('id');
+        const select = $('#setor-sub-almoxarifado');
+        const values = (select.val() || []).filter(v => String(v) !== String(id));
+        select.val(values).trigger('change');
+    });
+    
+    // Abrir "Novo Setor" sempre em branco
+    $('#newSetorBtn').on('click', openSetorModal);
     
     // Event listeners para mudança de abas
     $('#hierarchyTabs button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
@@ -393,11 +421,38 @@ $(document).ready(function() {
             $('#setor-almoxarifado').prop('disabled', true);
             $('#setor-sub-almoxarifado').prop('disabled', true);
             $('#setorModalLabel').text('Novo Setor');
+            // Reset de UX de sub-almoxarifados
+            $('#setor-sub-search').val('');
+            $('#setor-sub-selected-chips').empty();
+            setorSubCache = [];
         }
-        // Carregar centrais
-        loadCentraisForSetorSelect();
+        // Carregamento de centrais é feito apenas via openSetorModal/editSetor para evitar duplicações
+    });
+    
+    // Garantir limpeza ao fechar o modal
+    $('#setorModal').on('hidden.bs.modal', function () {
+        $('#setorForm').removeData('edit-id');
+        $('#setorForm')[0].reset();
+        $('#setor-almoxarifado').prop('disabled', true).find('option:not(:first)').remove();
+        $('#setor-sub-almoxarifado').prop('disabled', true).val([]).find('option:not(:first)').remove();
+        $('#setor-sub-selected-chips').empty();
+        $('#setorModalLabel').text('Novo Setor');
     });
 });
+
+// Abre o modal de Setor garantindo um estado limpo
+function openSetorModal() {
+    $('#setorForm')[0].reset();
+    $('#setorForm').removeData('edit-id');
+    $('#setorModalLabel').text('Novo Setor');
+    $('#setor-almoxarifado').prop('disabled', true).find('option:not(:first)').remove();
+    $('#setor-sub-almoxarifado').prop('disabled', true).val([]).find('option:not(:first)').remove();
+    $('#setor-sub-selected-chips').empty();
+    
+    // Carregar centrais e abrir modal
+    loadCentraisForSetorSelect();
+    $('#setorModal').modal('show');
+}
 
 function loadCentrais() {
     $.get('/api/centrais?per_page=1000')
@@ -698,7 +753,7 @@ function onSubAlmoxCentralChange() {
         // Carregar almoxarifados da central selecionada
         $.get('/api/almoxarifados')
             .done(function(response) {
-                almoxSelect.find('option:first').text('Selecione um almoxarifado');
+                almoxSelect.find('option:first').text('Selecione um ou mais almoxarifados');
                 
                 const data = response.items || [];
                 data.forEach(almox => {
@@ -751,27 +806,30 @@ function onSetorCentralChange() {
 }
 
 function onSetorAlmoxarifadoChange() {
-    const almoxarifadoId = $('#setor-almoxarifado').val();
+    const selectedAlmoxIds = $('#setor-almoxarifado').val() || [];
     const subAlmoxSelect = $('#setor-sub-almoxarifado');
-    
+
     // Limpar e desabilitar select de sub-almoxarifado
     subAlmoxSelect.find('option:not(:first)').remove();
-    subAlmoxSelect.prop('disabled', !almoxarifadoId);
-    
-    if (almoxarifadoId) {
+    subAlmoxSelect.prop('disabled', selectedAlmoxIds.length === 0);
+
+    if (selectedAlmoxIds.length > 0) {
         subAlmoxSelect.find('option:first').text('Carregando...');
-        
-        // Carregar sub-almoxarifados do almoxarifado selecionado
+
+        // Carregar sub-almoxarifados dos almoxarifados selecionados (união)
         $.get('/api/sub-almoxarifados')
             .done(function(response) {
-                subAlmoxSelect.find('option:first').text('Selecione um sub-almoxarifado');
-                
+                subAlmoxSelect.find('option:first').text('Selecione sub-almoxarifados');
+
                 const data = response.items || [];
-                data.forEach(subAlmox => {
-                    if (subAlmox.ativo && subAlmox.almoxarifado_id == almoxarifadoId) {
-                        subAlmoxSelect.append(`<option value="${subAlmox.id}">${subAlmox.nome}</option>`);
-                    }
-                });
+                const selectedSet = new Set((selectedAlmoxIds || []).map(id => String(id)));
+                // Cache local para filtro por busca
+                setorSubCache = data
+                    .filter(subAlmox => subAlmox.ativo && selectedSet.has(String(subAlmox.almoxarifado_id)))
+                    .map(subAlmox => ({ id: String(subAlmox.id), nome: subAlmox.nome }));
+                // Reconstroi opções conforme termo atual
+                const term = ($('#setor-sub-search').val() || '').toLowerCase();
+                rebuildSetorSubOptions(term);
             })
             .fail(function() {
                 subAlmoxSelect.find('option:first').text('Erro ao carregar');
@@ -779,6 +837,40 @@ function onSetorAlmoxarifadoChange() {
     } else {
         subAlmoxSelect.find('option:first').text('Primeiro selecione um almoxarifado');
     }
+}
+
+// Reconstrói opções do select de sub-almoxarifados conforme termo de busca
+function rebuildSetorSubOptions(term) {
+    const select = $('#setor-sub-almoxarifado');
+    const current = new Set((select.val() || []).map(v => String(v)));
+    select.find('option:not(:first)').remove();
+    const filtered = (typeof setorSubCache !== 'undefined' ? setorSubCache : []).filter(item => {
+        if (!term) return true;
+        return (item.nome || '').toLowerCase().includes(term);
+    });
+    filtered.forEach(item => {
+        const opt = $(`<option></option>`).attr('value', item.id).text(item.nome);
+        if (current.has(String(item.id))) opt.prop('selected', true);
+        select.append(opt);
+    });
+    select.prop('disabled', filtered.length === 0);
+    renderSelectedSubChips();
+}
+
+// Renderiza chips dos sub-almoxarifados selecionados
+function renderSelectedSubChips() {
+    const select = $('#setor-sub-almoxarifado');
+    const container = $('#setor-sub-selected-chips');
+    const values = select.val() || [];
+    if (values.length === 0) {
+        container.html('<small class="text-muted">Nenhum sub-almoxarifado selecionado</small>');
+        return;
+    }
+    const chips = values.map(v => {
+        const text = select.find(`option[value="${v}"]`).text();
+        return `<span class="badge bg-primary me-1 mb-1 d-inline-flex align-items-center">${text}<button type="button" class="btn btn-sm btn-light ms-2 py-0 px-1" data-id="${v}">&times;</button></span>`;
+    }).join('');
+    container.html(chips);
 }
 
 function handleCentralSubmit(e) {
@@ -886,10 +978,24 @@ function handleSetorSubmit(e) {
     const editId = $('#setorForm').data('edit-id');
     const isEdit = editId !== undefined;
     
+    const nome = $('#setor-nome').val().trim();
+    const descricao = $('#setor-descricao').val().trim();
+    const almoxarifadoIds = ($('#setor-almoxarifado').val() || []).map(v => parseInt(v));
+    const subAlmoxarifadoIds = ($('#setor-sub-almoxarifado').val() || []).map(v => parseInt(v));
+
+    if (!nome || subAlmoxarifadoIds.length === 0) {
+        showAlert('Informe o nome e selecione ao menos um sub-almoxarifado.', 'warning');
+        return;
+    }
+
     const data = {
-        sub_almoxarifado_id: parseInt($('#setor-sub-almoxarifado').val()),
-        nome: $('#setor-nome').val(),
-        descricao: $('#setor-descricao').val(),
+        // Compatível com API legada
+        sub_almoxarifado_id: subAlmoxarifadoIds[0] || null,
+        // Novo: múltiplos vínculos
+        almoxarifado_ids: almoxarifadoIds,
+        sub_almoxarifado_ids: subAlmoxarifadoIds,
+        nome,
+        descricao,
         ativo: true
     };
     
@@ -1037,7 +1143,9 @@ function deleteAlmoxarifado(id) {
 function editSubAlmoxarifado(id) {
     $.get(`/api/sub-almoxarifados/${id}`)
         .done(function(subAlmox) {
-            loadCentraisForSubAlmoxSelect();
+            $('#subAlmoxarifadoModalLabel').text('Editar Sub-Almoxarifado');
+            $('#subAlmoxarifadoForm').data('edit-id', id);
+            $('#subAlmoxarifadoModal').modal('show');
             setTimeout(() => {
                 $('#sub-almoxarifado-central').val(subAlmox.central_id);
                 onSubAlmoxCentralChange();
@@ -1045,9 +1153,6 @@ function editSubAlmoxarifado(id) {
                     $('#sub-almoxarifado-almoxarifado').val(subAlmox.almoxarifado_id);
                     $('#sub-almoxarifado-nome').val(subAlmox.nome);
                     $('#sub-almoxarifado-descricao').val(subAlmox.descricao);
-                    $('#subAlmoxarifadoModalLabel').text('Editar Sub-Almoxarifado');
-                    $('#subAlmoxarifadoForm').data('edit-id', id);
-                    $('#subAlmoxarifadoModal').modal('show');
                 }, 300);
             }, 300);
         })
@@ -1103,10 +1208,12 @@ function editSetor(id) {
                 $('#setor-central').val(setor.central_id);
                 onSetorCentralChange();
                 setTimeout(() => {
-                    $('#setor-almoxarifado').val(setor.almoxarifado_id);
+                    const almoxIds = setor.almoxarifado_ids || (setor.almoxarifado_id ? [setor.almoxarifado_id] : []);
+                    $('#setor-almoxarifado').val(almoxIds);
                     onSetorAlmoxarifadoChange();
                     setTimeout(() => {
-                        $('#setor-sub-almoxarifado').val(setor.sub_almoxarifado_id);
+                        const subIds = setor.sub_almoxarifado_ids || (setor.sub_almoxarifado_id ? [setor.sub_almoxarifado_id] : []);
+                        $('#setor-sub-almoxarifado').val(subIds);
                         $('#setor-nome').val(setor.nome);
                         $('#setor-descricao').val(setor.descricao);
                         $('#setorModalLabel').text('Editar Setor');

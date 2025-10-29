@@ -203,7 +203,17 @@
                             <div class="row text-center">
                                 <div class="col-6">
                                     <div class="border-end">
-                                        <h4 class="text-primary mb-0">{{ user.data_criacao.strftime('%d/%m/%Y') }}</h4>
+                                        <h4 class="text-primary mb-0">
+                                            {% if user.data_criacao %}
+                                                {% if user.data_criacao is string %}
+                                                    {{ user.data_criacao }}
+                                                {% else %}
+                                                    {{ user.data_criacao.strftime('%d/%m/%Y') }}
+                                                {% endif %}
+                                            {% else %}
+                                                &mdash;
+                                            {% endif %}
+                                        </h4>
                                         <small class="text-muted">Criado em</small>
                                     </div>
                                 </div>

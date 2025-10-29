@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+
+{% block title %}Demandas de Produtos - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid" data-setor-id="{{ current_user.setor_id }}">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-clipboard-list"></i> Demandas de Produtos</h2>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-plus-circle"></i> Nova Demanda</h5>
+                </div>
+                <div class="card-body">
+                    <form id="formDemanda" onsubmit="event.preventDefault(); enviarDemanda();">
+                        <div class="mb-3">
+                            <label class="form-label">Buscar Produto</label>
+                            <input type="text" class="form-control" id="produtoBuscaInput" placeholder="Digite nome ou código do produto...">
+                            <div id="produtoResultados" class="list-group mt-2" style="max-height:220px; overflow:auto;"></div>
+                            <div id="produtoSelecionadoInfo" class="form-text text-muted"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Produto (ID ou código)</label>
+                            <input type="text" class="form-control" id="produtoIdInput" placeholder="Digite o ID ou o código do produto" required>
+                            <div class="form-text text-muted">Você pode digitar o código (ex.: 2-MO001-0001) ou o ID.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Quantidade</label>
+                            <input type="number" step="0.01" min="0.01" class="form-control" id="quantidadeInput" placeholder="Ex.: 5" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Destino preferencial</label>
+                            <select id="destinoSelect" class="form-select">
+                                <option value="almoxarifado">Almoxarifado</option>
+                                <option value="central">Central</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Observações (opcional)</label>
+                            <textarea class="form-control" id="observacoesInput" rows="2" placeholder="Motivo, urgência, detalhes..."></textarea>
+                        </div>
+                        <div class="d-flex justify-content-end">
+                            <button class="btn btn-primary" type="submit">
+                                <i class="fas fa-paper-plane"></i> Enviar Demanda
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-box"></i> Estoque Atual no Setor</h5>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="atualizarEstoqueSetor()">
+                        <i class="fas fa-sync-alt"></i> Atualizar
+                    </button>
+                </div>
+                <div class="card-body" id="estoqueSetor">
+                    <div class="text-muted">Informe um Produto ID para ver o estoque do setor.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-list"></i> Minhas Demandas</h5>
+                    <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandas()">
+                        <i class="fas fa-sync-alt"></i> Atualizar
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="listaDemandas">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Carregando...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const containerEl = document.querySelector('[data-setor-id]');
+// Sanitizar setorId: ignorar valores vazios/None/null/undefined vindos do template
+const _setorIdRaw = containerEl ? containerEl.getAttribute('data-setor-id') : null;
+const setorId = (_setorIdRaw && !['None','none','null','undefined',''].includes(String(_setorIdRaw))) ? _setorIdRaw : null;
+
+function htmlEscape(str) {
+    return (str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
+}
+
+async function enviarDemanda() {
+    try {
+        const produtoIdRaw = document.getElementById('produtoIdInput').value.trim();
+        const quantidade = parseFloat(document.getElementById('quantidadeInput').value);
+        const destino = document.getElementById('destinoSelect').value;
+        const observacoes = document.getElementById('observacoesInput').value.trim();
+        if (!produtoIdRaw || !quantidade || quantidade <= 0) {
+            alert('Informe Produto ID e quantidade válida.');
+            return;
+        }
+        // Resolver produto_id a partir de ID, código ou nome
+        let produtoId = produtoIdRaw;
+        if (!/^\d+$/.test(produtoIdRaw)) {
+            try {
+                const resBuscaProd = await fetch(`/api/produtos?search=${encodeURIComponent(produtoIdRaw)}&per_page=1`);
+                if (resBuscaProd.ok) {
+                    const dataBuscaProd = await resBuscaProd.json();
+                    const item = (dataBuscaProd.items || [])[0];
+                    if (item && item.id !== undefined && item.id !== null) {
+                        produtoId = String(item.id);
+                        document.getElementById('produtoIdInput').value = produtoId;
+                        const nome = item.nome || '';
+                        const codigo = item.codigo || '';
+                        document.getElementById('produtoSelecionadoInfo').innerText = `Selecionado: ${htmlEscape(nome)} (${htmlEscape(codigo)})`;
+                    }
+                }
+            } catch (e) {
+                // Prosseguir com valor bruto se falhar
+            }
+        }
+        const res = await fetch('/api/demandas', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ produto_id: produtoId, quantidade, destino_tipo: destino, observacoes })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Falha ao enviar demanda');
+            return;
+        }
+        document.getElementById('formDemanda').reset();
+        carregarDemandas();
+        atualizarEstoqueSetor();
+    } catch (e) {
+        alert('Erro ao enviar: ' + e);
+    }
+}
+
+async function carregarDemandas() {
+    const el = document.getElementById('listaDemandas');
+    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
+    try {
+        const res = await fetch('/api/demandas?mine=true&per_page=50');
+        const data = await res.json();
+        if (!res.ok) {
+            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(data.error || 'Erro ao listar')}</div>`;
+            return;
+        }
+        if (!data.items || !data.items.length) {
+            el.innerHTML = '<div class="text-muted">Nenhuma demanda encontrada.</div>';
+            return;
+        }
+        const rows = data.items.map(d => `
+            <tr>
+                <td>${htmlEscape(d.id)}</td>
+                <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
+                <td class="text-end">${Number(d.quantidade_solicitada || 0).toFixed(2)}</td>
+                <td>${htmlEscape(d.destino_tipo || '')}</td>
+                <td><span class="badge bg-${d.status==='aprovado'?'success':d.status==='negado'?'danger':d.status==='atendido'?'primary':'secondary'}">${htmlEscape(d.status || '')}</span></td>
+                <td>${htmlEscape(d.created_at || '')}</td>
+            </tr>
+        `).join('');
+        el.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-sm table-striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Produto</th>
+                            <th class="text-end">Qtd</th>
+                            <th>Destino</th>
+                            <th>Status</th>
+                            <th>Criado em</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
+    }
+}
+
+async function atualizarEstoqueSetor() {
+    const el = document.getElementById('estoqueSetor');
+    const pidRaw = document.getElementById('produtoIdInput').value.trim();
+    if (!pidRaw) {
+        el.innerHTML = '<div class="text-muted">Informe um Produto ID.</div>';
+        return;
+    }
+    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
+    try {
+        // Resolver Produto ID: se o valor não for claramente numérico, tentar por nome/código
+        let pid = pidRaw;
+        if (!/^\d+$/.test(pidRaw)) {
+            try {
+                const resBuscaProd = await fetch(`/api/produtos?search=${encodeURIComponent(pidRaw)}&per_page=1`);
+                if (resBuscaProd.ok) {
+                    const dataBuscaProd = await resBuscaProd.json();
+                    const item = (dataBuscaProd.items || [])[0];
+                    if (item && item.id !== undefined && item.id !== null) {
+                        pid = String(item.id);
+                        // Atualizar input para refletir ID resolvido
+                        document.getElementById('produtoIdInput').value = pid;
+                        const nome = item.nome || '';
+                        const codigo = item.codigo || '';
+                        document.getElementById('produtoSelecionadoInfo').innerText = `Selecionado: ${htmlEscape(nome)} (${htmlEscape(codigo)})`;
+                    }
+                }
+            } catch (e) {
+                // Silencioso: caso falhe, prosseguir com o valor bruto
+            }
+        }
+
+        const [resEstoque, resDemandas] = await Promise.all([
+            fetch(`/api/produtos/${encodeURIComponent(pid)}/estoque`),
+            fetch('/api/demandas?mine=true&status=pendente&per_page=100')
+        ]);
+        const dataEstoque = await resEstoque.json();
+        const dataDemandas = await resDemandas.json();
+        if (!resEstoque.ok) {
+            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(dataEstoque.error || 'Erro ao consultar estoque')}</div>`;
+            return;
+        }
+        if (!resDemandas.ok) {
+            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(dataDemandas.error || 'Erro ao consultar demandas')}</div>`;
+            return;
+        }
+        // Resolver candidatos de ID do setor (bruto e normalizado) para compatibilidade
+        let setorIdCandidates = [];
+        let setorNome = '';
+        if (setorId) {
+            setorIdCandidates.push(String(setorId));
+            try {
+                const resSetor = await fetch(`/api/setores/${encodeURIComponent(setorId)}`);
+                if (resSetor.ok) {
+                    const dataSetor = await resSetor.json();
+                    if (dataSetor && dataSetor.id) {
+                        setorIdCandidates.push(String(dataSetor.id));
+                    }
+                    if (dataSetor && (dataSetor.nome || dataSetor.nome_setor)) {
+                        setorNome = dataSetor.nome || dataSetor.nome_setor || '';
+                    }
+                }
+            } catch (e) {
+                // Ignorar falhas de resolução; usamos apenas o bruto
+            }
+        }
+        const entries = (dataEstoque.estoques || []).filter(e => {
+            if (e.tipo !== 'setor') return false;
+            const lid = String(e.local_id);
+            return setorIdCandidates.length ? setorIdCandidates.includes(lid) : (String(setorId) === lid);
+        });
+        const totalDisp = entries.reduce((sum, e) => sum + Number(e.quantidade_disponivel ?? e.quantidade ?? 0), 0);
+        const pendentes = (Array.isArray(dataDemandas.items) ? dataDemandas.items : [])
+            .filter(d => String(d.produto_id) === String(pid))
+            .reduce((sum, d) => sum + Number(d.quantidade_solicitada || 0), 0);
+        el.innerHTML = `
+            <div>
+                <h5 class="mb-2">Setor atual: ${htmlEscape(entries[0]?.nome_local || setorNome || '')}</h5>
+                <p class="mb-1"><strong>Disponível:</strong> ${totalDisp.toFixed(2)}</p>
+                <p class="mb-0"><strong>Demandado (pendente):</strong> ${pendentes.toFixed(2)}</p>
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
+    }
+}
+
+document.getElementById('produtoIdInput').addEventListener('input', () => {
+    const val = document.getElementById('produtoIdInput').value.trim();
+    if (val) {
+        atualizarEstoqueSetor();
+    }
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+    carregarDemandas();
+});
+
+// Busca de produtos em tempo real
+let produtoBuscaTimeout = null;
+document.getElementById('produtoBuscaInput').addEventListener('input', async (e) => {
+    const q = (e.target.value || '').trim();
+    clearTimeout(produtoBuscaTimeout);
+    if (!q) {
+        document.getElementById('produtoResultados').innerHTML = '';
+        document.getElementById('produtoSelecionadoInfo').innerText = '';
+        return;
+    }
+    produtoBuscaTimeout = setTimeout(async () => {
+        const resultadosEl = document.getElementById('produtoResultados');
+        resultadosEl.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Buscando...</span></div></div>';
+        try {
+            const res = await fetch(`/api/produtos?search=${encodeURIComponent(q)}&per_page=20`);
+            const data = await res.json();
+            if (!res.ok) {
+                resultadosEl.innerHTML = `<div class="list-group-item list-group-item-danger">${htmlEscape(data.error || 'Erro na busca')}</div>`;
+                return;
+            }
+            const items = Array.isArray(data.items) ? data.items : [];
+            if (!items.length) {
+                resultadosEl.innerHTML = '<div class="list-group-item text-muted">Nenhum produto encontrado.</div>';
+                return;
+            }
+            resultadosEl.innerHTML = items.map(p => `
+                <button type="button" class="list-group-item list-group-item-action" data-id="${htmlEscape(p.id)}" data-nome="${htmlEscape(p.nome || '')}" data-codigo="${htmlEscape(p.codigo || '')}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${htmlEscape(p.nome || '')}</strong>
+                            <small class="text-muted ms-2">${htmlEscape(p.codigo || '')}</small>
+                        </div>
+                        <span class="badge bg-${p.ativo ? 'success' : 'secondary'}">${p.ativo ? 'Ativo' : 'Inativo'}</span>
+                    </div>
+                    ${p.unidade_medida ? `<div class="small text-muted">Unidade: ${htmlEscape(p.unidade_medida)}</div>` : ''}
+                </button>
+            `).join('');
+
+            // Bind seleção
+            Array.from(resultadosEl.querySelectorAll('.list-group-item-action')).forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const pid = btn.getAttribute('data-id');
+                    const nome = btn.getAttribute('data-nome');
+                    const codigo = btn.getAttribute('data-codigo');
+                    // Preencher com código para ser mais intuitivo; resolveremos ID automaticamente
+                    document.getElementById('produtoIdInput').value = codigo || pid;
+                    document.getElementById('produtoBuscaInput').value = nome;
+                    document.getElementById('produtoSelecionadoInfo').innerText = `Selecionado: ${nome} (${codigo})`;
+                    resultadosEl.innerHTML = '';
+                    atualizarEstoqueSetor();
+                });
+            });
+        } catch (err) {
+            resultadosEl.innerHTML = `<div class="list-group-item list-group-item-danger">Erro: ${htmlEscape(String(err))}</div>`;
+        }
+    }, 250);
+});
+</script>
+{% endblock %}

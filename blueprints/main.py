@@ -6,7 +6,7 @@ from flask_login import current_user
 # Removido: from models.categoria import CategoriaProduto
 # Removido: from extensions import db
 from auth import (require_any_level, require_manager_or_above, require_admin_or_above, 
-                  ScopeFilter)
+                  require_level, ScopeFilter)
 from config.ui_blocks import get_ui_blocks_config
 import extensions
 from pymongo import ReturnDocument
@@ -14,6 +14,21 @@ from datetime import datetime
 from bson import ObjectId
 
 main_bp = Blueprint('main', __name__)
+
+# Helper para serialização consistente de datas em ISO 8601 (sem timezone)
+def _isoformat_or_str(value):
+    """Serialize datetime to ISO 8601 string; normalize strings to ISO if possible."""
+    try:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, str) and value:
+            try:
+                return datetime.fromisoformat(value).isoformat()
+            except Exception:
+                return value
+    except Exception:
+        pass
+    return None
 
 # Helper compartilhado para resolver documento por id sequencial ou ObjectId string
 def _find_by_id(coll_name: str, value):
@@ -671,7 +686,7 @@ def categorias():
     return configuracoes_categorias()
 
 @main_bp.route('/relatorios')
-@require_admin_or_above
+@require_manager_or_above
 def relatorios():
     """Página de relatórios"""
     return render_template('relatorios/index.html')
@@ -1766,11 +1781,28 @@ def api_sub_almoxarifados_delete(id):
 def api_setores():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    ativo_param = request.args.get('ativo')
+    search = (request.args.get('search') or '').strip()
 
     coll = extensions.mongo_db['setores']
-    total = coll.count_documents({})
+
+    # Montar filtro
+    filter_query = {}
+    if ativo_param is not None and ativo_param != '':
+        val = str(ativo_param).lower()
+        if val in ('true', '1'):
+            filter_query['ativo'] = True
+        elif val in ('false', '0'):
+            filter_query['ativo'] = False
+    if search:
+        filter_query['$or'] = [
+            {'nome': {'$regex': search, '$options': 'i'}},
+            {'descricao': {'$regex': search, '$options': 'i'}}
+        ]
+
+    total = coll.count_documents(filter_query)
     skip = max(0, (page - 1) * per_page)
-    cursor = coll.find({}).sort('id', 1).skip(skip).limit(per_page)
+    cursor = coll.find(filter_query).sort('id', 1).skip(skip).limit(per_page)
 
     # Preload sub-almoxarifados, almoxarifados e centrais
     sub_coll = extensions.mongo_db['sub_almoxarifados']
@@ -1785,56 +1817,120 @@ def api_setores():
 
     items = []
     for doc in cursor:
-        raw_sid = doc.get('sub_almoxarifado_id')
-        sub_doc = None
-        normalized_sub_id = None
-        if isinstance(raw_sid, int):
-            sub_doc = sub_by_seq.get(raw_sid)
-            normalized_sub_id = raw_sid
-        elif isinstance(raw_sid, ObjectId):
-            sub_doc = sub_by_oid.get(str(raw_sid))
-            normalized_sub_id = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
-        elif isinstance(raw_sid, str) and len(raw_sid) == 24:
-            sub_doc = sub_by_oid.get(raw_sid)
-            normalized_sub_id = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
+        raw_sids = doc.get('sub_almoxarifado_ids') or ([] if doc.get('sub_almoxarifado_id') is None else [doc.get('sub_almoxarifado_id')])
 
-        almox_doc = None
-        normalized_almox_id = None
-        raw_aid = sub_doc.get('almoxarifado_id') if sub_doc else None
-        if isinstance(raw_aid, int):
-            almox_doc = almox_by_seq.get(raw_aid)
-            normalized_almox_id = raw_aid
-        elif isinstance(raw_aid, ObjectId):
-            almox_doc = almox_by_oid.get(str(raw_aid))
-            normalized_almox_id = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
-        elif isinstance(raw_aid, str) and len(raw_aid) == 24:
-            almox_doc = almox_by_oid.get(raw_aid)
-            normalized_almox_id = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+        sub_docs = []
+        normalized_sub_ids = []
+        for raw_sid in raw_sids:
+            sub_doc = None
+            norm_sid = None
+            if isinstance(raw_sid, int):
+                sub_doc = sub_by_seq.get(raw_sid)
+                norm_sid = raw_sid
+            elif isinstance(raw_sid, ObjectId):
+                sub_doc = sub_by_oid.get(str(raw_sid))
+                norm_sid = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
+            elif isinstance(raw_sid, str) and len(raw_sid) == 24:
+                sub_doc = sub_by_oid.get(raw_sid)
+                norm_sid = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
+            else:
+                # tentar converter para int
+                try:
+                    norm_sid = int(raw_sid)
+                    sub_doc = sub_by_seq.get(norm_sid)
+                except Exception:
+                    norm_sid = raw_sid
+            if sub_doc:
+                sub_docs.append(sub_doc)
+            normalized_sub_ids.append(norm_sid)
 
-        central_doc = None
-        normalized_central_id = None
-        raw_cid = almox_doc.get('central_id') if almox_doc else None
-        if isinstance(raw_cid, int):
-            central_doc = centrais_by_seq.get(raw_cid)
-            normalized_central_id = raw_cid
-        elif isinstance(raw_cid, ObjectId):
-            central_doc = centrais_by_oid.get(str(raw_cid))
-            normalized_central_id = central_doc.get('id') if central_doc and 'id' in central_doc else None
-        elif isinstance(raw_cid, str) and len(raw_cid) == 24:
-            central_doc = centrais_by_oid.get(raw_cid)
-            normalized_central_id = central_doc.get('id') if central_doc and 'id' in central_doc else None
+        # Agregar almoxarifados e centrais a partir dos sub_docs
+        almox_ids = []
+        almox_names = []
+        central_ids = []
+        central_names = []
+
+        for sdoc in sub_docs:
+            raw_aid = sdoc.get('almoxarifado_id')
+            almox_doc = None
+            norm_aid = None
+            if isinstance(raw_aid, int):
+                almox_doc = almox_by_seq.get(raw_aid)
+                norm_aid = raw_aid
+            elif isinstance(raw_aid, ObjectId):
+                almox_doc = almox_by_oid.get(str(raw_aid))
+                norm_aid = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+            elif isinstance(raw_aid, str) and len(raw_aid) == 24:
+                almox_doc = almox_by_oid.get(raw_aid)
+                norm_aid = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+            else:
+                try:
+                    norm_aid = int(raw_aid)
+                    almox_doc = almox_by_seq.get(norm_aid)
+                except Exception:
+                    norm_aid = raw_aid
+            if norm_aid is not None:
+                almox_ids.append(norm_aid)
+            if almox_doc and almox_doc.get('nome'):
+                almox_names.append(almox_doc.get('nome'))
+
+            # Central
+            raw_cid = almox_doc.get('central_id') if almox_doc else None
+            central_doc = None
+            norm_cid = None
+            if isinstance(raw_cid, int):
+                central_doc = centrais_by_seq.get(raw_cid)
+                norm_cid = raw_cid
+            elif isinstance(raw_cid, ObjectId):
+                central_doc = centrais_by_oid.get(str(raw_cid))
+                norm_cid = central_doc.get('id') if central_doc and 'id' in central_doc else None
+            elif isinstance(raw_cid, str) and len(raw_cid) == 24:
+                central_doc = centrais_by_oid.get(raw_cid)
+                norm_cid = central_doc.get('id') if central_doc and 'id' in central_doc else None
+            else:
+                try:
+                    norm_cid = int(raw_cid)
+                    central_doc = centrais_by_seq.get(norm_cid)
+                except Exception:
+                    norm_cid = raw_cid
+            if norm_cid is not None:
+                central_ids.append(norm_cid)
+            if central_doc and central_doc.get('nome'):
+                central_names.append(central_doc.get('nome'))
+
+        # Remover duplicatas preservando ordem
+        def unique(seq):
+            seen = set()
+            out = []
+            for x in seq:
+                if x not in seen:
+                    seen.add(x)
+                    out.append(x)
+            return out
+
+        normalized_sub_ids = unique([sid for sid in normalized_sub_ids if sid is not None])
+        almox_ids = unique([aid for aid in almox_ids if aid is not None])
+        central_ids = unique([cid for cid in central_ids if cid is not None])
+        sub_names = unique([s.get('nome') for s in sub_docs if s.get('nome')])
+        almox_names = unique(almox_names)
+        central_names = unique(central_names)
 
         items.append({
             'id': doc.get('id') if doc.get('id') is not None else str(doc.get('_id')),
             'nome': doc.get('nome'),
             'descricao': doc.get('descricao'),
             'ativo': doc.get('ativo', True),
-            'sub_almoxarifado_id': normalized_sub_id if normalized_sub_id is not None else (raw_sid if isinstance(raw_sid, int) else None),
-            'sub_almoxarifado_nome': sub_doc.get('nome') if sub_doc else None,
-            'almoxarifado_id': normalized_almox_id if normalized_almox_id is not None else (raw_aid if isinstance(raw_aid, int) else None),
-            'almoxarifado_nome': almox_doc.get('nome') if almox_doc else None,
-            'central_id': normalized_central_id if normalized_central_id is not None else (raw_cid if isinstance(raw_cid, int) else None),
-            'central_nome': central_doc.get('nome') if central_doc else None,
+            # Campos legados (primeiro)
+            'sub_almoxarifado_id': normalized_sub_ids[0] if normalized_sub_ids else None,
+            'sub_almoxarifado_nome': ', '.join(sub_names) if sub_names else None,
+            'almoxarifado_id': almox_ids[0] if almox_ids else None,
+            'almoxarifado_nome': ', '.join(almox_names) if almox_names else None,
+            'central_id': central_ids[0] if central_ids else None,
+            'central_nome': ', '.join(central_names) if central_names else None,
+            # Novos campos (listas)
+            'sub_almoxarifado_ids': normalized_sub_ids,
+            'almoxarifado_ids': almox_ids,
+            'central_ids': central_ids,
         })
 
     return jsonify({
@@ -1867,56 +1963,115 @@ def api_setor_get(id):
     centrais_by_seq = {c.get('id'): c for c in centrais_coll.find({}, {'id': 1, 'nome': 1}) if 'id' in c}
     centrais_by_oid = {str(c.get('_id')): c for c in centrais_coll.find({}, {'_id': 1, 'nome': 1})}
 
-    raw_sid = doc.get('sub_almoxarifado_id')
-    sub_doc = None
-    normalized_sub_id = None
-    if isinstance(raw_sid, int):
-        sub_doc = sub_by_seq.get(raw_sid)
-        normalized_sub_id = raw_sid
-    elif isinstance(raw_sid, ObjectId):
-        sub_doc = sub_by_oid.get(str(raw_sid))
-        normalized_sub_id = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
-    elif isinstance(raw_sid, str) and len(raw_sid) == 24:
-        sub_doc = sub_by_oid.get(raw_sid)
-        normalized_sub_id = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
+    raw_sids = doc.get('sub_almoxarifado_ids') or ([] if doc.get('sub_almoxarifado_id') is None else [doc.get('sub_almoxarifado_id')])
 
-    almox_doc = None
-    normalized_almox_id = None
-    raw_aid = sub_doc.get('almoxarifado_id') if sub_doc else None
-    if isinstance(raw_aid, int):
-        almox_doc = almox_by_seq.get(raw_aid)
-        normalized_almox_id = raw_aid
-    elif isinstance(raw_aid, ObjectId):
-        almox_doc = almox_by_oid.get(str(raw_aid))
-        normalized_almox_id = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
-    elif isinstance(raw_aid, str) and len(raw_aid) == 24:
-        almox_doc = almox_by_oid.get(raw_aid)
-        normalized_almox_id = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+    sub_docs = []
+    normalized_sub_ids = []
+    for raw_sid in raw_sids:
+        sub_doc = None
+        norm_sid = None
+        if isinstance(raw_sid, int):
+            sub_doc = sub_by_seq.get(raw_sid)
+            norm_sid = raw_sid
+        elif isinstance(raw_sid, ObjectId):
+            sub_doc = sub_by_oid.get(str(raw_sid))
+            norm_sid = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
+        elif isinstance(raw_sid, str) and len(raw_sid) == 24:
+            sub_doc = sub_by_oid.get(raw_sid)
+            norm_sid = sub_doc.get('id') if sub_doc and 'id' in sub_doc else None
+        else:
+            try:
+                norm_sid = int(raw_sid)
+                sub_doc = sub_by_seq.get(norm_sid)
+            except Exception:
+                norm_sid = raw_sid
+        if sub_doc:
+            sub_docs.append(sub_doc)
+        normalized_sub_ids.append(norm_sid)
 
-    central_doc = None
-    normalized_central_id = None
-    raw_cid = almox_doc.get('central_id') if almox_doc else None
-    if isinstance(raw_cid, int):
-        central_doc = centrais_by_seq.get(raw_cid)
-        normalized_central_id = raw_cid
-    elif isinstance(raw_cid, ObjectId):
-        central_doc = centrais_by_oid.get(str(raw_cid))
-        normalized_central_id = central_doc.get('id') if central_doc and 'id' in central_doc else None
-    elif isinstance(raw_cid, str) and len(raw_cid) == 24:
-        central_doc = centrais_by_oid.get(raw_cid)
-        normalized_central_id = central_doc.get('id') if central_doc and 'id' in central_doc else None
+    almox_ids = []
+    almox_names = []
+    central_ids = []
+    central_names = []
+    for sdoc in sub_docs:
+        raw_aid = sdoc.get('almoxarifado_id')
+        almox_doc = None
+        norm_aid = None
+        if isinstance(raw_aid, int):
+            almox_doc = almox_by_seq.get(raw_aid)
+            norm_aid = raw_aid
+        elif isinstance(raw_aid, ObjectId):
+            almox_doc = almox_by_oid.get(str(raw_aid))
+            norm_aid = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+        elif isinstance(raw_aid, str) and len(raw_aid) == 24:
+            almox_doc = almox_by_oid.get(raw_aid)
+            norm_aid = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+        else:
+            try:
+                norm_aid = int(raw_aid)
+                almox_doc = almox_by_seq.get(norm_aid)
+            except Exception:
+                norm_aid = raw_aid
+        if norm_aid is not None:
+            almox_ids.append(norm_aid)
+        if almox_doc and almox_doc.get('nome'):
+            almox_names.append(almox_doc.get('nome'))
+
+        raw_cid = almox_doc.get('central_id') if almox_doc else None
+        central_doc = None
+        norm_cid = None
+        if isinstance(raw_cid, int):
+            central_doc = centrais_by_seq.get(raw_cid)
+            norm_cid = raw_cid
+        elif isinstance(raw_cid, ObjectId):
+            central_doc = centrais_by_oid.get(str(raw_cid))
+            norm_cid = central_doc.get('id') if central_doc and 'id' in central_doc else None
+        elif isinstance(raw_cid, str) and len(raw_cid) == 24:
+            central_doc = centrais_by_oid.get(raw_cid)
+            norm_cid = central_doc.get('id') if central_doc and 'id' in central_doc else None
+        else:
+            try:
+                norm_cid = int(raw_cid)
+                central_doc = centrais_by_seq.get(norm_cid)
+            except Exception:
+                norm_cid = raw_cid
+        if norm_cid is not None:
+            central_ids.append(norm_cid)
+        if central_doc and central_doc.get('nome'):
+            central_names.append(central_doc.get('nome'))
+
+    def unique(seq):
+        seen = set()
+        out = []
+        for x in seq:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
+
+    normalized_sub_ids = unique([sid for sid in normalized_sub_ids if sid is not None])
+    almox_ids = unique([aid for aid in almox_ids if aid is not None])
+    central_ids = unique([cid for cid in central_ids if cid is not None])
+    sub_names = unique([s.get('nome') for s in sub_docs if s.get('nome')])
+    almox_names = unique(almox_names)
+    central_names = unique(central_names)
 
     return jsonify({
         'id': doc.get('id') if doc.get('id') is not None else str(doc.get('_id')),
         'nome': doc.get('nome'),
         'descricao': doc.get('descricao'),
         'ativo': doc.get('ativo', True),
-        'sub_almoxarifado_id': normalized_sub_id if normalized_sub_id is not None else (raw_sid if isinstance(raw_sid, int) else None),
-        'sub_almoxarifado_nome': sub_doc.get('nome') if sub_doc else None,
-        'almoxarifado_id': normalized_almox_id if normalized_almox_id is not None else (raw_aid if isinstance(raw_aid, int) else None),
-        'almoxarifado_nome': almox_doc.get('nome') if almox_doc else None,
-        'central_id': normalized_central_id if normalized_central_id is not None else (raw_cid if isinstance(raw_cid, int) else None),
-        'central_nome': central_doc.get('nome') if central_doc else None,
+        # Campos singulares para compatibilidade
+        'sub_almoxarifado_id': normalized_sub_ids[0] if normalized_sub_ids else None,
+        'sub_almoxarifado_nome': ', '.join(sub_names) if sub_names else None,
+        'almoxarifado_id': almox_ids[0] if almox_ids else None,
+        'almoxarifado_nome': ', '.join(almox_names) if almox_names else None,
+        'central_id': central_ids[0] if central_ids else None,
+        'central_nome': ', '.join(central_names) if central_names else None,
+        # Novos campos de listas
+        'sub_almoxarifado_ids': normalized_sub_ids,
+        'almoxarifado_ids': almox_ids,
+        'central_ids': central_ids,
     })
 
 @main_bp.route('/api/setores', methods=['POST'])
@@ -1924,12 +2079,14 @@ def api_setor_get(id):
 def api_setores_create():
     data = request.get_json() or {}
     nome = (data.get('nome') or '').strip()
+    # Aceitar um único sub ou múltiplos
     sub_almoxarifado_id = data.get('sub_almoxarifado_id')
+    sub_almoxarifado_ids = data.get('sub_almoxarifado_ids') or ([] if sub_almoxarifado_id is None else [sub_almoxarifado_id])
     descricao = (data.get('descricao') or '').strip()
     ativo = bool(data.get('ativo', True))
     if not nome:
         return jsonify({'error': 'Nome é obrigatório'}), 400
-    if sub_almoxarifado_id is None:
+    if not sub_almoxarifado_ids:
         return jsonify({'error': 'Sub-almoxarifado é obrigatório'}), 400
 
     coll = extensions.mongo_db['setores']
@@ -1938,12 +2095,23 @@ def api_setores_create():
     last_doc = next(last_cursor, None)
     next_id = (last_doc['id'] + 1) if (last_doc and isinstance(last_doc.get('id'), int)) else 1
 
+    # Normalizar lista de sub_almoxarifado_ids para inteiros quando possível
+    normalized_ids = []
+    for sid in sub_almoxarifado_ids:
+        try:
+            normalized_ids.append(int(sid))
+        except Exception:
+            normalized_ids.append(sid)
+
     doc = {
         'id': next_id,
         'nome': nome,
         'descricao': descricao,
         'ativo': ativo,
-        'sub_almoxarifado_id': sub_almoxarifado_id,
+        # Manter compatibilidade com código legado que usa um único vínculo
+        'sub_almoxarifado_id': normalized_ids[0],
+        # Novo campo: lista completa de sub‑almoxarifados
+        'sub_almoxarifado_ids': normalized_ids,
         'created_at': datetime.utcnow()
     }
     coll.insert_one(doc)
@@ -1954,9 +2122,16 @@ def api_setores_create():
 def api_setores_update(id):
     data = request.get_json() or {}
     update = {}
-    for field in ('nome', 'descricao', 'ativo', 'sub_almoxarifado_id'):
+    for field in ('nome', 'descricao', 'ativo', 'sub_almoxarifado_id', 'sub_almoxarifado_ids'):
         if field in data:
             update[field] = data[field]
+    # Se vier apenas lista, ajustar o campo legado para o primeiro elemento
+    if 'sub_almoxarifado_ids' in update and 'sub_almoxarifado_id' not in update:
+        try:
+            first = update['sub_almoxarifado_ids'][0]
+            update['sub_almoxarifado_id'] = int(first) if str(first).isdigit() else first
+        except Exception:
+            pass
     coll = extensions.mongo_db['setores']
     if str(id).isdigit():
         res = coll.update_one({'id': int(id)}, {'$set': update})
@@ -2263,12 +2438,50 @@ def api_produto_estoque(produto_id):
         cursor = coll.find({'produto_id': {'$in': pid_candidates}})
         for s in cursor:
             quantidade = float(s.get('quantidade', s.get('quantidade_atual', 0)) or 0)
-            disponivel = float(s.get('quantidade_disponivel', quantidade) or 0)
+            reservada = float(s.get('quantidade_reservada', 0) or 0)
+            disponivel = float(s.get('quantidade_disponivel', quantidade - reservada) or 0)
             total_qtd += quantidade
             total_disp += disponivel
-            tipo = s.get('tipo') or s.get('local_tipo') or 'almoxarifado'
+
+            # Determinar tipo/local_id com base nos campos presentes, alinhando com api_estoque_hierarquia
+            tipo = None
+            local_id = None
+            coll_name = None
+            if s.get('setor_id') is not None:
+                tipo = 'setor'
+                local_id = s.get('setor_id')
+                coll_name = 'setores'
+            elif s.get('sub_almoxarifado_id') is not None:
+                # Padronizar nome do tipo para templates: 'sub_almoxarifado'
+                tipo = 'sub_almoxarifado'
+                local_id = s.get('sub_almoxarifado_id')
+                coll_name = 'sub_almoxarifados'
+            elif s.get('almoxarifado_id') is not None:
+                tipo = 'almoxarifado'
+                local_id = s.get('almoxarifado_id')
+                coll_name = 'almoxarifados'
+            elif s.get('central_id') is not None:
+                tipo = 'central'
+                local_id = s.get('central_id')
+                coll_name = 'centrais'
+            else:
+                tipo = s.get('tipo') or s.get('local_tipo') or 'almoxarifado'
+                local_id = s.get('local_id')
+
             nome_local = s.get('nome_local') or s.get('local_nome') or 'Local'
-            local_id = s.get('local_id') or s.get('almoxarifado_id') or s.get('sub_almoxarifado_id') or s.get('setor_id')
+            if coll_name and local_id is not None:
+                try:
+                    ldoc = _find_by_id(coll_name, local_id)
+                except Exception:
+                    ldoc = None
+                if ldoc is not None:
+                    nome_local = ldoc.get('nome') or ldoc.get('descricao') or nome_local
+                    # normalizar id de saída
+                    lid_out = ldoc.get('id')
+                    if lid_out is None:
+                        lid_out = str(ldoc.get('_id'))
+                    local_id = lid_out
+
             estoques.append({
                 'tipo': tipo,
                 'nome_local': nome_local,
@@ -2322,6 +2535,7 @@ def api_produto_movimentacoes(produto_id):
     """Placeholder compatível com templates: retorna movimentações paginadas."""
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('limit', request.args.get('per_page', 20)))
+    tipo_filtro = (request.args.get('tipo') or '').strip().lower()
     items = []
     total = 0
     try:
@@ -2334,13 +2548,37 @@ def api_produto_movimentacoes(produto_id):
             pid_candidates.append(ObjectId(produto_id))
         except Exception:
             pass
-        total = coll.count_documents({'produto_id': {'$in': pid_candidates}})
+        base_query = {'produto_id': {'$in': pid_candidates}}
+        # Aplicar filtro por tipo, se fornecido
+        if tipo_filtro:
+            if tipo_filtro == 'saida':
+                tipo_vals = ['saida', 'distribuicao', 'distribuição']
+                base_query['$or'] = [
+                    {'tipo': {'$in': tipo_vals}},
+                    {'tipo_movimentacao': {'$in': tipo_vals}}
+                ]
+            else:
+                base_query['$or'] = [
+                    {'tipo': tipo_filtro},
+                    {'tipo_movimentacao': tipo_filtro}
+                ]
+        total = coll.count_documents(base_query)
         skip = max(0, (page - 1) * per_page)
-        for m in coll.find({'produto_id': {'$in': pid_candidates}}).sort('data_movimentacao', -1).skip(skip).limit(per_page):
+        for m in coll.find(base_query).sort('data_movimentacao', -1).skip(skip).limit(per_page):
+            # Construir string de local com base em origem/destino quando possível
+            origem_nome = m.get('origem_nome') or m.get('local_nome') or m.get('nome_local')
+            destino_nome = m.get('destino_nome')
+            if origem_nome and destino_nome:
+                local_str = f"{origem_nome} → {destino_nome}"
+            else:
+                local_str = destino_nome or origem_nome or '-'
+
             items.append({
-                'data_movimentacao': m.get('data_movimentacao'),
+                'data_movimentacao': _isoformat_or_str(m.get('data_movimentacao')) or m.get('data_movimentacao'),
                 'tipo_movimentacao': m.get('tipo') or m.get('tipo_movimentacao'),
                 'quantidade': m.get('quantidade'),
+                'local': local_str,
+                'usuario_responsavel': m.get('usuario_responsavel'),
                 'observacoes': m.get('observacoes')
             })
     except Exception:
@@ -2516,6 +2754,18 @@ def api_dashboard_stats_general():
 def api_dashboard_estoque_baixo():
     return jsonify({'items': []})
 
+@main_bp.route('/demandas')
+@require_level('operador_setor')
+def demandas():
+    """Página de demandas para Operador de Setor."""
+    return render_template('demandas/index.html')
+
+@main_bp.route('/demandas/gerencia')
+@require_manager_or_above
+def demandas_gerencia():
+    """Página de demandas para Gerência/Admin."""
+    return render_template('demandas/gerencia.html')
+
 @main_bp.route('/api/dashboard/movimentacoes-recentes')
 @require_any_level
 def api_dashboard_movimentacoes_recentes():
@@ -2542,10 +2792,18 @@ def api_movimentacoes():
     # Filtro por tipo
     if filtros['tipo']:
         # aceitar tanto campo 'tipo' quanto 'tipo_movimentacao'
-        query['$or'] = [
-            {'tipo': filtros['tipo']},
-            {'tipo_movimentacao': filtros['tipo']}
-        ]
+        tipo_val = filtros['tipo']
+        if tipo_val == 'saida':
+            tipo_vals = ['saida', 'distribuicao', 'distribuição']
+            query['$or'] = [
+                {'tipo': {'$in': tipo_vals}},
+                {'tipo_movimentacao': {'$in': tipo_vals}}
+            ]
+        else:
+            query['$or'] = [
+                {'tipo': tipo_val},
+                {'tipo_movimentacao': tipo_val}
+            ]
 
     # Filtro por produto: pode ser nome/código (texto) ou id
     if filtros['produto']:
@@ -2613,7 +2871,11 @@ def api_movimentacoes():
     if filtros['data_fim']:
         df = parse_date_str(filtros['data_fim'])
         if df:
-            # incluir final do dia
+            # incluir final do dia corretamente (23:59:59.999999)
+            try:
+                df = df.replace(hour=23, minute=59, second=59, microsecond=999999)
+            except Exception:
+                pass
             date_range['$lte'] = df
     if date_range:
         # aceitar campos data_movimentacao e created_at
@@ -2635,6 +2897,79 @@ def api_movimentacoes():
                 {'data_movimentacao': date_range},
                 {'created_at': date_range}
             ]
+
+    # Escopo por nível: operador de setor só vê movimentações do seu setor
+    level = getattr(current_user, 'nivel_acesso', None)
+    if level == 'operador_setor':
+        sid = getattr(current_user, 'setor_id', None)
+        if sid is not None:
+            # Gerar candidatos normalizados para comparação (sequencial id e ObjectId string)
+            sid_candidates = []
+            try:
+                sdoc = _find_by_id('setores', sid)
+            except Exception:
+                sdoc = None
+            if sdoc:
+                if sdoc.get('id') is not None:
+                    sid_candidates.append(sdoc.get('id'))
+                if sdoc.get('_id') is not None:
+                    try:
+                        sid_candidates.append(str(sdoc.get('_id')))
+                    except Exception:
+                        pass
+            # Incluir valor bruto e representações alternativas para compatibilidade
+            sid_candidates.append(sid)
+            try:
+                # Se for ObjectId, incluir string equivalente
+                if isinstance(sid, ObjectId):
+                    sid_candidates.append(str(sid))
+                elif isinstance(sid, str):
+                    if sid.isdigit():
+                        sid_candidates.append(int(sid))
+                    if len(sid) == 24:
+                        try:
+                            sid_candidates.append(ObjectId(sid))
+                        except Exception:
+                            pass
+                elif isinstance(sid, int):
+                    sid_candidates.append(str(sid))
+            except Exception:
+                pass
+            # Remover duplicatas preservando ordem
+            _seen = set()
+            _normalized = []
+            for v in sid_candidates:
+                _key = str(v)
+                if _key not in _seen:
+                    _seen.add(_key)
+                    _normalized.append(v)
+            sid_candidates = _normalized
+
+            setor_cond = {'$or': [
+                {'$and': [
+                    {'origem_tipo': {'$in': ['setor', 'setores']}},
+                    {'origem_id': {'$in': sid_candidates}}
+                ]},
+                {'$and': [
+                    {'destino_tipo': {'$in': ['setor', 'setores']}},
+                    {'destino_id': {'$in': sid_candidates}}
+                ]},
+                # compatibilidade com possíveis documentos legados
+                {'$and': [
+                    {'local_tipo': {'$in': ['setor', 'setores']}},
+                    {'local_id': {'$in': sid_candidates}}
+                ]}
+            ]}
+
+            if '$and' in query:
+                query['$and'].append(setor_cond)
+            elif '$or' in query:
+                query = {'$and': [
+                    {'$or': query['$or']},
+                    setor_cond
+                ]}
+            else:
+                query = setor_cond
 
     total = coll.count_documents(query or {})
     page = max(1, page)
@@ -2704,8 +3039,9 @@ def api_movimentacoes():
 
         origem_doc = resolve_local(origem_tipo, origem_id)
         destino_doc = resolve_local(destino_tipo, destino_id)
-        origem_nome = (origem_doc or {}).get('nome') or m.get('origem_nome') or m.get('local_nome')
-        destino_nome = (destino_doc or {}).get('nome') or m.get('destino_nome')
+        # Priorizar nomes persistidos para manter fornecedor em entradas
+        origem_nome = m.get('origem_nome') or (origem_doc or {}).get('nome') or m.get('local_nome') or m.get('nome_local')
+        destino_nome = m.get('destino_nome') or (destino_doc or {}).get('nome')
 
         # Usuário
         usuario_resp = m.get('usuario_responsavel') or m.get('usuario') or m.get('usuario_nome') or '-'
@@ -2719,7 +3055,7 @@ def api_movimentacoes():
                 data_mov = datetime.utcnow()
 
         items.append({
-            'data_movimentacao': data_mov,
+            'data_movimentacao': _isoformat_or_str(data_mov) or data_mov,
             'tipo_movimentacao': tipo_mov,
             'produto_codigo': produto_codigo,
             'produto_nome': produto_nome,
@@ -3168,8 +3504,8 @@ def api_movimentacoes_transferencia():
 
 @main_bp.route('/api/movimentacoes/distribuicao', methods=['POST'])
 @require_any_level
-def api_movimentacoes_distribuicao():
-    """Executa distribuição de estoque de uma origem para múltiplos setores.
+def api_movimentacoes_saida():
+    """Executa saída de estoque de uma origem para múltiplos setores.
     Payload esperado:
     {
         produto_id: <id>,
@@ -3342,7 +3678,7 @@ def api_movimentacoes_distribuicao():
             # registrar movimentação
             mov_doc = {
                 'produto_id': pid_out,
-                'tipo': 'distribuicao',
+                'tipo': 'saida',
                 'quantidade': quantidade_por_setor,
                 'data_movimentacao': now,
                 'origem_tipo': str(origem_tipo).lower(),
@@ -3367,3 +3703,326 @@ def api_movimentacoes_distribuicao():
         })
     except Exception as e:
         return jsonify({'error': f'Falha ao executar distribuição: {e}'}), 500
+
+# ==================== DEMANDAS (Solicitações de Produtos) ====================
+
+def _resolve_hierarchy_from_setor(setor_id_raw):
+    """Resolve IDs de sub, almoxarifado e central a partir de um setor."""
+    db = extensions.mongo_db
+    setores = db['setores']
+    subs = db['sub_almoxarifados']
+    almoxes = db['almoxarifados']
+    centrais = db['centrais']
+
+    sdoc = None
+    try:
+        if str(setor_id_raw).isdigit():
+            sdoc = setores.find_one({'id': int(setor_id_raw)})
+        if not sdoc and isinstance(setor_id_raw, str) and len(setor_id_raw) == 24:
+            sdoc = setores.find_one({'_id': ObjectId(setor_id_raw)})
+        if not sdoc:
+            sdoc = setores.find_one({'_id': setor_id_raw}) or setores.find_one({'id': setor_id_raw})
+    except Exception:
+        sdoc = setores.find_one({'_id': setor_id_raw}) or setores.find_one({'id': setor_id_raw})
+    if not sdoc:
+        return None, None, None, None
+
+    # Preferir lista de sub IDs se existir; usar o primeiro
+    sub_ids = sdoc.get('sub_almoxarifado_ids') or []
+    sub_id = sdoc.get('sub_almoxarifado_id') if not sub_ids else sub_ids[0]
+    subdoc = None
+    try:
+        if isinstance(sub_id, int) or (isinstance(sub_id, str) and str(sub_id).isdigit()):
+            subdoc = subs.find_one({'id': int(sub_id)})
+        if not subdoc and isinstance(sub_id, str) and len(sub_id) == 24:
+            subdoc = subs.find_one({'_id': ObjectId(sub_id)})
+        if not subdoc:
+            subdoc = subs.find_one({'_id': sub_id}) or subs.find_one({'id': sub_id})
+    except Exception:
+        subdoc = subs.find_one({'_id': sub_id}) or subs.find_one({'id': sub_id})
+
+    almox_id = subdoc.get('almoxarifado_id') if subdoc else None
+    almoxdoc = None
+    if almox_id is not None:
+        try:
+            if isinstance(almox_id, int) or (isinstance(almox_id, str) and str(almox_id).isdigit()):
+                almoxdoc = almoxes.find_one({'id': int(almox_id)})
+            if not almoxdoc and isinstance(almox_id, str) and len(almox_id) == 24:
+                almoxdoc = almoxes.find_one({'_id': ObjectId(almox_id)})
+            if not almoxdoc:
+                almoxdoc = almoxes.find_one({'_id': almox_id}) or almoxes.find_one({'id': almox_id})
+        except Exception:
+            almoxdoc = almoxes.find_one({'_id': almox_id}) or almoxes.find_one({'id': almox_id})
+
+    central_id = almoxdoc.get('central_id') if almoxdoc else None
+    centraldoc = None
+    if central_id is not None:
+        try:
+            if isinstance(central_id, int) or (isinstance(central_id, str) and str(central_id).isdigit()):
+                centraldoc = centrais.find_one({'id': int(central_id)})
+            if not centraldoc and isinstance(central_id, str) and len(central_id) == 24:
+                centraldoc = centrais.find_one({'_id': ObjectId(central_id)})
+            if not centraldoc:
+                centraldoc = centrais.find_one({'_id': central_id}) or centrais.find_one({'id': central_id})
+        except Exception:
+            centraldoc = centrais.find_one({'_id': central_id}) or centrais.find_one({'id': central_id})
+
+    def _out_id(doc, fallback):
+        if not doc:
+            return None
+        return doc.get('id') if doc.get('id') is not None else str(doc.get('_id')) if doc.get('_id') is not None else fallback
+
+    return (
+        sdoc.get('id') if sdoc.get('id') is not None else str(sdoc.get('_id')),
+        _out_id(subdoc, sub_id),
+        _out_id(almoxdoc, almox_id),
+        _out_id(centraldoc, central_id)
+    )
+
+@main_bp.route('/api/demandas', methods=['POST'])
+@require_level('operador_setor')
+def api_demandas_create():
+    """Cria uma demanda de produto pelo Operador de Setor."""
+    try:
+        db = extensions.mongo_db
+        demandas = db['demandas']
+        produtos = db['produtos']
+
+        data = request.get_json(silent=True) or {}
+        raw_pid = data.get('produto_id')
+        quantidade = float(data.get('quantidade') or data.get('quantidade_solicitada') or 0)
+        destino_tipo = (data.get('destino_tipo') or 'almoxarifado').strip().lower()
+        observacoes = (data.get('observacoes') or '').strip()
+
+        if raw_pid is None:
+            return jsonify({'error': 'produto_id é obrigatório'}), 400
+        if quantidade <= 0:
+            return jsonify({'error': 'quantidade deve ser maior que zero'}), 400
+
+        # Validar produto existente
+        prod_doc = None
+        try:
+            if str(raw_pid).isdigit():
+                prod_doc = produtos.find_one({'id': int(raw_pid)})
+            if not prod_doc and isinstance(raw_pid, str) and len(raw_pid) == 24:
+                prod_doc = produtos.find_one({'_id': ObjectId(raw_pid)})
+            if not prod_doc:
+                prod_doc = produtos.find_one({'_id': raw_pid}) or produtos.find_one({'id': raw_pid})
+        except Exception:
+            prod_doc = produtos.find_one({'_id': raw_pid}) or produtos.find_one({'id': raw_pid})
+        if not prod_doc:
+            return jsonify({'error': 'Produto não encontrado'}), 404
+
+        # Determinar setor do usuário
+        setor_id_user = getattr(current_user, 'setor_id', None)
+        if setor_id_user is None:
+            return jsonify({'error': 'Usuário não possui setor associado'}), 400
+
+        setor_id, sub_id, almox_id, central_id = _resolve_hierarchy_from_setor(setor_id_user)
+        if setor_id is None:
+            return jsonify({'error': 'Setor inválido'}), 400
+
+        now = datetime.utcnow()
+        doc = {
+            'produto_id': prod_doc.get('id') if prod_doc.get('id') is not None else str(prod_doc.get('_id')),
+            'setor_id': setor_id,
+            'sub_almoxarifado_id': sub_id,
+            'almoxarifado_id': almox_id,
+            'central_id': central_id,
+            'quantidade_solicitada': quantidade,
+            'status': 'pendente',
+            'destino_tipo': destino_tipo,
+            'observacoes': observacoes,
+            'usuario_solicitante': getattr(current_user, 'username', None),
+            'created_at': now,
+            'updated_at': now
+        }
+        ins = demandas.insert_one(doc)
+        return jsonify({'success': True, 'id': str(ins.inserted_id)})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao criar demanda: {e}'}), 500
+
+@main_bp.route('/api/demandas', methods=['GET'])
+@require_any_level
+def api_demandas_list():
+    """Lista demandas com filtro por escopo do usuário e paginação."""
+    try:
+        db = extensions.mongo_db
+        demandas = db['demandas']
+        produtos = db['produtos']
+        setores = db['setores']
+
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+        status = (request.args.get('status') or '').strip().lower()
+        mine = str(request.args.get('mine') or '').strip().lower() in ('true', '1')
+
+        query = {}
+        if status:
+            query['status'] = status
+
+        # Helper: gerar candidatos normalizados para comparação (sequencial id e ObjectId string)
+        def _id_candidates(coll_name: str, raw_id):
+            cands = []
+            if raw_id is None:
+                return cands
+            try:
+                doc = _find_by_id(coll_name, raw_id)
+            except Exception:
+                doc = None
+            if doc:
+                if doc.get('id') is not None:
+                    cands.append(doc.get('id'))
+                if doc.get('_id') is not None:
+                    try:
+                        cands.append(str(doc.get('_id')))
+                    except Exception:
+                        pass
+            # Incluir o valor bruto também
+            cands.append(raw_id)
+            # Remover duplicatas preservando ordem
+            seen = set()
+            out = []
+            for v in cands:
+                key = str(v)
+                if key not in seen:
+                    seen.add(key)
+                    out.append(v)
+            return out
+
+        # Escopo por nível
+        level = getattr(current_user, 'nivel_acesso', None)
+        if mine and level == 'operador_setor':
+            sid = getattr(current_user, 'setor_id', None)
+            if sid is not None:
+                query['setor_id'] = {'$in': _id_candidates('setores', sid)}
+        else:
+            if level == 'operador_setor':
+                # Por padrão, operador vê apenas suas demandas
+                sid = getattr(current_user, 'setor_id', None)
+                if sid is not None:
+                    query['setor_id'] = {'$in': _id_candidates('setores', sid)}
+            elif level == 'resp_sub_almox':
+                sub_id = getattr(current_user, 'sub_almoxarifado_id', None)
+                if sub_id is not None:
+                    query['sub_almoxarifado_id'] = {'$in': _id_candidates('sub_almoxarifados', sub_id)}
+            elif level == 'gerente_almox':
+                almox_id = getattr(current_user, 'almoxarifado_id', None)
+                if almox_id is not None:
+                    query['almoxarifado_id'] = {'$in': _id_candidates('almoxarifados', almox_id)}
+            elif level == 'admin_central':
+                central_id = getattr(current_user, 'central_id', None)
+                if central_id is not None:
+                    query['central_id'] = {'$in': _id_candidates('centrais', central_id)}
+            # super_admin vê tudo
+
+        total = demandas.count_documents(query)
+        skip = max(0, (page - 1) * per_page)
+        cursor = demandas.find(query).sort('created_at', -1).skip(skip).limit(per_page)
+
+        items = []
+        for d in cursor:
+            # Resolver nome do produto
+            pname = None
+            try:
+                pid = d.get('produto_id')
+                pdoc = None
+                if isinstance(pid, int) or (isinstance(pid, str) and str(pid).isdigit()):
+                    pdoc = produtos.find_one({'id': int(pid)})
+                if not pdoc and isinstance(pid, str) and len(pid) == 24:
+                    pdoc = produtos.find_one({'_id': ObjectId(pid)})
+                if not pdoc:
+                    pdoc = produtos.find_one({'_id': pid}) or produtos.find_one({'id': pid})
+                if pdoc:
+                    pname = pdoc.get('nome') or pdoc.get('descricao')
+            except Exception:
+                pass
+
+            # Resolver nome do setor
+            sname = None
+            try:
+                sid = d.get('setor_id')
+                sdoc = None
+                if isinstance(sid, int) or (isinstance(sid, str) and str(sid).isdigit()):
+                    sdoc = setores.find_one({'id': int(sid)})
+                if not sdoc and isinstance(sid, str) and len(sid) == 24:
+                    sdoc = setores.find_one({'_id': ObjectId(sid)})
+                if not sdoc:
+                    sdoc = setores.find_one({'_id': sid}) or setores.find_one({'id': sid})
+                if sdoc:
+                    sname = sdoc.get('nome')
+            except Exception:
+                pass
+
+            items.append({
+                'id': str(d.get('_id')) if d.get('_id') is not None else d.get('id'),
+                'produto_id': d.get('produto_id'),
+                'produto_nome': pname,
+                'setor_id': d.get('setor_id'),
+                'setor_nome': sname,
+                'quantidade_solicitada': float(d.get('quantidade_solicitada', 0) or 0),
+                'status': d.get('status') or 'pendente',
+                'destino_tipo': d.get('destino_tipo'),
+                'observacoes': d.get('observacoes'),
+                'created_at': _isoformat_or_str(d.get('created_at')),
+                'updated_at': _isoformat_or_str(d.get('updated_at'))
+            })
+
+        pages = max(1, (total + per_page - 1) // per_page)
+        return jsonify({'items': items, 'page': page, 'pages': pages, 'per_page': per_page, 'total': total})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao listar demandas: {e}'}), 500
+
+@main_bp.route('/api/demandas/<string:demanda_id>', methods=['PUT'])
+@require_manager_or_above
+def api_demandas_update(demanda_id):
+    """Atualiza status de uma demanda (admin/gerência)."""
+    try:
+        db = extensions.mongo_db
+        demandas = db['demandas']
+
+        data = request.get_json(silent=True) or {}
+        status = (data.get('status') or '').strip().lower()
+        quantidade_autorizada = data.get('quantidade_autorizada')
+        if status not in ('pendente', 'aprovado', 'negado', 'atendido', 'cancelado'):
+            return jsonify({'error': 'Status inválido'}), 400
+
+        # Resolver documento
+        ddoc = None
+        try:
+            if str(demanda_id).isdigit():
+                ddoc = demandas.find_one({'id': int(demanda_id)})
+            if not ddoc and len(demanda_id) == 24:
+                ddoc = demandas.find_one({'_id': ObjectId(demanda_id)})
+            if not ddoc:
+                ddoc = demandas.find_one({'_id': demanda_id}) or demandas.find_one({'id': demanda_id})
+        except Exception:
+            ddoc = demandas.find_one({'_id': demanda_id}) or demandas.find_one({'id': demanda_id})
+        if not ddoc:
+            return jsonify({'error': 'Demanda não encontrada'}), 404
+
+        # Checar escopo do usuário
+        level = getattr(current_user, 'nivel_acesso', None)
+        if level == 'resp_sub_almox' and ddoc.get('sub_almoxarifado_id') != getattr(current_user, 'sub_almoxarifado_id', None):
+            return jsonify({'error': 'Acesso negado'}), 403
+        if level == 'gerente_almox' and ddoc.get('almoxarifado_id') != getattr(current_user, 'almoxarifado_id', None):
+            return jsonify({'error': 'Acesso negado'}), 403
+        if level == 'admin_central' and ddoc.get('central_id') != getattr(current_user, 'central_id', None):
+            return jsonify({'error': 'Acesso negado'}), 403
+
+        update = {
+            '$set': {
+                'status': status,
+                'updated_at': datetime.utcnow()
+            }
+        }
+        if quantidade_autorizada is not None:
+            try:
+                update['$set']['quantidade_autorizada'] = float(quantidade_autorizada)
+            except Exception:
+                pass
+
+        res = demandas.update_one({'_id': ddoc.get('_id')}, update)
+        return jsonify({'success': True, 'matched': res.matched_count, 'modified': res.modified_count})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao atualizar demanda: {e}'}), 500

@@ -122,6 +122,28 @@ class UIBlocksConfig:
                 active_endpoints=['main.movimentacoes']
             ),
             MenuBlock(
+                id='demandas',
+                label='Demandas',
+                icon='fas fa-clipboard-list',
+                url='main.demandas',
+                access_levels=[
+                    AccessLevel.OPERADOR_SETOR
+                ],
+                active_endpoints=['main.demandas']
+            ),
+            MenuBlock(
+                id='demandas_gerencia',
+                label='Demandas • Gerência',
+                icon='fas fa-tasks',
+                url='main.demandas_gerencia',
+                access_levels=[
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.GERENTE_ALMOX
+                ],
+                active_endpoints=['main.demandas_gerencia']
+            ),
+            MenuBlock(
                 id='relatorios',
                 label='Relatórios',
                 icon='fas fa-chart-bar',

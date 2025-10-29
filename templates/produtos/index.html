@@ -233,7 +233,11 @@ function renderizarProdutos(produtos) {
                     <small class="text-muted d-block">${produto.categoria_produto.nome}</small>` 
                     : '-'}
             </td>
-            <td>${produto.unidade_medida}</td>
+            <td id="unidade_${produto.id}">
+                <span class="text-muted">${produto.unidade_medida}</span>
+                <br>
+                <small class="text-muted">Carregando estoque...</small>
+            </td>
             <td>
                 <span class="badge ${produto.ativo ? 'bg-success' : 'bg-secondary'}">
                     ${produto.ativo ? 'Ativo' : 'Inativo'}
@@ -257,6 +261,9 @@ function renderizarProdutos(produtos) {
             </td>
         </tr>
     `).join('');
+
+    // Após renderizar, carregar estoque disponível e por tipo
+    carregarEstoqueParaProdutos(produtos);
 }
 
 // Renderizar paginação
@@ -449,6 +456,57 @@ function salvarEdicaoProduto() {
     .catch(error => {
         console.error('Erro:', error);
         alert('Erro ao atualizar produto: ' + error.message);
+    });
+}
+
+// Carrega e exibe estoque disponível por produto
+function carregarEstoqueParaProdutos(produtos) {
+    const formatNum = (n) => {
+        const val = parseFloat(n || 0);
+        return val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    };
+
+    produtos.forEach(produto => {
+        const cell = document.getElementById(`unidade_${produto.id}`);
+        if (!cell) return;
+
+        fetch(`/api/produtos/${produto.id}/estoque`)
+            .then(resp => resp.json())
+            .then(data => {
+                const itens = Array.isArray(data.estoques) ? data.estoques : [];
+                let totalDisp = 0;
+                let dispAlmox = 0;
+                let dispSub = 0;
+
+                itens.forEach(it => {
+                    const q = parseFloat(it.quantidade_disponivel || 0);
+                    const tipo = String(it.tipo || '').toLowerCase();
+                    // Excluir estoque de setores do total disponível
+                    if (tipo !== 'setor') {
+                        totalDisp += q;
+                    }
+                    if (tipo === 'almoxarifado') dispAlmox += q;
+                    // Considerar ambas grafias para compatibilidade
+                    if (tipo === 'sub_almoxarifado' || tipo === 'subalmoxarifado') dispSub += q;
+                });
+
+                cell.innerHTML = `
+                    <span class="text-muted">${produto.unidade_medida}</span>
+                    <br>
+                    <small>
+                        Disponível: <strong>${formatNum(totalDisp)}</strong>
+                        <span class="text-muted">(Almox: ${formatNum(dispAlmox)} | Sub: ${formatNum(dispSub)})</span>
+                    </small>
+                `;
+            })
+            .catch(err => {
+                console.error('Erro ao carregar estoque do produto', produto.id, err);
+                cell.innerHTML = `
+                    <span class="text-muted">${produto.unidade_medida}</span>
+                    <br>
+                    <small class="text-danger">Estoque indisponível</small>
+                `;
+            });
     });
 }
 

@@ -332,15 +332,21 @@ function renderizarProduto(produto) {
 function carregarResumoEstoque() {
     fetchJson(`/api/produtos/${produtoId}/estoque`)
         .then(data => {
-            const resumo = data.resumo || {};
-            const total = resumo.total_disponivel || 0;
             const unidade = (produtoDetalhes && produtoDetalhes.unidade_medida) || '';
+
+            // Somar apenas estoques internos (central, almoxarifado e sub‑almoxarifado), excluindo setores
+            const itens = Array.isArray(data.estoques) ? data.estoques : [];
+            const tiposInternos = new Set(['central', 'almoxarifado', 'sub_almoxarifado', 'subalmoxarifado']);
+            const totalInterno = itens
+                .filter(it => tiposInternos.has(String(it.tipo)))
+                .reduce((acc, it) => acc + parseFloat(it.quantidade_disponivel || 0), 0);
+
             document.getElementById('resumoEstoque').innerHTML = `
                 <div class="text-center">
                     <div class="row">
                         <div class="col-12 mb-3">
-                            <h3 class="text-primary">${formatQuantidade(total, unidade)}</h3>
-                            <small class="text-muted">Total Disponível</small>
+                            <h3 class="text-primary">${formatQuantidade(totalInterno, unidade)}</h3>
+                            <small class="text-muted">Total Disponível (Exclui Setores)</small>
                         </div>
                     </div>
                 </div>
@@ -540,7 +546,10 @@ function carregarMovimentacoes() {
                 
                 html += `
                     <tr>
-                        <td>${new Date(mov.data_movimentacao).toLocaleDateString('pt-BR')}</td>
+                        <td>
+                            <div>${new Date(mov.data_movimentacao).toLocaleDateString('pt-BR')}</div>
+                            <small class="text-muted">${new Date(mov.data_movimentacao).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})}</small>
+                        </td>
                         <td>
                             <i class="${tipoIcon[mov.tipo_movimentacao?.toLowerCase()] || 'fas fa-question'}"></i>
                             ${mov.tipo_movimentacao}

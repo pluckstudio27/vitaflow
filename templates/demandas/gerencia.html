@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Demandas • Gerência - Almox SMS{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-tasks"></i> Demandas • Gerência</h2>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-clock"></i> Pendentes</h5>
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandasGerencia()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body" id="listaDemandasGerencia">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visualmente-oculto">Carregando...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function htmlEscape(str) {
+    return (str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
+}
+
+async function carregarDemandasGerencia() {
+    const el = document.getElementById('listaDemandasGerencia');
+    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
+    try {
+        const res = await fetch('/api/demandas?status=pendente&per_page=50');
+        const data = await res.json();
+        if (!res.ok) {
+            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(data.error || 'Erro ao listar')}</div>`;
+            return;
+        }
+        if (!data.items || !data.items.length) {
+            el.innerHTML = '<div class="text-muted">Nenhuma demanda pendente.</div>';
+            return;
+        }
+        const rows = data.items.map(d => `
+            <tr>
+                <td>${htmlEscape(d.id)}</td>
+                <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
+                <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
+                <td class="text-end">${Number(d.quantidade_solicitada || 0).toFixed(2)}</td>
+                <td>${htmlEscape(d.destino_tipo || '')}</td>
+                <td>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-success" onclick="atualizarStatus('${htmlEscape(d.id)}','aprovado')"><i class="fas fa-check"></i> Aprovar</button>
+                        <button class="btn btn-danger" onclick="atualizarStatus('${htmlEscape(d.id)}','negado')"><i class="fas fa-times"></i> Negar</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+        el.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-sm table-striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Produto</th>
+                            <th>Setor</th>
+                            <th class="text-end">Qtd</th>
+                            <th>Destino</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
+    }
+}
+
+async function atualizarStatus(id, status) {
+    try {
+        const res = await fetch(`/api/demandas/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ status })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Falha ao atualizar status');
+            return;
+        }
+        carregarDemandasGerencia();
+    } catch (e) {
+        alert('Erro: ' + e);
+    }
+}
+
+window.addEventListener('DOMContentLoaded', carregarDemandasGerencia);
+</script>
+{% endblock %}

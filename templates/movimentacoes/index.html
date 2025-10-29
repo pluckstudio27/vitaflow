@@ -13,7 +13,7 @@
                         <i class="fas fa-plus"></i> Nova Transferência
                     </button>
                     <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#distribuicaoModal">
-                        <i class="fas fa-share-alt"></i> Distribuição
+                        <i class="fas fa-arrow-up"></i> Saída
                     </button>
                 </div>
             </div>
@@ -63,15 +63,14 @@
                                     <th>Tipo</th>
                                     <th>Produto</th>
                                     <th>Quantidade</th>
-                                    <th>Origem</th>
-                                    <th>Destino</th>
+                                    <th>Local</th>
                                     <th>Responsável</th>
                                     <th>Motivo</th>
                                 </tr>
                             </thead>
                             <tbody id="movimentacoesTableBody">
                                 <tr>
-                                    <td colspan="8" class="text-center">
+                                    <td colspan="7" class="text-center">
                                         <div class="spinner-border text-primary" role="status">
                                             <span class="visually-hidden">Carregando...</span>
                                         </div>
@@ -147,7 +146,6 @@
                                     <option value="">Selecione...</option>
                                     <option value="almoxarifado">Almoxarifado</option>
                                     <option value="sub_almoxarifado">Sub-Almoxarifado</option>
-                                    <option value="setor">Setor</option>
                                 </select>
                             </div>
                             <div class="mb-3">
@@ -180,12 +178,12 @@
     </div>
 </div>
 
-<!-- Modal Distribuição -->
+<!-- Modal Saída -->
 <div class="modal fade" id="distribuicaoModal" tabindex="-1" aria-labelledby="distribuicaoModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="distribuicaoModalLabel">Distribuição para Setores</h5>
+                <h5 class="modal-title" id="distribuicaoModalLabel">Saída para Setores</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -254,7 +252,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                 <button type="button" class="btn btn-success" onclick="executarDistribuicao()">
-                    <i class="fas fa-share-alt"></i> Executar Distribuição
+                    <i class="fas fa-arrow-up"></i> Executar Saída
                 </button>
             </div>
         </div>
@@ -342,7 +340,7 @@ function renderizarMovimentacoes(movimentacoes) {
     if (!movimentacoes || movimentacoes.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="text-center text-muted">
+                <td colspan="7" class="text-center text-muted">
                     <i class="fas fa-inbox"></i> Nenhuma movimentação encontrada
                 </td>
             </tr>
@@ -354,8 +352,17 @@ function renderizarMovimentacoes(movimentacoes) {
         'entrada': 'fas fa-arrow-down text-success',
         'saida': 'fas fa-arrow-up text-danger',
         'transferencia': 'fas fa-exchange-alt text-primary',
-        'distribuicao': 'fas fa-share-alt text-info',
-        'distribuição': 'fas fa-share-alt text-info'
+        // suportar registros legados marcados como "distribuição" com ícone de saída
+        'distribuicao': 'fas fa-arrow-up text-danger',
+        'distribuição': 'fas fa-arrow-up text-danger'
+    };
+    const tipoLabels = {
+        'entrada': 'Entrada',
+        'saida': 'Saída',
+        'transferencia': 'Transferência',
+        // mapear registros antigos para "Saída"
+        'distribuicao': 'Saída',
+        'distribuição': 'Saída'
     };
     
     tbody.innerHTML = movimentacoes.map(mov => `
@@ -366,15 +373,19 @@ function renderizarMovimentacoes(movimentacoes) {
             </td>
             <td>
                 <i class="${tipoIcons[mov.tipo_movimentacao?.toLowerCase()] || 'fas fa-question'}"></i>
-                ${mov.tipo_movimentacao}
+                ${tipoLabels[mov.tipo_movimentacao?.toLowerCase()] || mov.tipo_movimentacao}
             </td>
             <td>
                 <strong>${mov.produto_nome}</strong><br>
                 <small>${mov.produto_codigo}</small>
             </td>
             <td>${parseFloat(mov.quantidade).toLocaleString('pt-BR')} ${mov.produto_unidade}</td>
-            <td>${mov.origem_nome || '-'}</td>
-            <td>${mov.destino_nome || '-'}</td>
+            <td>${(() => {
+                const origem = mov.origem_nome || '';
+                const destino = mov.destino_nome || '';
+                if (origem && destino) return `${origem} → ${destino}`;
+                return origem || destino || '-';
+            })()}</td>
             <td>${mov.usuario_responsavel}</td>
             <td>${mov.motivo || '-'}</td>
         </tr>
@@ -573,12 +584,6 @@ function carregarTiposDestino() {
                 if (subAlmoxarifadosDaCentral.length > 0) {
                     opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
                 }
-                const subIds = subAlmoxarifadosDaCentral.map(sa => sa.id);
-                const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
-                const setoresDaCentral = (setoresResp.items || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
-                if (setoresDaCentral.length > 0) {
-                    opcoesDisponiveis.push('<option value="setor">Setor</option>');
-                }
             } else {
                 // SQL: usar dados carregados do template sem chamadas à API
                 const almoxarifadosDaCentral = (locaisData.almoxarifados || []).filter(almox => almox.central_id === produto.central_id);
@@ -589,11 +594,6 @@ function carregarTiposDestino() {
                 const subAlmoxarifadosDaCentral = (locaisData.sub_almoxarifados || []).filter(subAlmox => almoxIds.includes(subAlmox.almoxarifado_id));
                 if (subAlmoxarifadosDaCentral.length > 0) {
                     opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
-                }
-                const subIds = subAlmoxarifadosDaCentral.map(subAlmox => subAlmox.id);
-                const setoresDaCentral = (locaisData.setores || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
-                if (setoresDaCentral.length > 0) {
-                    opcoesDisponiveis.push('<option value="setor">Setor</option>');
                 }
             }
             
@@ -614,6 +614,8 @@ function carregarLocaisDestino() {
     const tipo = document.getElementById('tipoDestinoTransferencia').value;
     const produtoId = document.getElementById('produtoTransferencia').value;
     const select = document.getElementById('localDestinoTransferencia');
+    const tipoOrigem = document.getElementById('tipoOrigemTransferencia').value;
+    const localOrigem = document.getElementById('localOrigemTransferencia').value;
     
     if (!tipo) {
         select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
@@ -631,22 +633,61 @@ function carregarLocaisDestino() {
             let locais = [];
             
             if (USE_MONGO) {
-                // Em Mongo, buscar listas via API e montar conforme o tipo
+                // Em Mongo, buscar listas via API e montar conforme o tipo, respeitando a origem
                 if (tipo === 'almoxarifado') {
                     const resp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
                     locais = resp.items || [];
                 } else if (tipo === 'sub_almoxarifado') {
-                    const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
-                    const almoxIds = (almoxResp.items || []).map(a => a.id);
+                    // Carregar apenas sub-almoxarifados que pertencem ao almoxarifado da origem
+                    if (!tipoOrigem || !localOrigem) {
+                        select.innerHTML = '<option value="">Selecione o almoxarifado de origem primeiro...</option>';
+                        return;
+                    }
+                    let almoxRefId = null;
+                    if (tipoOrigem === 'almoxarifado') {
+                        almoxRefId = String(localOrigem);
+                    } else if (tipoOrigem === 'sub_almoxarifado') {
+                        const subsAll = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                        const subOrigem = (subsAll.items || []).find(sa => String(sa.id) === String(localOrigem));
+                        almoxRefId = subOrigem ? String(subOrigem.almoxarifado_id) : null;
+                    } else if (tipoOrigem === 'setor') {
+                        const setoresAll = await fetchJson(`/api/setores?per_page=1000`);
+                        const setorOrigem = (setoresAll.items || []).find(s => String(s.id) === String(localOrigem));
+                        if (setorOrigem) {
+                            const subsAll = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                            const subParent = (subsAll.items || []).find(sa => String(sa.id) === String(setorOrigem.sub_almoxarifado_id));
+                            almoxRefId = subParent ? String(subParent.almoxarifado_id) : null;
+                        }
+                    }
+                    if (!almoxRefId) {
+                        select.innerHTML = '<option value="">Origem inválida ou não encontrada</option>';
+                        return;
+                    }
                     const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
-                    locais = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                    locais = (subsResp.items || []).filter(sa => String(sa.almoxarifado_id) === almoxRefId);
                 } else if (tipo === 'setor') {
-                    const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
-                    const almoxIds = (almoxResp.items || []).map(a => a.id);
-                    const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
-                    const subIds = (subsResp.items || []).filter(sa => almoxIds.includes(sa.almoxarifado_id)).map(sa => sa.id);
+                    // Carregar apenas setores que pertencem ao sub-almoxarifado da origem
+                    if (!tipoOrigem || !localOrigem) {
+                        select.innerHTML = '<option value="">Selecione o sub-almoxarifado de origem primeiro...</option>';
+                        return;
+                    }
+                    let subRefId = null;
+                    if (tipoOrigem === 'sub_almoxarifado') {
+                        subRefId = String(localOrigem);
+                    } else if (tipoOrigem === 'setor') {
+                        const setoresAll = await fetchJson(`/api/setores?per_page=1000`);
+                        const setorOrigem = (setoresAll.items || []).find(s => String(s.id) === String(localOrigem));
+                        subRefId = setorOrigem ? String(setorOrigem.sub_almoxarifado_id) : null;
+                    } else if (tipoOrigem === 'almoxarifado') {
+                        select.innerHTML = '<option value="">Selecione origem como Sub-Almoxarifado para listar setores...</option>';
+                        return;
+                    }
+                    if (!subRefId) {
+                        select.innerHTML = '<option value="">Origem inválida ou não encontrada</option>';
+                        return;
+                    }
                     const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
-                    locais = (setoresResp.items || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                    locais = (setoresResp.items || []).filter(s => String(s.sub_almoxarifado_id) === subRefId);
                 }
             } else {
                 // SQL: montar listas a partir dos dados embutidos no template
@@ -655,14 +696,48 @@ function carregarLocaisDestino() {
                         locais = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id);
                         break;
                     case 'sub_almoxarifado': {
-                        const almoxIds = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id).map(a => a.id);
-                        locais = (locaisData.sub_almoxarifados || []).filter(sa => almoxIds.includes(sa.almoxarifado_id));
+                        if (!tipoOrigem || !localOrigem) {
+                            select.innerHTML = '<option value="">Selecione o almoxarifado de origem primeiro...</option>';
+                            return;
+                        }
+                        let almoxRefId = null;
+                        if (tipoOrigem === 'almoxarifado') {
+                            almoxRefId = localOrigem;
+                        } else if (tipoOrigem === 'sub_almoxarifado') {
+                            const subOrigem = (locaisData.sub_almoxarifados || []).find(sa => idEq(sa.id, localOrigem));
+                            almoxRefId = subOrigem ? subOrigem.almoxarifado_id : null;
+                        } else if (tipoOrigem === 'setor') {
+                            const setorOrigem = (locaisData.setores || []).find(s => idEq(s.id, localOrigem));
+                            const subParent = setorOrigem ? (locaisData.sub_almoxarifados || []).find(sa => idEq(sa.id, setorOrigem.sub_almoxarifado_id)) : null;
+                            almoxRefId = subParent ? subParent.almoxarifado_id : null;
+                        }
+                        if (!almoxRefId) {
+                            select.innerHTML = '<option value="">Origem inválida ou não encontrada</option>';
+                            return;
+                        }
+                        locais = (locaisData.sub_almoxarifados || []).filter(sa => idEq(sa.almoxarifado_id, almoxRefId));
                         break;
                     }
                     case 'setor': {
-                        const almoxIds = (locaisData.almoxarifados || []).filter(a => a.central_id === produto.central_id).map(a => a.id);
-                        const subIds = (locaisData.sub_almoxarifados || []).filter(sa => almoxIds.includes(sa.almoxarifado_id)).map(sa => sa.id);
-                        locais = (locaisData.setores || []).filter(s => subIds.includes(s.sub_almoxarifado_id));
+                        if (!tipoOrigem || !localOrigem) {
+                            select.innerHTML = '<option value="">Selecione o sub-almoxarifado de origem primeiro...</option>';
+                            return;
+                        }
+                        let subRefId = null;
+                        if (tipoOrigem === 'sub_almoxarifado') {
+                            subRefId = localOrigem;
+                        } else if (tipoOrigem === 'setor') {
+                            const setorOrigem = (locaisData.setores || []).find(s => idEq(s.id, localOrigem));
+                            subRefId = setorOrigem ? setorOrigem.sub_almoxarifado_id : null;
+                        } else if (tipoOrigem === 'almoxarifado') {
+                            select.innerHTML = '<option value="">Selecione origem como Sub-Almoxarifado para listar setores...</option>';
+                            return;
+                        }
+                        if (!subRefId) {
+                            select.innerHTML = '<option value="">Origem inválida ou não encontrada</option>';
+                            return;
+                        }
+                        locais = (locaisData.setores || []).filter(s => idEq(s.sub_almoxarifado_id, subRefId));
                         break;
                     }
                 }
@@ -762,14 +837,34 @@ function renderSetoresDistribuicao(setores) {
 }
 
 // Filtra setores obedecendo a hierarquia da origem selecionada
-function filtrarSetoresDistribuicao() {
+async function filtrarSetoresDistribuicao() {
     const tipo = document.getElementById('tipoOrigemDistribuicao')?.value;
     const origemId = document.getElementById('localOrigemDistribuicao')?.value;
-    const todosSetores = locaisData.setores || [];
+    const container = document.getElementById('setoresDistribuicao');
+    if (container) {
+        container.innerHTML = '<div class="text-muted">Carregando setores...</div>';
+    }
+    let todosSetores = [];
+    try {
+        const resp = await fetchJson('/api/setores?per_page=1000');
+        todosSetores = resp.items || [];
+    } catch (err) {
+        console.error('Erro ao carregar setores via API:', err);
+        // Fallback para dados embutidos no template
+        todosSetores = locaisData.setores || [];
+    }
     if (!tipo || !origemId) {
         renderSetoresDistribuicao([]);
         return;
     }
+
+    // Helper: verifica se o setor pertence ao sub informado considerando
+    // campo legado (sub_almoxarifado_id) e novo (sub_almoxarifado_ids)
+    const setorPertenceAoSub = (setor, subId) => {
+        const single = setor.sub_almoxarifado_id;
+        const multi = Array.isArray(setor.sub_almoxarifado_ids) ? setor.sub_almoxarifado_ids : [];
+        return idEq(single, subId) || multi.some(id => idEq(id, subId));
+    };
 
     let setoresFiltrados = [];
     if (tipo === 'central') {
@@ -779,14 +874,22 @@ function filtrarSetoresDistribuicao() {
         const subDaCentral = (locaisData.sub_almoxarifados || [])
             .filter(sa => almoxDaCentral.includes(String(sa.almoxarifado_id)))
             .map(sa => String(sa.id));
-        setoresFiltrados = todosSetores.filter(s => subDaCentral.includes(String(s.sub_almoxarifado_id)));
+        setoresFiltrados = todosSetores.filter(s => {
+            const single = String(s.sub_almoxarifado_id);
+            const multi = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+            return subDaCentral.includes(single) || multi.some(v => subDaCentral.includes(v));
+        });
     } else if (tipo === 'almoxarifado') {
         const subsDoAlmox = (locaisData.sub_almoxarifados || [])
             .filter(sa => idEq(sa.almoxarifado_id, origemId))
             .map(sa => String(sa.id));
-        setoresFiltrados = todosSetores.filter(s => subsDoAlmox.includes(String(s.sub_almoxarifado_id)));
+        setoresFiltrados = todosSetores.filter(s => {
+            const single = String(s.sub_almoxarifado_id);
+            const multi = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+            return subsDoAlmox.includes(single) || multi.some(v => subsDoAlmox.includes(v));
+        });
     } else if (tipo === 'sub_almoxarifado') {
-        setoresFiltrados = todosSetores.filter(s => idEq(s.sub_almoxarifado_id, origemId));
+        setoresFiltrados = todosSetores.filter(s => setorPertenceAoSub(s, origemId));
     } else {
         setoresFiltrados = [];
     }
@@ -850,7 +953,7 @@ function carregarLocaisProdutoDistribuicao() {
                     // Mostrar mensagem informativa
                     localOrigemSelect.innerHTML = '<option value="">Produto disponível em múltiplos tipos de local - selecione o tipo primeiro</option>';
                 } else {
-                    localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível para distribuição</option>';
+                    localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível para saída</option>';
                 }
             } else {
                 localOrigemSelect.innerHTML = '<option value="">Produto sem estoque disponível</option>';
@@ -1108,7 +1211,7 @@ function executarDistribuicao() {
         body: JSON.stringify(dadosDistribuicao)
     })
     .then(result => {
-        alert(`Distribuição executada com sucesso! ${result.movimentacoes_criadas} movimentações criadas.`);
+        alert(`Saída executada com sucesso! ${result.movimentacoes_criadas} movimentações criadas.`);
         
         // Fechar modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('distribuicaoModal'));
@@ -1125,7 +1228,7 @@ function executarDistribuicao() {
     })
     .catch(error => {
         console.error('Erro:', error);
-        alert('Erro ao executar distribuição: ' + error.message);
+        alert('Erro ao executar saída: ' + error.message);
     });
 }
 
