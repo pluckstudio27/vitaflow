@@ -34,13 +34,15 @@
             </div>
             {% endif %}
 
-            <!-- Ações para todos os usuários -->
+            <!-- Ações para níveis acima de operador de setor -->
+            {% if is_super_admin or is_admin_central or is_gerente_almox or is_resp_sub_almox %}
             <div class="col-6">
                 <a href="{{ url_for('main.movimentacoes') }}" class="btn btn-outline-warning btn-sm w-100">
                     <i class="fas fa-exchange-alt d-block mb-1"></i>
                     <small>Movimentação</small>
                 </a>
             </div>
+            {% endif %}
 
             <div class="col-6">
                 <a href="{{ url_for('main.estoque') }}" class="btn btn-outline-secondary btn-sm w-100">

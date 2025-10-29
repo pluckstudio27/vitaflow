@@ -128,7 +128,6 @@
                                     <option value="">Selecione...</option>
                                     <option value="almoxarifado">Almoxarifado</option>
                                     <option value="sub_almoxarifado">Sub-Almoxarifado</option>
-                                    <option value="setor">Setor</option>
                                 </select>
                             </div>
                             <div class="mb-3">
@@ -986,7 +985,8 @@ function carregarLocaisProduto() {
                 // Agrupar por tipo de local
                 const locaisPorTipo = {};
                 data.estoques.forEach(estoque => {
-                    if (estoque.quantidade_disponivel > 0) {
+                    // Para transferência, setor não pode ser origem: ignorar estoques em setores
+                    if (estoque.quantidade_disponivel > 0 && estoque.tipo !== 'setor') {
                         const tipo = estoque.tipo;
                         if (!locaisPorTipo[tipo]) {
                             locaisPorTipo[tipo] = [];

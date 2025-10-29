@@ -170,8 +170,8 @@ function formatQuantidade(valor, unidade) {
 // Carregar dados iniciais
 function carregarDados() {
     Promise.all([
-        fetch('/api/estoque/hierarquia').then(r => r.json()),
-        fetch('/api/hierarquia/locais').then(r => r.json())
+        fetchJson('/api/estoque/hierarquia', { headers: { 'Accept': 'application/json' } }),
+        fetchJson('/api/hierarquia/locais', { headers: { 'Accept': 'application/json' } })
     ])
     .then(([estoque, locais]) => {
         dadosEstoque = estoque;
@@ -401,9 +401,9 @@ function renderizarTabela() {
 // Ver detalhes
 function verDetalhes(produtoId, localId) {
     Promise.all([
-        fetch(`/api/produtos/${produtoId}`).then(r => r.json()),
-        fetch(`/api/produtos/${produtoId}/lotes?local_id=${localId}`).then(r => r.json()),
-        fetch(`/api/produtos/${produtoId}/movimentacoes?local_id=${localId}&limit=10`).then(r => r.json())
+        fetchJson(`/api/produtos/${produtoId}`, { headers: { 'Accept': 'application/json' } }),
+        fetchJson(`/api/produtos/${produtoId}/lotes?local_id=${localId}`, { headers: { 'Accept': 'application/json' } }),
+        fetchJson(`/api/produtos/${produtoId}/movimentacoes?local_id=${localId}&limit=10`, { headers: { 'Accept': 'application/json' } })
     ])
     .then(([produto, lotes, movimentacoes]) => {
         let html = `

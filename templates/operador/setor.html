@@ -1,0 +1,448 @@
+{% extends 'base.html' %}
+{% block title %}Gestão do Setor{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <!-- Contexto do usuário para JS: evitar Jinja dentro de <script> -->
+  <div id="operador-setor-context" data-setor-id="{{ user.setor_id if user and user.setor_id is not none else '' }}" style="display:none;"></div>
+  <div class="row mb-3">
+    <div class="col-12">
+      <h4 class="mb-0">
+        <i class="fas fa-clipboard-list me-2"></i>
+        Gestão do Setor (Operador)
+      </h4>
+      <small class="text-muted">Visualize o estoque do seu setor e os lotes com validade por produto.</small>
+    </div>
+  </div>
+
+  <!-- Seleção de Produto -->
+  <div class="row">
+    <div class="col-12 col-lg-6">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title mb-0"><i class="fas fa-search me-2"></i>Selecionar Produto</h5>
+        </div>
+        <div class="card-body">
+          <div class="input-group mb-3">
+            <input type="text" class="form-control" id="busca-produto" placeholder="Buscar por nome, código ou descrição...">
+            <button class="btn btn-primary" id="btn-buscar"><i class="fas fa-search"></i></button>
+          </div>
+          <div id="resultados-produtos" class="list-group"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Informações do Produto e Estoque do Setor -->
+    <div class="col-12 col-lg-6">
+      <div class="card" id="card-produto" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="card-title mb-0"><i class="fas fa-box me-2"></i>Produto Selecionado</h5>
+          <button class="btn btn-sm btn-outline-secondary" id="btn-trocar">Trocar</button>
+        </div>
+        <div class="card-body">
+          <div id="produto-info" class="mb-3"></div>
+          <div class="border rounded p-3 bg-light">
+            <div class="d-flex align-items-center mb-2">
+              <i class="fas fa-warehouse me-2"></i>
+              <strong>Estoque no meu setor:</strong>
+            </div>
+            <div class="small mb-2"><strong>Setor atual:</strong> <span id="setor-nome">Carregando...</span></div>
+            <div id="estoque-setor" class="small text-muted">Carregando...</div>
+            <div class="mt-2">
+              <div class="d-flex align-items-center mb-2">
+                <i class="fas fa-calendar-day me-2"></i>
+                <strong>Resumo do dia:</strong>
+              </div>
+              <div id="resumo-dia-setor" class="small">
+                <div class="row">
+                  <div class="col-6 col-md-3"><strong>Recebido (Almox):</strong> <span id="resumo-almox">0</span></div>
+                  <div class="col-6 col-md-3"><strong>Recebido (Sub):</strong> <span id="resumo-sub">0</span></div>
+                  <div class="col-6 col-md-3 mt-2 mt-md-0"><strong>Usado hoje:</strong> <span id="resumo-usado">0</span></div>
+                  <div class="col-6 col-md-3 mt-2 mt-md-0"><strong>Disponível:</strong> <span id="resumo-disponivel">0</span></div>
+                </div>
+              </div>
+              <form id="form-consumo-dia" class="mt-2">
+                <div class="input-group input-group-sm" style="max-width:260px;">
+                  <span class="input-group-text">Usado hoje</span>
+                  <input type="number" step="0.01" min="0" class="form-control" id="qtd-consumo-dia" placeholder="0">
+                  <button class="btn btn-outline-danger" type="submit">Registrar</button>
+                </div>
+                <div id="consumo-status" class="small mt-1"></div>
+              </form>
+            </div>
+            <div class="mt-2">
+              <div class="d-flex align-items-center mb-2">
+                <i class="fas fa-tags me-2"></i>
+                <strong>Lotes no setor (validade):</strong>
+              </div>
+              <div id="lotes-setor" class="small text-muted">Carregando...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Removido: Registro Diário do Setor -->
+</div>
+
+<script>
+let selectedProduct = null;
+// Formatação de quantidade para pt-BR com até 2 casas decimais, sem zeros desnecessários
+const fmtQtd = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
+
+// Parser flexível para datas: aceita ISO, timestamp, e DD/MM/YYYY
+function parseDateFlexible(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    return isNaN(val) ? null : val;
+  }
+  if (typeof val === 'number') {
+    const d = new Date(val);
+    return isNaN(d) ? null : d;
+  }
+  const s = String(val).trim();
+  // Tentar ISO direto
+  const dISO = new Date(s);
+  if (!isNaN(dISO)) return dISO;
+  // Tentar DD/MM/YYYY
+  const m = s.match(/^([0-3]?\d)\/([0-1]?\d)\/(\d{4})$/);
+  if (m) {
+    const dia = parseInt(m[1], 10);
+    const mes = parseInt(m[2], 10) - 1; // 0-based
+    const ano = parseInt(m[3], 10);
+    const d = new Date(ano, mes, dia);
+    return isNaN(d) ? null : d;
+  }
+  return null;
+}
+
+function normalizeId(val) {
+  if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  const m = s.match(/^ObjectId\(['"]?([0-9a-fA-F]{24})['"]?\)$/);
+  if (m) return m[1];
+  return s;
+}
+
+async function loadSetorAtual() {
+  const el = document.getElementById('setor-nome');
+  const raw = (document.getElementById('operador-setor-context').dataset.setorId || '').trim();
+  const sid = normalizeId(raw);
+  if (!sid) { el.textContent = '-'; return; }
+  try {
+    const data = await fetchJson(`/api/setores/${sid}`, { headers: { 'Accept': 'application/json' } });
+    el.textContent = data.nome || data.descricao || 'Setor';
+  } catch (e) {
+    console.error('Erro ao carregar setor atual:', e);
+    el.textContent = sid;
+  }
+}
+
+function renderResultados(items) {
+  const cont = document.getElementById('resultados-produtos');
+  cont.innerHTML = '';
+  if (!items || items.length === 0) {
+    cont.innerHTML = '<div class="text-muted">Nenhum produto encontrado.</div>';
+    return;
+  }
+  items.forEach(p => {
+    const el = document.createElement('a');
+    el.href = '#';
+    el.className = 'list-group-item list-group-item-action';
+    el.innerHTML = `<div class="d-flex w-100 justify-content-between">
+      <h6 class="mb-1">${p.nome || p.descricao || 'Produto'}</h6>
+      <small>${p.codigo || ''}</small>
+    </div>
+    <small class="text-muted">${p.categoria_nome || ''}</small>`;
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      selectProduto(p);
+    });
+    cont.appendChild(el);
+  });
+}
+
+function produtoIdOut(p) {
+  if (!p) return null;
+  return (p.id !== undefined && p.id !== null) ? p.id : (p._id || (p._id_str || null));
+}
+
+async function buscarProdutos() {
+  const termo = (document.getElementById('busca-produto').value || '').trim();
+  const url = termo ? `/api/produtos?search=${encodeURIComponent(termo)}&per_page=10` : '/api/produtos?per_page=10';
+  try {
+    const data = await fetchJson(url, { headers: { 'Accept': 'application/json' } });
+    renderResultados(data.items || []);
+  } catch (err) {
+    console.error('Erro ao buscar produtos:', err);
+    document.getElementById('resultados-produtos').innerHTML = '<div class="text-danger">Erro ao buscar produtos.</div>';
+  }
+}
+
+function selectProduto(p) {
+  selectedProduct = p;
+  document.getElementById('card-produto').style.display = '';
+  const info = document.getElementById('produto-info');
+  info.innerHTML = `<div class="row">
+    <div class="col-12 col-md-6"><strong>Nome:</strong> ${p.nome || '-'}</div>
+    <div class="col-12 col-md-3"><strong>Código:</strong> ${p.codigo || '-'}</div>
+    <div class="col-12 col-md-3"><strong>Unidade:</strong> ${p.unidade_medida || '-'}</div>
+  </div>`;
+  loadSetorStock();
+  loadSetorLotes();
+  loadResumoDia();
+}
+
+async function loadSetorStock() {
+  const el = document.getElementById('estoque-setor');
+  el.textContent = 'Carregando...';
+  if (!selectedProduct) return;
+  const pid = normalizeId(produtoIdOut(selectedProduct));
+  if (!pid) { el.textContent = 'Produto inválido.'; return; }
+  try {
+    const data = await fetchJson(`/api/produtos/${pid}/estoque`, { headers: { 'Accept': 'application/json' } });
+    const meusetorStrRaw = (document.getElementById('operador-setor-context').dataset.setorId || null);
+    const meusetorStr = normalizeId(meusetorStrRaw);
+    // Construir candidatos de comparação para o setor do usuário (ObjectId e id sequencial)
+    const setorIdCandidates = [];
+    if (meusetorStr) setorIdCandidates.push(String(meusetorStr));
+    try {
+      const res = await fetch(`/api/setores/${encodeURIComponent(meusetorStr)}`, { headers: { 'Accept': 'application/json' } });
+      if (res.ok) {
+        const ds = await res.json();
+        if (ds && ds.id !== undefined && ds.id !== null) {
+          setorIdCandidates.push(String(ds.id));
+        }
+      }
+    } catch (e) {
+      // Ignorar falhas ao resolver id sequencial do setor
+    }
+    let setorItem = null;
+    (data.estoques || []).forEach(it => {
+      const tipo = (it.tipo || '').toLowerCase();
+      const lid = normalizeId(it.local_id !== undefined && it.local_id !== null ? it.local_id : null);
+      if (tipo === 'setor' && setorIdCandidates.length && setorIdCandidates.includes(String(lid))) {
+        setorItem = it;
+      }
+    });
+  if (!setorItem) {
+      el.innerHTML = '<span class="text-warning">Sem registro de estoque para este produto no seu setor.</span>';
+      const lotesEl = document.getElementById('lotes-setor');
+      if (lotesEl) lotesEl.textContent = 'Sem lotes cadastrados.';
+      const dispEl = document.getElementById('resumo-disponivel');
+      if (dispEl) dispEl.textContent = '0';
+  } else {
+      el.innerHTML = `<div class="row">
+        <div class="col-12 col-md-4"><strong>Quantidade:</strong> ${fmtQtd.format(Number(setorItem.quantidade || 0))}</div>
+        <div class="col-12 col-md-4"><strong>Disponível:</strong> ${fmtQtd.format(Number(setorItem.quantidade_disponivel || 0))}</div>
+        <div class="col-12 col-md-4"><strong>Atualizado em:</strong> ${setorItem.data_atualizacao ? new Date(setorItem.data_atualizacao).toLocaleString() : '-'}</div>
+      </div>`;
+      const dispEl = document.getElementById('resumo-disponivel');
+      if (dispEl) dispEl.textContent = fmtQtd.format(Number(setorItem.quantidade_disponivel || setorItem.quantidade || 0));
+  }
+  // Atualizar lotes após estoque
+  await loadSetorLotes();
+  } catch (err) {
+    console.error('Erro ao carregar estoque do setor:', err);
+    el.innerHTML = '<span class="text-danger">Erro ao carregar estoque.</span>';
+  }
+}
+
+async function loadSetorLotes() {
+  const el = document.getElementById('lotes-setor');
+  if (!el) return;
+  if (!selectedProduct) { el.textContent = 'Selecione um produto.'; return; }
+  const pid = normalizeId(produtoIdOut(selectedProduct));
+  const rawSid = (document.getElementById('operador-setor-context').dataset.setorId || '').trim();
+  const sid = normalizeId(rawSid);
+  if (!pid || !sid) { el.textContent = 'Dados insuficientes.'; return; }
+  el.textContent = 'Carregando...';
+  try {
+    // Helper para buscar lotes por local
+    async function fetchLotesBy(tipo, id) {
+      const res = await fetchJson(`/api/produtos/${pid}/lotes?local_tipo=${encodeURIComponent(tipo)}&local_id=${encodeURIComponent(id)}`, { headers: { 'Accept': 'application/json' } });
+      return (res.items || []);
+    }
+    // Fallback global: buscar lotes do produto sem filtro de local
+    async function fetchLotesGlobal() {
+      const res = await fetchJson(`/api/produtos/${pid}/lotes`, { headers: { 'Accept': 'application/json' } });
+      return (res.items || []);
+    }
+    // Helper para resolver hierarquia a partir do setor
+    async function resolveHierarchy(setorId) {
+      try {
+        const info = await fetchJson(`/api/setores/${encodeURIComponent(setorId)}`, { headers: { 'Accept': 'application/json' } });
+        // Preferir listas se disponíveis; cair para campo singular se necessário
+        let subIds = Array.isArray(info.sub_almoxarifado_ids) ? info.sub_almoxarifado_ids.slice() : [];
+        let almoxIds = Array.isArray(info.almoxarifado_ids) ? info.almoxarifado_ids.slice() : [];
+        let centralIds = Array.isArray(info.central_ids) ? info.central_ids.slice() : [];
+        if (!subIds.length && info.sub_almoxarifado_id) subIds = [info.sub_almoxarifado_id];
+        if (!almoxIds.length && info.almoxarifado_id) almoxIds = [info.almoxarifado_id];
+        if (!centralIds.length && info.central_id) centralIds = [info.central_id];
+        // Normalizar cada id (ObjectId("...") -> hex, números como string)
+        subIds = subIds.map(x => normalizeId(x)).filter(Boolean);
+        almoxIds = almoxIds.map(x => normalizeId(x)).filter(Boolean);
+        centralIds = centralIds.map(x => normalizeId(x)).filter(Boolean);
+        return { sub_ids: subIds, almox_ids: almoxIds, central_ids: centralIds };
+      } catch (_) {
+        return { sub_ids: [], almox_ids: [], central_ids: [] };
+      }
+    }
+
+    let items = await fetchLotesBy('setor', sid);
+    let origemAtual = 'setor';
+    if (!items.length) {
+      const h = await resolveHierarchy(sid);
+      // Preferir lotes da Central quando setor não tem
+      for (const cid of (h.central_ids || [])) {
+        const citems = await fetchLotesBy('central', cid);
+        if (citems.length) { items = citems; origemAtual = 'central'; break; }
+      }
+      // Se central não tem, tentar almoxarifado (em lista)
+      if (!items.length) {
+        for (const aid of (h.almox_ids || [])) {
+          const aitems = await fetchLotesBy('almoxarifado', aid);
+          if (aitems.length) { items = aitems; origemAtual = 'almoxarifado'; break; }
+        }
+      }
+      // Se almox não tem, tentar sub-almoxarifado (em lista)
+      if (!items.length) {
+        for (const sid2 of (h.sub_ids || [])) {
+          const sitems = await fetchLotesBy('sub_almoxarifado', sid2);
+          if (sitems.length) { items = sitems; origemAtual = 'sub_almoxarifado'; break; }
+        }
+      }
+    }
+    // Fallback final: lotes globais do produto
+    if (!items.length) {
+      const gitems = await fetchLotesGlobal();
+      if (gitems.length) { items = gitems; origemAtual = 'produto'; }
+    }
+    if (!items.length) { el.textContent = 'Sem lotes cadastrados para este produto neste setor ou origem superior.'; return; }
+    let html = '<div class="table-responsive"><table class="table table-sm mb-0">';
+    html += '<thead><tr><th>Origem</th><th>Lote</th><th>Quantidade</th><th>Data Fabricação</th><th>Data Vencimento</th><th>Status</th><th>Observações</th></tr></thead><tbody>';
+    const hoje = new Date();
+    items.forEach(l => {
+      const qtdNum = Number(l.quantidade_atual || 0);
+      const unidade = (selectedProduct && selectedProduct.unidade_medida) ? String(selectedProduct.unidade_medida) : '';
+      const qtd = `${fmtQtd.format(qtdNum)}${unidade ? ' ' + unidade : ''}`;
+      const df = parseDateFlexible(l.data_fabricacao);
+      const dv = parseDateFlexible(l.data_vencimento);
+      let status = '-';
+      let fabStr = '-';
+      let vencStr = '-';
+      if (df && !isNaN(df)) {
+        fabStr = df.toLocaleDateString('pt-BR');
+      }
+      if (dv && !isNaN(dv)) {
+        vencStr = dv.toLocaleDateString('pt-BR');
+        const diffMs = dv.getTime() - hoje.getTime();
+        const dias = Math.ceil(diffMs / (1000*60*60*24));
+        if (dias < 0) status = 'Vencido';
+        else if (dias <= 30) status = `Vence em ${dias} dias`;
+        else status = 'Válido';
+      }
+      const obs = (l.observacoes && String(l.observacoes).trim() !== '') ? l.observacoes : '-';
+      const origemRaw = (l.local_tipo || origemAtual || '-');
+      const origemLabel = origemRaw
+        .replace('sub_almoxarifado', 'Sub‑Almoxarifado')
+        .replace('almoxarifado', 'Almoxarifado')
+        .replace('central', 'Central')
+        .replace('setor', 'Setor')
+        .replace('produto', 'Produto');
+      html += `<tr>
+        <td>${origemLabel}</td>
+        <td>${l.numero_lote || '-'}</td>
+        <td>${qtd}</td>
+        <td>${fabStr}</td>
+        <td>${vencStr}</td>
+        <td>${status}</td>
+        <td>${obs}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+  } catch (e) {
+    console.error('Erro ao carregar lotes:', e);
+    el.innerHTML = '<span class="text-danger">Erro ao carregar lotes.</span>';
+  }
+}
+
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+}
+
+async function loadResumoDia() {
+  const elA = document.getElementById('resumo-almox');
+  const elS = document.getElementById('resumo-sub');
+  const elU = document.getElementById('resumo-usado');
+  const elD = document.getElementById('resumo-disponivel');
+  if (!selectedProduct) { elA.textContent='0'; elS.textContent='0'; elU.textContent='0'; elD.textContent='0'; return; }
+  const pid = normalizeId(produtoIdOut(selectedProduct));
+  const sidRaw = (document.getElementById('operador-setor-context').dataset.setorId || '').trim();
+  const sid = normalizeId(sidRaw);
+  if (!pid || !sid) return;
+  try {
+    const data = await fetchJson(`/api/setores/${sid}/produtos/${pid}/resumo-dia`, { headers: { 'Accept': 'application/json' } });
+    const rpo = data.recebido_hoje_por_origem || {};
+    elA.textContent = fmtQtd.format(Number(rpo.almoxarifado || 0));
+    elS.textContent = fmtQtd.format(Number(rpo.sub_almoxarifado || 0));
+    elU.textContent = fmtQtd.format(Number(data.usado_hoje_total || 0));
+    elD.textContent = fmtQtd.format(Number(data.estoque_disponivel || data.estoque_atual || 0));
+  } catch (err) {
+    console.error('Erro ao carregar resumo do dia:', err);
+    elA.textContent='-'; elS.textContent='-'; elU.textContent='-'; elD.textContent='-';
+  }
+}
+
+// Removido: preenchimento automático por movimentações
+
+document.getElementById('btn-buscar').addEventListener('click', buscarProdutos);
+document.getElementById('busca-produto').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    buscarProdutos();
+  }
+});
+
+document.getElementById('btn-trocar').addEventListener('click', () => {
+  selectedProduct = null;
+  document.getElementById('card-produto').style.display = 'none';
+  const statusEl = document.getElementById('consumo-status');
+  if (statusEl) statusEl.textContent = '';
+});
+
+document.getElementById('form-consumo-dia').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const statusEl = document.getElementById('consumo-status');
+  if (!selectedProduct) { statusEl.textContent = 'Selecione um produto primeiro.'; return; }
+  const pid = normalizeId(produtoIdOut(selectedProduct));
+  const valor = parseFloat((document.getElementById('qtd-consumo-dia').value || '0').replace(',', '.'));
+  if (!valor || valor <= 0) { statusEl.innerHTML = '<span class="text-muted">Informe uma quantidade maior que zero.</span>'; return; }
+  try {
+    await fetchJson('/api/setor/registro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ produto_id: pid, saida_dia: valor })
+    });
+    statusEl.innerHTML = '<span class="text-success">Consumo registrado.</span>';
+    document.getElementById('qtd-consumo-dia').value = '';
+    await loadSetorStock();
+    await loadResumoDia();
+  } catch (err) {
+    console.error('Erro ao registrar consumo:', err);
+    statusEl.innerHTML = '<span class="text-danger">Erro ao registrar consumo.</span>';
+  }
+});
+
+// Carregar alguns produtos inicialmente para facilitar seleção
+loadSetorAtual();
+buscarProdutos();
+
+// Atualizar quando um produto é selecionado
+function afterProdutoSelecionado() {
+  loadResumoDia();
+}
+</script>
+{% endblock %}

@@ -116,10 +116,20 @@ class UIBlocksConfig:
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
                     AccessLevel.GERENTE_ALMOX,
-                    AccessLevel.RESP_SUB_ALMOX,
-                    AccessLevel.OPERADOR_SETOR
+                    AccessLevel.RESP_SUB_ALMOX
                 ],
                 active_endpoints=['main.movimentacoes']
+            ),
+            # Página do Operador de Setor para gestão diária
+            MenuBlock(
+                id='operador_setor',
+                label='Gestão do Setor',
+                icon='fas fa-warehouse',
+                url='main.operador_setor_pagina',
+                access_levels=[
+                    AccessLevel.OPERADOR_SETOR
+                ],
+                active_endpoints=['main.operador_setor_pagina']
             ),
             MenuBlock(
                 id='demandas',

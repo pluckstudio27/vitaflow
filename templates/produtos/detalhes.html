@@ -56,12 +56,21 @@
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0"><i class="fas fa-sitemap"></i> Estoque por Hierarquia</h5>
-                            <button class="btn btn-sm btn-outline-primary" onclick="atualizarEstoque()">
-                                <i class="fas fa-sync-alt"></i> Atualizar
-                            </button>
+                            <div class="d-flex align-items-center gap-2">
+                                <select class="form-select form-select-sm" id="filtroPeriodoEstoque" style="width: auto;">
+                                    <option value="">Todos</option>
+                                    <option value="hoje">Hoje</option>
+                                    <option value="dia">Dia</option>
+                                    <option value="semana">Semana</option>
+                                    <option value="mes">Mês</option>
+                                </select>
+                                <button class="btn btn-sm btn-outline-primary" onclick="atualizarEstoque()">
+                                    <i class="fas fa-sync-alt"></i> Atualizar
+                                </button>
+                            </div>
                         </div>
                         <div class="card-body">
-                            <div id="estoqueHierarquia">
+                            <div id="estoqueHierarquia" class="limited-section">
                                 <div class="text-center py-4">
                                     <div class="spinner-border" role="status">
                                         <span class="visually-hidden">Carregando estoque...</span>
@@ -81,7 +90,7 @@
                             <h5 class="mb-0"><i class="fas fa-calendar-alt"></i> Lotes e Validades</h5>
                         </div>
                         <div class="card-body">
-                            <div id="lotesValidades">
+                            <div id="lotesValidades" class="limited-section">
                                 <div class="text-center py-4">
                                     <div class="spinner-border" role="status">
                                         <span class="visually-hidden">Carregando lotes...</span>
@@ -99,7 +108,14 @@
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0"><i class="fas fa-history"></i> Movimentações Recentes</h5>
-                            <div>
+                            <div class="d-flex align-items-center gap-2">
+                                <select class="form-select form-select-sm" id="filtroPeriodoMov" style="width: auto;">
+                                    <option value="">Todos</option>
+                                    <option value="hoje">Hoje</option>
+                                    <option value="dia">Dia</option>
+                                    <option value="semana">Semana</option>
+                                    <option value="mes">Mês</option>
+                                </select>
                                 <select class="form-select form-select-sm" id="filtroMovimentacao" style="width: auto;">
                                     <option value="">Todas</option>
                                     <option value="entrada">Entradas</option>
@@ -109,7 +125,7 @@
                             </div>
                         </div>
                         <div class="card-body">
-                            <div id="movimentacoes">
+                            <div id="movimentacoes" class="limited-section">
                                 <div class="text-center py-4">
                                     <div class="spinner-border" role="status">
                                         <span class="visually-hidden">Carregando movimentações...</span>
@@ -242,6 +258,11 @@
 <script>
 let produtoId = null;
 let produtoDetalhes = null;
+let estoqueAbortController = null;
+let estoquePromise = null;
+let estoqueDadosCache = null;
+let lotesExpandido = false;
+const LOTES_LIMITE = 10;
 
 // Extrair ID do produto da URL
 function obterProdutoId() {
@@ -330,7 +351,7 @@ function renderizarProduto(produto) {
 
 // Carregar resumo de estoque
 function carregarResumoEstoque() {
-    fetchJson(`/api/produtos/${produtoId}/estoque`)
+    obterEstoqueDados()
         .then(data => {
             const unidade = (produtoDetalhes && produtoDetalhes.unidade_medida) || '';
 
@@ -364,7 +385,7 @@ function carregarResumoEstoque() {
 
 // Carregar estoque por hierarquia
 function carregarEstoqueHierarquia() {
-    fetchJson(`/api/produtos/${produtoId}/estoque`)
+    obterEstoqueDados()
         .then(data => {
             const estoques = data.estoques || [];
             if (estoques.length === 0) {
@@ -375,6 +396,18 @@ function carregarEstoqueHierarquia() {
                 `;
                 return;
             }
+            const periodo = document.getElementById('filtroPeriodoEstoque')?.value || '';
+            let inicio = null;
+            const agora = new Date();
+            if (periodo === 'hoje') { inicio = new Date(); inicio.setHours(0,0,0,0); }
+            else if (periodo === 'dia') { inicio = new Date(agora.getTime() - 24*60*60*1000); }
+            else if (periodo === 'semana') { inicio = new Date(agora.getTime() - 7*24*60*60*1000); }
+            else if (periodo === 'mes') { inicio = new Date(agora.getTime() - 30*24*60*60*1000); }
+
+            const aplicados = inicio ? estoques.filter(it => {
+                const dt = parseDateFlexible(it.data_atualizacao);
+                return dt && dt >= inicio;
+            }) : estoques;
             
             let html = '<div class="table-responsive"><table class="table table-hover">';
             html += `
@@ -390,11 +423,12 @@ function carregarEstoqueHierarquia() {
                 <tbody>
             `;
             
-            estoques.forEach(item => {
+            aplicados.forEach(item => {
                 const tipoIcon = {
                     'central': 'fas fa-building',
                     'almoxarifado': 'fas fa-warehouse',
                     'subalmoxarifado': 'fas fa-boxes',
+                    'sub_almoxarifado': 'fas fa-boxes',
                     'setor': 'fas fa-users'
                 };
                 
@@ -410,7 +444,7 @@ function carregarEstoqueHierarquia() {
                         <td><strong>${formatQuantidade(item.quantidade)}</strong></td>
                         <td class="text-success">${formatQuantidade(item.quantidade_disponivel)}</td>
                         <td class="text-muted">
-                            ${item.data_atualizacao ? new Date(item.data_atualizacao).toLocaleString('pt-BR', {
+                            ${item.data_atualizacao ? parseDateFlexible(item.data_atualizacao).toLocaleString('pt-BR', {
                                 day: '2-digit',
                                 month: '2-digit', 
                                 year: 'numeric',
@@ -450,47 +484,7 @@ function carregarLotes() {
                 return;
             }
             
-            let html = '<div class="table-responsive"><table class="table table-hover">';
-            html += `
-                <thead>
-                    <tr>
-                        <th>Lote</th>
-                        <th>Quantidade</th>
-                        <th>Data Fabricação</th>
-                        <th>Data Vencimento</th>
-                        <th>Status</th>
-                        <th>Observações</th>
-                    </tr>
-                </thead>
-                <tbody>
-            `;
-            
-            lotes.forEach(lote => {
-                const hoje = new Date();
-                const vencimento = new Date(lote.data_vencimento);
-                const diasVencimento = Math.ceil((vencimento - hoje) / (1000 * 60 * 60 * 24));
-                
-                let statusBadge = '<span class="badge bg-success">Válido</span>';
-                if (diasVencimento < 0) {
-                    statusBadge = '<span class="badge bg-danger">Vencido</span>';
-                } else if (diasVencimento <= 30) {
-                    statusBadge = '<span class="badge bg-warning">Próximo ao vencimento</span>';
-                }
-                
-                html += `
-                    <tr>
-                        <td><strong>${lote.numero_lote || '-'}</strong></td>
-                        <td>${formatQuantidade(lote.quantidade_atual)}</td>
-                        <td>${lote.data_fabricacao ? new Date(lote.data_fabricacao).toLocaleDateString('pt-BR') : '-'}</td>
-                        <td>${lote.data_vencimento ? new Date(lote.data_vencimento).toLocaleDateString('pt-BR') : '-'}</td>
-                        <td>${statusBadge}</td>
-                        <td class="text-muted">${lote.observacoes || '-'}</td>
-                    </tr>
-                `;
-            });
-            
-            html += '</tbody></table></div>';
-            document.getElementById('lotesValidades').innerHTML = html;
+    renderizarTabelaLotes(lotes);
         })
         .catch(error => {
             console.error('Erro ao carregar lotes:', error);
@@ -505,9 +499,21 @@ function carregarLotes() {
 // Carregar movimentações
 function carregarMovimentacoes() {
     const filtro = document.getElementById('filtroMovimentacao').value;
+    const periodoMov = document.getElementById('filtroPeriodoMov')?.value || '';
     let url = `/api/produtos/${produtoId}/movimentacoes?limit=20`;
     if (filtro) {
         url += `&tipo=${filtro}`;
+    }
+    if (periodoMov) {
+        const agora = new Date();
+        let inicio = null;
+        if (periodoMov === 'hoje') { inicio = new Date(); inicio.setHours(0,0,0,0); }
+        else if (periodoMov === 'dia') { inicio = new Date(agora.getTime() - 24*60*60*1000); }
+        else if (periodoMov === 'semana') { inicio = new Date(agora.getTime() - 7*24*60*60*1000); }
+        else if (periodoMov === 'mes') { inicio = new Date(agora.getTime() - 30*24*60*60*1000); }
+        if (inicio) {
+            url += `&data_inicio=${encodeURIComponent(inicio.toISOString())}`;
+        }
     }
     fetchJson(url)
         .then(data => {
@@ -577,8 +583,12 @@ function carregarMovimentacoes() {
 
 // Atualizar estoque
 function atualizarEstoque() {
-    carregarResumoEstoque();
-    carregarEstoqueHierarquia();
+    obterEstoqueDados(true)
+        .then(() => {
+            carregarResumoEstoque();
+            carregarEstoqueHierarquia();
+        })
+        .catch(err => { if (err && err.name === 'AbortError') return; });
     carregarLotes();
 }
 
@@ -640,6 +650,8 @@ function carregarAlmoxarifadosDetalhes() {
 
 // Filtro de movimentações
 document.getElementById('filtroMovimentacao').addEventListener('change', carregarMovimentacoes);
+document.getElementById('filtroPeriodoMov').addEventListener('change', carregarMovimentacoes);
+document.getElementById('filtroPeriodoEstoque').addEventListener('change', carregarEstoqueHierarquia);
 
 // Salvar recebimento
 document.getElementById('salvarRecebimento').addEventListener('click', function() {
@@ -719,6 +731,95 @@ function formatQuantidade(value, unidadeOverride) {
     return unidade ? `${inteiro} ${unidade}` : `${inteiro}`;
 }
 
+// Helper: parse de data flexível (ISO, timestamp numérico, DD/MM/YYYY)
+function parseDateFlexible(value) {
+    if (!value) return null;
+    try {
+        if (value instanceof Date) return value;
+        if (typeof value === 'number') return new Date(value);
+        const s = String(value).trim();
+        const dm = s.match(/^([0-3]?\d)[\/-]([0-1]?\d)[\/-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+        if (dm) {
+            const d = parseInt(dm[1], 10);
+            const m = parseInt(dm[2], 10) - 1;
+            const y = parseInt(dm[3], 10);
+            const hh = dm[4] ? parseInt(dm[4], 10) : 0;
+            const mm = dm[5] ? parseInt(dm[5], 10) : 0;
+            return new Date(y, m, d, hh, mm);
+        }
+        const iso = new Date(s);
+        if (!isNaN(iso.getTime())) return iso;
+    } catch (_) {}
+    return null;
+}
+
+// Cache: obter dados de estoque com AbortController
+function obterEstoqueDados(force = false) {
+    if (!produtoId) return Promise.reject(new Error('Produto não identificado'));
+    if (!force && estoquePromise) return estoquePromise;
+    if (estoqueAbortController) { try { estoqueAbortController.abort(); } catch (_) {} }
+    estoqueAbortController = new AbortController();
+    estoquePromise = fetchJson(`/api/produtos/${produtoId}/estoque`, { signal: estoqueAbortController.signal })
+        .then(data => { estoqueDadosCache = data; return data; })
+        .catch(err => { if (err && err.name === 'AbortError') { throw err; } throw err; });
+    return estoquePromise;
+}
+
+// Renderização: tabela de lotes com limite e toggle
+function renderizarTabelaLotes(lotes) {
+    let html = '<div class="table-responsive"><table class="table table-hover">';
+    html += `
+        <thead>
+            <tr>
+                <th>Lote</th>
+                <th>Quantidade</th>
+                <th>Data Fabricação</th>
+                <th>Data Vencimento</th>
+                <th>Status</th>
+                <th>Observações</th>
+            </tr>
+        </thead>
+        <tbody>
+    `;
+    const hoje = new Date();
+    const mostrar = lotesExpandido ? lotes : lotes.slice(0, LOTES_LIMITE);
+    mostrar.forEach(lote => {
+        const vencDt = parseDateFlexible(lote.data_vencimento);
+        const diasVencimento = (vencDt) ? Math.ceil((vencDt - hoje) / (1000 * 60 * 60 * 24)) : null;
+        let statusBadge = '<span class="badge bg-success">Válido</span>';
+        if (diasVencimento !== null) {
+            if (diasVencimento < 0) statusBadge = '<span class="badge bg-danger">Vencido</span>';
+            else if (diasVencimento <= 30) statusBadge = '<span class="badge bg-warning">Próximo ao vencimento</span>';
+        }
+        html += `
+            <tr>
+                <td><strong>${lote.numero_lote || '-'}</strong></td>
+                <td>${formatQuantidade(lote.quantidade_atual)}</td>
+                <td>${lote.data_fabricacao ? parseDateFlexible(lote.data_fabricacao).toLocaleDateString('pt-BR') : '-'}</td>
+                <td>${lote.data_vencimento ? parseDateFlexible(lote.data_vencimento).toLocaleDateString('pt-BR') : '-'}</td>
+                <td>${statusBadge}</td>
+                <td class="text-muted">${lote.observacoes || '-'}</td>
+            </tr>
+        `;
+    });
+    html += '</tbody></table></div>';
+    if (lotes.length > LOTES_LIMITE) {
+        html += `
+            <div class="d-flex justify-content-center">
+                <button class="btn btn-sm btn-outline-secondary" onclick="toggleLotesExpandido()">
+                    ${lotesExpandido ? 'Mostrar menos' : 'Mostrar mais'}
+                </button>
+            </div>
+        `;
+    }
+    document.getElementById('lotesValidades').innerHTML = html;
+}
+
+function toggleLotesExpandido() {
+    lotesExpandido = !lotesExpandido;
+    carregarLotes();
+}
+
 // Calcular valor total (modal)
 function calcularValorTotalModal() {
     const quantidade = parseFloat(document.getElementById('quantidade')?.value) || 0;
@@ -729,7 +830,7 @@ function calcularValorTotalModal() {
         valorEl.value = valorTotal.toLocaleString('pt-BR', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
-        });
+});
     }
 }
 
@@ -756,4 +857,7 @@ function verificarVencimentoModal() {
     }
 }
 </script>
+<style>
+.limited-section { max-height: 360px; overflow-y: auto; }
+</style>
 {% endblock %}

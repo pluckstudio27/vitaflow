@@ -470,8 +470,7 @@ function carregarEstoqueParaProdutos(produtos) {
         const cell = document.getElementById(`unidade_${produto.id}`);
         if (!cell) return;
 
-        fetch(`/api/produtos/${produto.id}/estoque`)
-            .then(resp => resp.json())
+        fetchJson(`/api/produtos/${produto.id}/estoque`, { headers: { 'Accept': 'application/json' } })
             .then(data => {
                 const itens = Array.isArray(data.estoques) ? data.estoques : [];
                 let totalDisp = 0;

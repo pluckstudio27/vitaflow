@@ -6,11 +6,12 @@ from flask_login import current_user
 # Removido: from models.categoria import CategoriaProduto
 # Removido: from extensions import db
 from auth import (require_any_level, require_manager_or_above, require_admin_or_above, 
-                  require_level, ScopeFilter)
+                  require_level, require_responsible_or_above, ScopeFilter)
 from config.ui_blocks import get_ui_blocks_config
 import extensions
 from pymongo import ReturnDocument
 from datetime import datetime
+from datetime import datetime, date, timedelta
 from bson import ObjectId
 
 main_bp = Blueprint('main', __name__)
@@ -153,8 +154,242 @@ def estoque():
                          sub_almoxarifados=sub_almoxarifados,
                          setores=setores)
 
+# ==================== OPERADOR DE SETOR ====================
+
+@main_bp.route('/operador/setor')
+@require_level('operador_setor')
+def operador_setor_pagina():
+    """Página para Operador de Setor registrar uso diário e entradas."""
+    return render_template('operador/setor.html')
+
+@main_bp.route('/api/setor/registro', methods=['POST'])
+@require_level('operador_setor')
+def api_setor_registro():
+    """Registra informações diárias do setor para um produto.
+    Campos aceitos (JSON):
+      - produto_id (obrigatório)
+      - quantidade_recebida (opcional, >0)
+      - data_vencimento (opcional, ISO date)
+      - quantidade_atual (opcional, >=0)
+      - saida_dia (opcional, >0)
+      - observacoes (opcional)
+
+    Efeitos:
+      - Atualiza estoque do setor em 'estoques'
+      - Cria movimentações em 'movimentacoes' (entrada/saida)
+      - Registra lote em 'lotes' quando informado vencimento
+      - Persiste o registro em 'setor_registros'
+    """
+    try:
+        db = extensions.mongo_db
+        produtos = db['produtos']
+        estoques = db['estoques']
+        movimentacoes = db['movimentacoes']
+        lotes = db['lotes']
+        registros = db['setor_registros']
+
+        data = request.get_json(silent=True) or {}
+        raw_pid = data.get('produto_id')
+        if raw_pid is None:
+            return jsonify({'error': 'produto_id é obrigatório'}), 400
+
+        def _parse_date(val):
+            if not val:
+                return None
+            try:
+                # aceita 'YYYY-MM-DD' e ISO completo
+                if isinstance(val, (datetime, date)):
+                    return datetime(val.year, val.month, val.day)
+                s = str(val)
+                if len(s) == 10:
+                    return datetime.strptime(s, '%Y-%m-%d')
+                return datetime.fromisoformat(s.replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        # Normalizar produto
+        prod_doc = None
+        try:
+            if str(raw_pid).isdigit():
+                prod_doc = produtos.find_one({'id': int(raw_pid)})
+            if not prod_doc:
+                try:
+                    prod_doc = produtos.find_one({'_id': ObjectId(str(raw_pid))})
+                except Exception:
+                    prod_doc = None
+            if not prod_doc and isinstance(raw_pid, str):
+                prod_doc = produtos.find_one({'id': raw_pid}) or produtos.find_one({'_id': raw_pid})
+        except Exception:
+            prod_doc = produtos.find_one({'id': raw_pid}) or produtos.find_one({'_id': raw_pid})
+        if not prod_doc:
+            return jsonify({'error': 'Produto não encontrado'}), 404
+        pid_out = prod_doc.get('id') if prod_doc.get('id') is not None else str(prod_doc.get('_id'))
+
+        # Determinar setor do usuário
+        setor_raw = getattr(current_user, 'setor_id', None)
+        if setor_raw is None:
+            return jsonify({'error': 'Usuário não possui setor associado'}), 400
+
+        # Resolver ids da hierarquia para nomes
+        def _resolve_hierarchy_from_setor_local(setor_id_raw):
+            return _resolve_hierarchy_from_setor(setor_id_raw)
+
+        setor_id, sub_id, almox_id, central_id = _resolve_hierarchy_from_setor_local(setor_raw)
+        if setor_id is None:
+            return jsonify({'error': 'Setor inválido'}), 400
+
+        # Normalizar id de saída para filtros
+        def _id_out(coll_name, raw):
+            if raw is None:
+                return None
+            try:
+                coll = db[coll_name]
+                # tentar id sequencial
+                if str(raw).isdigit():
+                    doc = coll.find_one({'id': int(raw)})
+                else:
+                    doc = None
+                if not doc:
+                    try:
+                        doc = coll.find_one({'_id': ObjectId(str(raw))})
+                    except Exception:
+                        doc = coll.find_one({'_id': raw})
+                if not doc:
+                    doc = coll.find_one({'id': raw})
+                if not doc:
+                    return str(raw)
+                return doc.get('id') if doc.get('id') is not None else str(doc.get('_id'))
+            except Exception:
+                return str(raw)
+
+        sid_out = _id_out('setores', setor_id)
+        almox_out = _id_out('almoxarifados', almox_id)
+
+        # Coletar entradas
+        qtd_recebida = float(data.get('quantidade_recebida') or 0)
+        saida_dia = float(data.get('saida_dia') or 0)
+        qtd_atual = data.get('quantidade_atual')
+        if qtd_atual is not None:
+            try:
+                qtd_atual = float(qtd_atual)
+            except Exception:
+                return jsonify({'error': 'quantidade_atual inválida'}), 400
+        vencimento = _parse_date(data.get('data_vencimento'))
+        observacoes = (data.get('observacoes') or '').strip()
+        data_registro = _parse_date(data.get('data_registro')) or datetime.utcnow()
+        now = datetime.utcnow()
+
+        if qtd_recebida <= 0 and saida_dia <= 0 and qtd_atual is None and vencimento is None:
+            return jsonify({'error': 'Nenhum dado para registrar'}), 400
+
+        # Buscar estoque atual do setor
+        estoque_filter = {'produto_id': pid_out, 'local_tipo': 'setor', 'local_id': sid_out}
+        est_doc = estoques.find_one(estoque_filter)
+        quantidade_base = float((est_doc or {}).get('quantidade', (est_doc or {}).get('quantidade_atual', 0)) or 0)
+        reservada_base = float((est_doc or {}).get('quantidade_reservada', 0) or 0)
+
+        # Aplicar operações
+        nova_qtd = quantidade_base
+        if qtd_recebida and qtd_recebida > 0:
+            nova_qtd += qtd_recebida
+        if saida_dia and saida_dia > 0:
+            if nova_qtd < saida_dia:
+                return jsonify({'error': 'Saída maior que estoque disponível no setor'}), 400
+            nova_qtd -= saida_dia
+        if qtd_atual is not None and qtd_atual >= 0:
+            nova_qtd = qtd_atual
+
+        # Atualizar/Upsert estoque no setor
+        estoques.find_one_and_update(
+            estoque_filter,
+            {
+                '$set': {
+                    'produto_id': pid_out,
+                    'local_tipo': 'setor',
+                    'local_id': sid_out,
+                    'setor_id': sid_out,
+                    'quantidade': nova_qtd,
+                    'quantidade_disponivel': max(0.0, nova_qtd - reservada_base),
+                    'nome_local': 'Setor',
+                    'updated_at': now
+                },
+                '$setOnInsert': {
+                    'created_at': now
+                }
+            },
+            upsert=True
+        )
+
+        # Registrar movimentações
+        if qtd_recebida and qtd_recebida > 0:
+            movimentacoes.insert_one({
+                'produto_id': pid_out,
+                'tipo': 'entrada',
+                'quantidade': qtd_recebida,
+                'data_movimentacao': now,
+                'origem_tipo': 'almoxarifado' if almox_out else None,
+                'origem_id': almox_out,
+                'origem_nome': 'Almoxarifado' if almox_out else 'Recebimento no setor',
+                'destino_tipo': 'setor',
+                'destino_id': sid_out,
+                'destino_nome': 'Setor',
+                'observacoes': observacoes,
+                'created_at': now,
+                'updated_at': now
+            })
+        if saida_dia and saida_dia > 0:
+            movimentacoes.insert_one({
+                'produto_id': pid_out,
+                'tipo': 'saida',
+                'quantidade': saida_dia,
+                'data_movimentacao': now,
+                'origem_tipo': 'setor',
+                'origem_id': sid_out,
+                'origem_nome': 'Setor',
+                'destino_tipo': 'consumo',
+                'destino_nome': 'Consumo no setor',
+                'observacoes': observacoes,
+                'created_at': now,
+                'updated_at': now
+            })
+
+        # Registrar/atualizar lote com vencimento
+        if vencimento is not None:
+            try:
+                lotes.insert_one({
+                    'produto_id': pid_out,
+                    'local_tipo': 'setor',
+                    'local_id': sid_out,
+                    'data_vencimento': vencimento,
+                    'quantidade_atual': qtd_recebida if (qtd_recebida and qtd_recebida > 0) else None,
+                    'observacoes': observacoes,
+                    'created_at': now,
+                    'updated_at': now
+                })
+            except Exception:
+                pass
+
+        # Persistir registro diário
+        registros.insert_one({
+            'produto_id': pid_out,
+            'setor_id': sid_out,
+            'data_registro': data_registro,
+            'quantidade_recebida': qtd_recebida if (qtd_recebida and qtd_recebida > 0) else 0,
+            'saida_dia': saida_dia if (saida_dia and saida_dia > 0) else 0,
+            'quantidade_atual': nova_qtd,
+            'data_vencimento': vencimento,
+            'observacoes': observacoes,
+            'usuario': getattr(current_user, 'username', None),
+            'created_at': now,
+            'updated_at': now
+        })
+
+        return jsonify({'success': True, 'estoque_atual': nova_qtd})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao registrar informações do setor: {e}'}), 500
+
 @main_bp.route('/movimentacoes')
-@require_any_level
+@require_responsible_or_above
 def movimentacoes():
     """Página de movimentações e transferências (MongoDB)"""
     db = extensions.mongo_db
@@ -2467,6 +2702,10 @@ def api_produto_estoque(produto_id):
             else:
                 tipo = s.get('tipo') or s.get('local_tipo') or 'almoxarifado'
                 local_id = s.get('local_id')
+                # Se o documento só possui local_tipo/local_id, mas o tipo é 'setor',
+                # inferir a coleção para normalização consistente do ID e nome
+                if (not coll_name) and str(tipo).lower() == 'setor' and (local_id is not None):
+                    coll_name = 'setores'
 
             nome_local = s.get('nome_local') or s.get('local_nome') or 'Local'
             if coll_name and local_id is not None:
@@ -2505,7 +2744,12 @@ def api_produto_estoque(produto_id):
 @main_bp.route('/api/produtos/<string:produto_id>/lotes')
 @require_any_level
 def api_produto_lotes(produto_id):
-    """Placeholder compatível com templates: retorna lista de lotes."""
+    """Retorna lista de lotes do produto, com filtro opcional por local.
+    Aceita query params:
+      - local_tipo: 'setor' | 'almoxarifado' | 'sub_almoxarifado' | 'central'
+      - local_id: sequencial ou ObjectId string normalizado
+      Observação: aceita variações de grafia em local_tipo (ex.: 'subalmoxarifado').
+    """
     items = []
     try:
         coll = extensions.mongo_db['lotes']
@@ -2517,13 +2761,46 @@ def api_produto_lotes(produto_id):
             pid_candidates.append(ObjectId(produto_id))
         except Exception:
             pass
-        for l in coll.find({'produto_id': {'$in': pid_candidates}}).limit(50):
+
+        # filtros opcionais por local
+        local_tipo = (request.args.get('local_tipo') or '').strip().lower()
+        local_id_raw = request.args.get('local_id')
+        query = {'produto_id': {'$in': pid_candidates}}
+        if local_tipo:
+            tipo_map = {
+                'setor': ['setor', 'Setor'],
+                'almoxarifado': ['almoxarifado', 'Almoxarifado'],
+                'sub_almoxarifado': ['sub_almoxarifado', 'subalmoxarifado', 'Sub_Almoxarifado', 'Sub-Almoxarifado'],
+                'central': ['central', 'Central']
+            }
+            query['local_tipo'] = {'$in': tipo_map.get(local_tipo, [local_tipo])}
+        if local_id_raw is not None and str(local_id_raw).strip() != '':
+            lid_candidates = []
+            # aceitar id sequencial
+            if str(local_id_raw).isdigit():
+                try:
+                    lid_candidates.append(int(local_id_raw))
+                except Exception:
+                    pass
+            # aceitar string direta (incluindo ObjectId string)
+            lid_str = str(local_id_raw).strip()
+            lid_candidates.append(lid_str)
+            # aceitar ObjectId real
+            try:
+                lid_candidates.append(ObjectId(lid_str))
+            except Exception:
+                pass
+            query['local_id'] = {'$in': lid_candidates}
+
+        for l in coll.find(query).limit(100):
             items.append({
                 'numero_lote': l.get('lote') or l.get('numero_lote'),
                 'quantidade_atual': l.get('quantidade_atual', 0),
                 'data_fabricacao': l.get('data_fabricacao'),
                 'data_vencimento': l.get('data_vencimento'),
-                'observacoes': l.get('observacoes')
+                'observacoes': l.get('observacoes'),
+                'local_tipo': l.get('local_tipo'),
+                'local_id': l.get('local_id')
             })
     except Exception:
         pass
@@ -2536,6 +2813,8 @@ def api_produto_movimentacoes(produto_id):
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('limit', request.args.get('per_page', 20)))
     tipo_filtro = (request.args.get('tipo') or '').strip().lower()
+    data_inicio_arg = request.args.get('data_inicio')
+    data_fim_arg = request.args.get('data_fim')
     items = []
     total = 0
     try:
@@ -2549,6 +2828,55 @@ def api_produto_movimentacoes(produto_id):
         except Exception:
             pass
         base_query = {'produto_id': {'$in': pid_candidates}}
+        # Filtros por período
+        def _parse_dt_arg(val):
+            if not val:
+                return None
+            s = str(val).strip()
+            # Tentar ISO
+            try:
+                # Remover 'Z' se presente
+                s2 = s.replace('Z', '')
+                dt = datetime.fromisoformat(s2)
+                return dt
+            except Exception:
+                pass
+            # Tentar DD/MM/YYYY [HH:mm]
+            try:
+                parts = s.split()
+                date_part = parts[0]
+                time_part = parts[1] if len(parts) > 1 else None
+                sep = '/' if '/' in date_part else ('-' if '-' in date_part else None)
+                if sep is None:
+                    return None
+                d, m, y = date_part.split(sep)
+                hh = 0; mm = 0
+                if time_part and ':' in time_part:
+                    hh_s, mm_s = time_part.split(':')[:2]
+                    hh = int(hh_s)
+                    mm = int(mm_s)
+                # Se formato for YYYY-MM-DD, ajustar ordem
+                if len(y) == 4 and len(d) <= 2 and len(m) <= 2:
+                    # detectar se já está YYYY-MM-DD
+                    if int(d) > 31:  # improvável, então trate como YYYY-MM-DD
+                        return datetime(int(d), int(m), int(y), hh, mm)
+                # Se primeiro campo parecer ano (4 dígitos) e separador '-', considerar YYYY-MM-DD
+                if sep == '-' and len(d) == 4:
+                    return datetime(int(d), int(m), int(y), hh, mm)
+                # Caso padrão: DD/MM/YYYY
+                return datetime(int(y), int(m), int(d), hh, mm)
+            except Exception:
+                return None
+
+        dt_inicio = _parse_dt_arg(data_inicio_arg)
+        dt_fim = _parse_dt_arg(data_fim_arg)
+        if dt_inicio or dt_fim:
+            range_q = {}
+            if dt_inicio:
+                range_q['$gte'] = dt_inicio
+            if dt_fim:
+                range_q['$lte'] = dt_fim
+            base_query['data_movimentacao'] = range_q
         # Aplicar filtro por tipo, se fornecido
         if tipo_filtro:
             if tipo_filtro == 'saida':
@@ -2584,6 +2912,171 @@ def api_produto_movimentacoes(produto_id):
     except Exception:
         pass
     return jsonify({'items': items, 'pagination': {'page': page, 'per_page': per_page, 'total': total}})
+
+@main_bp.route('/api/setores/<string:setor_id>/produtos/<string:produto_id>/resumo-dia')
+@require_any_level
+def api_setor_produto_resumo_dia(setor_id, produto_id):
+    """Resumo do dia para um produto no setor: entradas (por origem) e consumo.
+    Considera movimentos de hoje (UTC) e retorna também estoque atual/disponível no setor.
+    """
+    def _candidates(value):
+        vals = []
+        s = str(value)
+        if s.isdigit():
+            try:
+                vals.append(int(s))
+            except Exception:
+                pass
+        vals.append(s)
+        try:
+            vals.append(ObjectId(s))
+        except Exception:
+            pass
+        return vals
+
+    items = {}
+    try:
+        db = extensions.mongo_db
+        movs = db['movimentacoes']
+        estoques = db['estoques']
+
+        pid_candidates = _candidates(produto_id)
+        sid_candidates = _candidates(setor_id)
+
+        today = datetime.utcnow().date()
+        start = datetime(today.year, today.month, today.day)
+        end = start + timedelta(days=1)
+
+        # Entradas recebidas no setor hoje, segmentadas por origem
+        inbound_query = {
+            'produto_id': {'$in': pid_candidates},
+            'destino_tipo': 'setor',
+            'destino_id': {'$in': sid_candidates},
+            'data_movimentacao': {'$gte': start, '$lt': end}
+        }
+        recebido_total = 0.0
+        recebido_por_origem = {'almoxarifado': 0.0, 'sub_almoxarifado': 0.0}
+        for m in movs.find(inbound_query):
+            origem = (m.get('origem_tipo') or '').lower()
+            qtd = float(m.get('quantidade') or 0)
+            # considerar entradas apenas de almoxarifado/sub (transferência, distribuição)
+            if origem in ('almoxarifado', 'subalmoxarifado', 'sub_almoxarifado'):
+                recebido_total += qtd
+                key = 'almoxarifado' if origem == 'almoxarifado' else 'sub_almoxarifado'
+                recebido_por_origem[key] = recebido_por_origem.get(key, 0.0) + qtd
+
+        # Saídas (consumo no setor) hoje
+        consumo_query = {
+            'produto_id': {'$in': pid_candidates},
+            'origem_tipo': 'setor',
+            'destino_tipo': 'consumo',
+            'data_movimentacao': {'$gte': start, '$lt': end}
+        }
+        usado_total = 0.0
+        for m in movs.find(consumo_query):
+            usado_total += float(m.get('quantidade') or 0)
+
+        # Estoque atual no setor
+        estoque_doc = estoques.find_one({'produto_id': {'$in': pid_candidates}, 'local_tipo': 'setor', 'local_id': {'$in': sid_candidates}})
+        if not estoque_doc:
+            estoque_doc = estoques.find_one({'produto_id': {'$in': pid_candidates}, 'setor_id': {'$in': sid_candidates}})
+        estoque_qtd = float((estoque_doc or {}).get('quantidade', (estoque_doc or {}).get('quantidade_atual', 0)) or 0)
+        estoque_disp = float((estoque_doc or {}).get('quantidade_disponivel', estoque_qtd) or estoque_qtd)
+        atualizado_em = (estoque_doc or {}).get('updated_at') or (estoque_doc or {}).get('data_atualizacao')
+
+        return jsonify({
+            'recebido_hoje_total': recebido_total,
+            'recebido_hoje_por_origem': recebido_por_origem,
+            'usado_hoje_total': usado_total,
+            'estoque_atual': estoque_qtd,
+            'estoque_disponivel': estoque_disp,
+            'estoque_atualizado_em': _isoformat_or_str(atualizado_em) if atualizado_em else None
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha ao obter resumo: {e}'}), 500
+
+@main_bp.route('/api/setores/<string:setor_id>/produtos/<string:produto_id>/saldo')
+@require_any_level
+def api_setor_produto_saldo(setor_id, produto_id):
+    """Computa a quantidade existente do produto no setor independente do dia recebido.
+    Base: somatório de todas as entradas no setor (destino_tipo='setor') menos todas as saídas do setor
+    (origem_tipo='setor'), com suporte a tipos 'transferencia', 'saida', 'entrada', e destino de consumo/transferência.
+    Também retorna o estoque atual consolidado e o total nos lotes para comparação.
+    """
+    def _candidates(value):
+        vals = []
+        s = str(value)
+        if s.isdigit():
+            try:
+                vals.append(int(s))
+            except Exception:
+                pass
+        vals.append(s)
+        try:
+            vals.append(ObjectId(s))
+        except Exception:
+            pass
+        return vals
+
+    try:
+        db = extensions.mongo_db
+        movs = db['movimentacoes']
+        estoques = db['estoques']
+        lotes = db['lotes']
+
+        pid_candidates = _candidates(produto_id)
+        sid_candidates = _candidates(setor_id)
+
+        # Entradas históricas no setor
+        inbound_query = {
+            'produto_id': {'$in': pid_candidates},
+            'destino_tipo': 'setor',
+            'destino_id': {'$in': sid_candidates}
+        }
+        inbound_total = 0.0
+        for m in movs.find(inbound_query):
+            qtd = float(m.get('quantidade') or 0)
+            inbound_total += qtd
+
+        # Saídas históricas do setor
+        outbound_query = {
+            'produto_id': {'$in': pid_candidates},
+            'origem_tipo': 'setor',
+            'origem_id': {'$in': sid_candidates}
+        }
+        outbound_total = 0.0
+        for m in movs.find(outbound_query):
+            qtd = float(m.get('quantidade') or 0)
+            outbound_total += qtd
+
+        saldo_movimentos = inbound_total - outbound_total
+
+        # Estoque consolidado atual
+        estoque_doc = estoques.find_one({'produto_id': {'$in': pid_candidates}, 'local_tipo': 'setor', 'local_id': {'$in': sid_candidates}})
+        if not estoque_doc:
+            estoque_doc = estoques.find_one({'produto_id': {'$in': pid_candidates}, 'setor_id': {'$in': sid_candidates}})
+        estoque_qtd = float((estoque_doc or {}).get('quantidade', (estoque_doc or {}).get('quantidade_atual', 0)) or 0)
+        estoque_disp = float((estoque_doc or {}).get('quantidade_disponivel', estoque_qtd) or estoque_qtd)
+
+        # Total em lotes no setor
+        lotes_total = 0.0
+        try:
+            for l in lotes.find({'produto_id': {'$in': pid_candidates}, 'local_tipo': 'setor', 'local_id': {'$in': sid_candidates}}):
+                lotes_total += float(l.get('quantidade_atual') or 0)
+        except Exception:
+            pass
+
+        return jsonify({
+            'inbound_total': inbound_total,
+            'outbound_total': outbound_total,
+            'saldo_movimentos': saldo_movimentos,
+            'estoque_atual': estoque_qtd,
+            'estoque_disponivel': estoque_disp,
+            'lotes_total': lotes_total,
+            'divergencia_movimentos_estoque': saldo_movimentos - estoque_qtd
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha ao computar saldo: {e}'}), 500
 
 @main_bp.route('/api/estoque/hierarquia')
 @require_any_level
@@ -3483,6 +3976,77 @@ def api_movimentacoes_transferencia():
         }
         mov_ins = movimentacoes.insert_one(mov_doc)
 
+        # criar registro diário automático quando destino for setor
+        try:
+            if str(destino_tipo).lower() == 'setor':
+                registros = db['setor_registros']
+                registros.insert_one({
+                    'produto_id': pid_out,
+                    'setor_id': destino_id_out,
+                    'data_registro': now,
+                    'quantidade_recebida': quantidade,
+                    'saida_dia': 0,
+                    'quantidade_atual': float(dest_res.get('quantidade', 0)),
+                    'data_vencimento': None,
+                    'observacoes': (data.get('observacoes') or ''),
+                    'usuario': getattr(current_user, 'username', None),
+                    'created_at': now,
+                    'updated_at': now
+                })
+        except Exception:
+            # Não bloquear operação principal por falha no registro automático
+            pass
+
+        # Alocar lotes do almoxarifado para o setor (FIFO por vencimento)
+        try:
+            if str(destino_tipo).lower() == 'setor' and str(origem_tipo).lower() == 'almoxarifado':
+                lotes = db['lotes']
+                qtd_remanescente = float(quantidade)
+                # buscar lotes no almoxarifado origem ordenados por vencimento
+                cursor = lotes.find({'produto_id': pid_out, 'almoxarifado_id': origem_id_out}).sort('data_vencimento', 1)
+                for l in cursor:
+                    if qtd_remanescente <= 0:
+                        break
+                    disponivel_lote = float(l.get('quantidade_atual', 0) or 0)
+                    if disponivel_lote <= 0:
+                        continue
+                    alocar = min(qtd_remanescente, disponivel_lote)
+                    if alocar <= 0:
+                        continue
+                    # debitar do lote origem
+                    lotes.find_one_and_update({'_id': l.get('_id')}, {'$inc': {'quantidade_atual': -alocar}, '$set': {'updated_at': now}})
+                    # creditar no lote destino (setor) mantendo número e datas
+                    lote_num = l.get('lote') or l.get('numero_lote')
+                    dest_lote_filter = {
+                        'produto_id': pid_out,
+                        'lote': lote_num,
+                        'local_tipo': 'setor',
+                        'local_id': destino_id_out
+                    }
+                    dest_lote_update = {
+                        '$inc': {
+                            'quantidade_atual': alocar
+                        },
+                        '$set': {
+                            'produto_id': pid_out,
+                            'lote': lote_num,
+                            'local_tipo': 'setor',
+                            'local_id': destino_id_out,
+                            'data_fabricacao': l.get('data_fabricacao'),
+                            'data_vencimento': l.get('data_vencimento'),
+                            'updated_at': now
+                        },
+                        '$setOnInsert': {
+                            'created_at': now
+                        }
+                    }
+                    lotes.find_one_and_update(dest_lote_filter, dest_lote_update, upsert=True)
+                    qtd_remanescente -= alocar
+                # Se sobrou quantidade sem lote identificado, não criar lote "sem número"; apenas manter estoque
+        except Exception:
+            # Qualquer erro na etapa de lotes não deve impedir a transferência
+            pass
+
         return jsonify({
             'success': True,
             'movimentacao_id': str(mov_ins.inserted_id),
@@ -3661,6 +4225,7 @@ def api_movimentacoes_saida():
                     'produto_id': pid_out,
                     'local_tipo': 'setor',
                     'local_id': setor_id_out,
+                    'setor_id': setor_id_out,
                     'nome_local': setor_nome,
                     'updated_at': now
                 },
@@ -3668,7 +4233,7 @@ def api_movimentacoes_saida():
                     'created_at': now
                 }
             }
-            estoques.find_one_and_update(
+            dest_res = estoques.find_one_and_update(
                 dest_filter,
                 dest_update,
                 return_document=ReturnDocument.AFTER,
@@ -3694,6 +4259,74 @@ def api_movimentacoes_saida():
             }
             movimentacoes.insert_one(mov_doc)
             movimentos_criados += 1
+
+            # criar registro diário automático para cada setor destino
+            try:
+                registros = db['setor_registros']
+                registros.insert_one({
+                    'produto_id': pid_out,
+                    'setor_id': setor_id_out,
+                    'data_registro': now,
+                    'quantidade_recebida': quantidade_por_setor,
+                    'saida_dia': 0,
+                    'quantidade_atual': float((dest_res or {}).get('quantidade', 0)),
+                    'data_vencimento': None,
+                    'observacoes': (data.get('observacoes') or ''),
+                    'usuario': getattr(current_user, 'username', None),
+                    'created_at': now,
+                    'updated_at': now
+                })
+            except Exception:
+                # Não bloquear operação principal por falha no registro automático
+                pass
+
+            # Alocar lotes do almoxarifado origem para o setor destino (FIFO)
+            try:
+                if str(origem_tipo).lower() == 'almoxarifado':
+                    lotes = db['lotes']
+                    qtd_rem = float(quantidade_por_setor)
+                    cursor = lotes.find({'produto_id': pid_out, 'almoxarifado_id': origem_id_out}).sort('data_vencimento', 1)
+                    for l in cursor:
+                        if qtd_rem <= 0:
+                            break
+                        disp_lote = float(l.get('quantidade_atual', 0) or 0)
+                        if disp_lote <= 0:
+                            continue
+                        alocar = min(qtd_rem, disp_lote)
+                        if alocar <= 0:
+                            continue
+                        # debita do lote na origem
+                        lotes.find_one_and_update({'_id': l.get('_id')}, {'$inc': {'quantidade_atual': -alocar}, '$set': {'updated_at': now}})
+                        # credita no lote do setor
+                        lote_num = l.get('lote') or l.get('numero_lote')
+                        dest_lote_filter = {
+                            'produto_id': pid_out,
+                            'lote': lote_num,
+                            'local_tipo': 'setor',
+                            'local_id': setor_id_out
+                        }
+                        dest_lote_update = {
+                            '$inc': {
+                                'quantidade_atual': alocar
+                            },
+                            '$set': {
+                                'produto_id': pid_out,
+                                'lote': lote_num,
+                                'local_tipo': 'setor',
+                                'local_id': setor_id_out,
+                                'data_fabricacao': l.get('data_fabricacao'),
+                                'data_vencimento': l.get('data_vencimento'),
+                                'updated_at': now
+                            },
+                            '$setOnInsert': {
+                                'created_at': now
+                            }
+                        }
+                        lotes.find_one_and_update(dest_lote_filter, dest_lote_update, upsert=True)
+                        qtd_rem -= alocar
+            except Exception:
+                # Não bloquear por erro de lote; estoque já foi atualizado e movimentos registrados
+                pass
 
         return jsonify({
             'success': True,
