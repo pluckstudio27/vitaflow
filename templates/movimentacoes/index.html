@@ -523,16 +523,37 @@ function carregarLocaisOrigem() {
 
             // Com produto: intersectar com locais que têm estoque (ignorar estoque.tipo para evitar vazamento de sub-almoxarifados)
             const estoqueData = await fetchJson(`/api/produtos/${produtoId}/estoque`);
-            const idsComEstoque = (Array.isArray(estoqueData.estoques) ? estoqueData.estoques : [])
-                .filter(e => e && e.quantidade_disponivel > 0)
-                .map(e => String(e.local_id));
+            const estoques = Array.isArray(estoqueData.estoques) ? estoqueData.estoques : [];
+            const normalizeTipo = (t) => String(t || '').toLowerCase().replace(/[-]/g, '_');
+            const tipoSel = normalizeTipo(tipo);
+            const tipoMatch = (t) => {
+                const nt = normalizeTipo(t);
+                if (tipoSel === 'sub_almoxarifado') return nt === 'sub_almoxarifado' || nt === 'subalmoxarifado';
+                return nt === tipoSel; // 'almoxarifado', 'setor', 'central'
+            };
+            const estoquePorId = {};
+            const nomeLocalPorId = {};
 
-            const locaisFiltrados = (locaisPermitidos || []).filter(l => idsComEstoque.includes(String(l.id)));
+            estoques.filter(e => e && tipoMatch(e.tipo)).forEach(e => {
+                const id = String(e.local_id);
+                if (e.nome_local) {
+                    nomeLocalPorId[id] = e.nome_local;
+                }
+                if (typeof e.quantidade_disponivel === 'number' && e.quantidade_disponivel > 0) {
+                    estoquePorId[id] = e.quantidade_disponivel;
+                }
+            });
+
+            const locaisFiltrados = (locaisPermitidos || []).filter(l => estoquePorId[String(l.id)] > 0);
 
             if (!locaisFiltrados || locaisFiltrados.length === 0) {
                 select.innerHTML = '<option value="">Nenhum local com estoque disponível na central do produto</option>';
             } else {
-                const options = locaisFiltrados.map(local => `<option value="${local.id}">${local.nome}</option>`).join('');
+                const options = locaisFiltrados.map(local => {
+                    const id = String(local.id);
+                    const qtd = estoquePorId[id] || 0;
+                    return `<option value="${local.id}">${local.nome} (Disponível: ${qtd})</option>`;
+                }).join('');
                 select.innerHTML = '<option value="">Selecione...</option>' + options;
             }
         })
@@ -745,9 +766,46 @@ function carregarLocaisDestino() {
             if (locais.length === 0) {
                 select.innerHTML = '<option value="">Nenhum local disponível para este produto</option>';
             } else {
+                // Anexar quantidade atual do produto no destino, quando disponível
+                let estoquePorId = {};
+                try {
+                    const estoqueData = await fetchJson(`/api/produtos/${produtoId}/estoque`);
+                    const normalizeTipo = (t) => String(t || '').toLowerCase().replace(/[-]/g, '_');
+                    const tipoSel = normalizeTipo(tipo);
+                    const tipoMatch = (t) => {
+                        const nt = normalizeTipo(t);
+                        if (tipoSel === 'sub_almoxarifado') return nt === 'sub_almoxarifado' || nt === 'subalmoxarifado';
+                        return nt === tipoSel;
+                    };
+                    (Array.isArray(estoqueData.estoques) ? estoqueData.estoques : [])
+                        .filter(e => e && tipoMatch(e.tipo))
+                        .forEach(e => {
+                            estoquePorId[String(e.local_id)] = e.quantidade_disponivel;
+                        });
+                } catch (err) {
+                    console.error('Erro ao carregar estoque do destino:', err);
+                }
+
+                // UI: não permitir transferir para o mesmo Sub‑Almoxarifado
+                if (String(tipo) === 'sub_almoxarifado' && String(tipoOrigem) === 'sub_almoxarifado' && localOrigem) {
+                    locais = locais.filter(local => String(local.id) !== String(localOrigem));
+                }
+
+                // Remover duplicidades por id (se houver)
+                const uniqById = new Map();
+                locais.forEach(local => {
+                    const key = String(local.id);
+                    if (!uniqById.has(key)) uniqById.set(key, local);
+                });
+                locais = Array.from(uniqById.values());
+
                 const options = locais
                     .filter(local => local.id !== undefined && local.id !== null && local.id !== 'undefined')
-                    .map(local => `<option value="${local.id}">${local.nome}</option>`) // não forçar parseInt para suportar ObjectId
+                    .map(local => {
+                        const qtd = estoquePorId[String(local.id)];
+                        const qtyText = (typeof qtd === 'number') ? ` (Atual: ${qtd})` : '';
+                        return `<option value="${local.id}">${local.nome}${qtyText}</option>`;
+                    }) // não forçar parseInt para suportar ObjectId
                     .join('');
                 
                 select.innerHTML = '<option value="">Selecione...</option>' + options;
@@ -828,7 +886,7 @@ function renderSetoresDistribuicao(setores) {
     }
     const html = setores.map(s => `
         <div class="form-check">
-            <input class="form-check-input" type="checkbox" value="${s.id}" id="setor${s.id}">
+            <input class="form-check-input" type="radio" name="setorDestino" value="${s.id}" id="setor${s.id}">
             <label class="form-check-label" for="setor${s.id}">${s.nome}</label>
         </div>
     `).join('');
@@ -1168,11 +1226,9 @@ function executarDistribuicao() {
     const motivo = document.getElementById('motivoDistribuicao').value;
     const observacoes = document.getElementById('observacoesDistribuicao').value;
     
-    // Coletar setores selecionados
-    const setoresSelecionados = [];
-    document.querySelectorAll('#setoresDistribuicao input[type="checkbox"]:checked').forEach(checkbox => {
-        setoresSelecionados.push(USE_MONGO ? String(checkbox.value) : parseInt(checkbox.value));
-    });
+    // Coletar setor selecionado (seleção única)
+    const radioSel = document.querySelector('#setoresDistribuicao input[type="radio"]:checked');
+    const setoresSelecionados = radioSel ? [ (USE_MONGO ? String(radioSel.value) : parseInt(radioSel.value)) ] : [];
     
     // Validações
     if (!produtoId || !quantidade || !tipoOrigem || !localOrigem) {
@@ -1181,7 +1237,7 @@ function executarDistribuicao() {
     }
     
     if (setoresSelecionados.length === 0) {
-        alert('Selecione pelo menos um setor de destino');
+        alert('Selecione um setor de destino');
         return;
     }
     
@@ -1219,8 +1275,8 @@ function executarDistribuicao() {
         
         // Limpar formulário
         document.getElementById('distribuicaoForm').reset();
-        document.querySelectorAll('#setoresDistribuicao input[type="checkbox"]').forEach(checkbox => {
-            checkbox.checked = false;
+        document.querySelectorAll('#setoresDistribuicao input[type="radio"]').forEach(radio => {
+            radio.checked = false;
         });
         
         // Recarregar lista

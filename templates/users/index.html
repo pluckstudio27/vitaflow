@@ -272,9 +272,16 @@
                             <select class="form-select" id="user-setor" name="setor_id">
                                 <option value="">Selecione...</option>
                                 {% for setor in setores %}
-                                    <option value="{{ setor.id }}" data-sub-almoxarifado="{{ setor.sub_almoxarifado_id }}">{{ setor.nome }}</option>
+                                    <option value="{{ setor.id }}" data-sub-almoxarifado="{{ setor.sub_almoxarifado_id }}" data-almoxarifado="{{ setor.almoxarifado_id }}" data-central="{{ setor.central_id }}">{{ setor.nome }}</option>
                                 {% endfor %}
                             </select>
+                        </div>
+                        <!-- Observação para Operador Setor -->
+                        <div class="col-12" id="operador-setor-note" style="display: none;">
+                            <div class="alert alert-info py-2 px-3 mb-0">
+                                Observação: para o nível <strong>Operador Setor</strong>, não é necessário vincular um Sub‑Almoxarifado. 
+                                Selecione diretamente o <strong>Setor</strong>. Você pode usar <strong>Central</strong> e <strong>Almoxarifado</strong> para filtrar os setores disponíveis.
+                            </div>
                         </div>
                         
                         <div class="col-md-6" id="password-field">
@@ -420,6 +427,20 @@ function openUserModal(userId = null) {
     }
 
     updateHierarchyFields();
+    // Listeners de selects dependentes
+    const centralSelect = document.getElementById('user-central');
+    const almoxSelect = document.getElementById('user-almoxarifado');
+    if (centralSelect) centralSelect.addEventListener('change', onUserCentralChange);
+    if (almoxSelect) almoxSelect.addEventListener('change', onUserAlmoxChange);
+    // Quando o Sub-Almoxarifado mudar, atualizar a lista de Setores
+    const subSelect = document.getElementById('user-sub-almoxarifado');
+    if (subSelect) {
+        subSelect.removeEventListener('change', onUserAlmoxChange);
+        subSelect.addEventListener('change', onUserAlmoxChange);
+    }
+    // Aplicar filtros iniciais
+    onUserCentralChange();
+    onUserAlmoxChange();
     
     // Abrir o modal
     const modalInstance = new bootstrap.Modal(modal);
@@ -428,12 +449,14 @@ function openUserModal(userId = null) {
 
 function updateHierarchyFields() {
     const nivel = document.getElementById('user-nivel').value;
+    const operadorNote = document.getElementById('operador-setor-note');
     
     // Sempre esconder todos os campos inicialmente
     document.getElementById('central-field').style.display = 'none';
     document.getElementById('almoxarifado-field').style.display = 'none';
     document.getElementById('sub-almoxarifado-field').style.display = 'none';
     document.getElementById('setor-field').style.display = 'none';
+    if (operadorNote) operadorNote.style.display = 'none';
     
     // Se não for super admin, manter oculto e sair
     if (!IS_SUPER_ADMIN) {
@@ -459,7 +482,140 @@ function updateHierarchyFields() {
             document.getElementById('almoxarifado-field').style.display = 'block';
             document.getElementById('sub-almoxarifado-field').style.display = 'block';
             document.getElementById('setor-field').style.display = 'block';
+            if (operadorNote) operadorNote.style.display = 'block';
             break;
+    }
+}
+
+// Filtros dependentes: Central → Almoxarifado → Sub-Almoxarifado → Setor
+function onUserCentralChange() {
+    const centralSelect = document.getElementById('user-central');
+    const almoxSelect = document.getElementById('user-almoxarifado');
+    const subSelect = document.getElementById('user-sub-almoxarifado');
+    const setorSelect = document.getElementById('user-setor');
+
+    if (!centralSelect || !almoxSelect) return;
+
+    const centralId = centralSelect.value || '';
+
+    // Filtrar opções de almoxarifado pelo data-central com fallback de mapeamento
+    const applyFilter = (matchId) => {
+        const almoxOptions = almoxSelect.querySelectorAll('option');
+        let visibleCount = 0;
+        almoxOptions.forEach((opt, idx) => {
+            if (idx === 0) return; // manter primeira opção "Selecione..."
+            const optCentral = opt.getAttribute('data-central') || '';
+            if (!matchId) {
+                opt.style.display = ''; // sem central selecionada, mostrar todas
+            } else {
+                const show = (String(optCentral) === String(matchId));
+                opt.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
+            }
+        });
+        return visibleCount;
+    };
+
+    // 1) Tenta com o valor do select (ObjectId ou sequencial em alguns casos)
+    let visible = applyFilter(centralId);
+
+    // 2) Se nada visível, buscar id normalizado da central via API e refiltrar
+    const looksLikeOid = typeof centralId === 'string' && centralId.length === 24;
+    const looksLikeSeq = /^[0-9]+$/.test(String(centralId));
+    if (centralId && visible === 0 && (looksLikeOid || looksLikeSeq)) {
+        fetch(`/api/centrais/${encodeURIComponent(centralId)}`)
+            .then(r => r.ok ? r.json() : Promise.reject(new Error('Falha ao mapear central')))
+            .then(data => {
+                const mappedId = String(data.id || '');
+                visible = applyFilter(mappedId);
+                finalizeState();
+            })
+            .catch(() => {
+                finalizeState();
+            });
+    } else {
+        finalizeState();
+    }
+
+    function finalizeState() {
+    
+    // Resetar seleção se incompatível e controlar disabled
+    const selectedAlmox = almoxSelect.querySelector(`option[value="${almoxSelect.value}"]`);
+    if (selectedAlmox && selectedAlmox.style.display === 'none') {
+        almoxSelect.value = '';
+    }
+    almoxSelect.disabled = !centralId || visible === 0;
+
+    // Reset do Sub, mas o Setor deve usar fallback por Almox/Central
+    if (subSelect) {
+        subSelect.value = '';
+        const subOptions = subSelect.querySelectorAll('option');
+        subOptions.forEach((opt, idx) => { if (idx !== 0) opt.style.display = 'none'; });
+        subSelect.disabled = !almoxSelect.value;
+    }
+    if (setorSelect) {
+        onUserAlmoxChange();
+    }
+    }
+}
+
+function onUserAlmoxChange() {
+    const almoxSelect = document.getElementById('user-almoxarifado');
+    const subSelect = document.getElementById('user-sub-almoxarifado');
+    const setorSelect = document.getElementById('user-setor');
+    if (!almoxSelect || !subSelect) return;
+
+    const almoxId = almoxSelect.value || '';
+    const centralSelect = document.getElementById('user-central');
+    const centralId = centralSelect ? (centralSelect.value || '') : '';
+
+    // Filtrar sub-almoxarifados pelo data-almoxarifado
+    const subOptions = subSelect.querySelectorAll('option');
+    subOptions.forEach((opt, idx) => {
+        if (idx === 0) return;
+        const parentId = opt.getAttribute('data-almoxarifado') || '';
+        if (!almoxId) {
+            opt.style.display = 'none';
+        } else {
+            opt.style.display = (parentId === almoxId) ? '' : 'none';
+        }
+    });
+
+    // Resetar seleção e desabilitar se necessário
+    const selectedSub = subSelect.querySelector(`option[value="${subSelect.value}"]`);
+    if (selectedSub && selectedSub.style.display === 'none') {
+        subSelect.value = '';
+    }
+    subSelect.disabled = !almoxId;
+
+    // Cascade para setores
+    if (setorSelect) {
+        const subId = subSelect.value || '';
+        const setorOptions = setorSelect.querySelectorAll('option');
+        let visibleCount = 0;
+        setorOptions.forEach((opt, idx) => {
+            if (idx === 0) return;
+            const sid = opt.getAttribute('data-sub-almoxarifado') || '';
+            const aid = opt.getAttribute('data-almoxarifado') || '';
+            const cid = opt.getAttribute('data-central') || '';
+            let show = false;
+            if (subId) {
+                show = (sid === subId);
+            } else if (almoxId) {
+                show = (aid === almoxId);
+            } else if (centralId) {
+                show = (cid === centralId);
+            } else {
+                show = false;
+            }
+            opt.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        const selectedSetor = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+        if (selectedSetor && selectedSetor.style.display === 'none') {
+            setorSelect.value = '';
+        }
+        setorSelect.disabled = visibleCount === 0;
     }
 }
 
@@ -469,14 +625,7 @@ function editUser(userId) {
 }
 
 function loadUserData(userId) {
-    fetch(`/api/usuarios/${userId}`)
-        .then(response => {
-            if (response.ok) {
-                return response.json();
-            } else {
-                throw new Error('Erro na resposta do servidor');
-            }
-        })
+    fetchJson(`/api/usuarios/${userId}`)
         .then(user => {
             document.getElementById('user-id').value = user.id;
             document.getElementById('user-nome').value = user.nome_completo;
@@ -492,29 +641,25 @@ function loadUserData(userId) {
             if (user.setor_id) document.getElementById('user-setor').value = user.setor_id;
             
             updateHierarchyFields();
+            // Aplicar filtros iniciais conforme valores carregados
+            onUserCentralChange();
+            onUserAlmoxChange();
             
             // Carregar categorias específicas
             carregarCategoriasEspecificas();
         })
         .catch(error => {
             console.error('Erro ao carregar usuário:', error);
-            alert('Erro ao carregar dados do usuário');
+            alert(error.message || 'Erro ao carregar dados do usuário');
         });
 }
 
 function toggleUserStatus(userId) {
     if (confirm('Tem certeza que deseja alterar o status deste usuário?')) {
-        fetch(`/api/usuarios/${userId}/toggle-status`, {
+        fetchJson(`/api/usuarios/${userId}/toggle-status`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-            }
-        })
-        .then(response => {
-            if (response.ok) {
-                return response.json();
-            } else {
-                throw new Error('Erro na resposta do servidor');
             }
         })
         .then(data => {
@@ -523,7 +668,7 @@ function toggleUserStatus(userId) {
         })
         .catch(error => {
             console.error('Erro:', error);
-            alert('Erro ao alterar status do usuário');
+            alert(error.message || 'Erro ao alterar status do usuário');
         });
     }
 }
@@ -583,14 +728,10 @@ document.addEventListener('click', function(e) {
             alert('Nova senha é obrigatória');
             return;
         }
-        fetch(`/api/usuarios/${currentResetUserId}/reset-password`, {
+        fetchJson(`/api/usuarios/${currentResetUserId}/reset-password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nova_senha: novaSenha })
-        })
-        .then(response => {
-            if (response.ok) return response.json();
-            throw new Error('Erro na resposta do servidor');
         })
         .then(data => {
             alert(data.message || 'Senha resetada com sucesso!');
@@ -598,7 +739,7 @@ document.addEventListener('click', function(e) {
         })
         .catch(error => {
             console.error('Erro:', error);
-            alert('Erro ao resetar senha');
+            alert(error.message || 'Erro ao resetar senha');
         });
     }
 });
@@ -621,15 +762,8 @@ document.addEventListener('keydown', function(e) {
 
 function deleteUser(userId) {
     if (confirm('Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.')) {
-        fetch(`/api/usuarios/${userId}`, {
+        fetchJson(`/api/usuarios/${userId}`, {
             method: 'DELETE'
-        })
-        .then(response => {
-            if (response.ok) {
-                return response.json();
-            } else {
-                throw new Error('Erro na resposta do servidor');
-            }
         })
         .then(data => {
             alert(data.message || 'Usuário excluído com sucesso');
@@ -637,7 +771,7 @@ function deleteUser(userId) {
         })
         .catch(error => {
             console.error('Erro:', error);
-            alert('Erro ao excluir usuário');
+            alert(error.message || 'Erro ao excluir usuário');
         });
     }
 }
@@ -684,19 +818,12 @@ document.getElementById('userForm').addEventListener('submit', function(e) {
     const url = isEditMode ? `/api/usuarios/${data.id}` : '/api/usuarios';
     const method = isEditMode ? 'PUT' : 'POST';
     
-    fetch(url, {
+    fetchJson(url, {
         method: method,
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(apiData)
-    })
-    .then(response => {
-        if (response.ok) {
-            return response.json();
-        } else {
-            return response.json().then(err => Promise.reject(err));
-        }
     })
     .then(data => {
         // Se é criação de usuário e há categorias selecionadas, adicioná-las
@@ -709,7 +836,7 @@ document.getElementById('userForm').addEventListener('submit', function(e) {
     })
     .catch(error => {
         console.error('Erro:', error);
-        alert(error.error || 'Erro ao salvar usuário');
+        alert(error.error || error.message || 'Erro ao salvar usuário');
     });
 });
 
@@ -748,8 +875,7 @@ function carregarCategoriasEspecificas() {
         return;
     }
     
-    fetch(`/api/usuarios/${userId}/categorias-especificas`)
-        .then(response => response.json())
+    fetchJson(`/api/usuarios/${userId}/categorias-especificas`)
         .then(data => {
             const lista = document.getElementById('categorias-especificas-lista');
             lista.innerHTML = '';
@@ -779,14 +905,13 @@ function adicionarCategoriaEspecifica() {
     
     // Se é um usuário existente, usar API
     if (userId) {
-        fetch(`/api/usuarios/${userId}/categorias-especificas`, {
+        fetchJson(`/api/usuarios/${userId}/categorias-especificas`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ categoria_id: categoriaId })
         })
-        .then(response => response.json())
         .then(data => {
             if (data.error) {
                 alert(data.error);
@@ -876,10 +1001,9 @@ function removerCategoriaTemporaria(categoriaId, button) {
 function removerCategoriaEspecifica(categoriaId, button) {
     const userId = document.getElementById('user-id').value;
     
-    fetch(`/api/usuarios/${userId}/categorias-especificas/${categoriaId}`, {
+    fetchJson(`/api/usuarios/${userId}/categorias-especificas/${categoriaId}`, {
         method: 'DELETE'
     })
-    .then(response => response.json())
     .then(data => {
         if (data.error) {
             alert(data.error);
@@ -908,17 +1032,14 @@ function removerCategoriaEspecifica(categoriaId, button) {
 function adicionarCategoriasAposCreacao(userId) {
     // Adicionar cada categoria selecionada via API
     const promises = categoriasSelecionadas.map(categoria => {
-        return fetch(`/api/usuarios/${userId}/categorias-especificas`, {
+        return fetchJson(`/api/usuarios/${userId}/categorias-especificas`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ categoria_id: categoria.id })
-        }).then(response => {
-            if (!response.ok) {
-                throw new Error(`Erro ao adicionar categoria ${categoria.nome}`);
-            }
-            return response.json();
+        }).catch(err => {
+            throw new Error(`Erro ao adicionar categoria ${categoria.nome}: ${err.message || ''}`);
         });
     });
     
@@ -975,89 +1096,3 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 {% endblock %}
-
-// CSS para modal de reset de senha injetado via JS
-const resetPwdModalStyle = document.createElement('style');
-resetPwdModalStyle.textContent = `
-    .custom-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 2000; }
-    .custom-modal.show { display: flex; }
-    .custom-modal-content { background: #fff; border-radius: 8px; padding: 16px; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-`;
-document.head.appendChild(resetPwdModalStyle);
-
-// Criar modal de reset de senha via DOM
-const resetPasswordModal = document.createElement('div');
-resetPasswordModal.id = 'resetPasswordModal';
-resetPasswordModal.className = 'custom-modal';
-resetPasswordModal.innerHTML = `
-    <div class="custom-modal-content">
-        <h5 class="mb-2">Resetar senha do usuário</h5>
-        <div class="mb-2">
-            <input type="password" id="novaSenhaInput" class="form-control" placeholder="Nova senha" autocomplete="new-password">
-        </div>
-        <div class="d-flex gap-2 justify-content-end">
-            <button type="button" class="btn btn-secondary" id="cancelResetBtn">Cancelar</button>
-            <button type="button" class="btn btn-primary" id="confirmResetBtn">Confirmar</button>
-        </div>
-    </div>
-`;
-document.body.appendChild(resetPasswordModal);
-
-let currentResetUserId = null;
-function openResetPasswordModal(userId) {
-    currentResetUserId = userId;
-    const input = document.getElementById('novaSenhaInput');
-    if (input) input.value = '';
-    resetPasswordModal.classList.add('show');
-    setTimeout(() => input && input.focus(), 0);
-}
-function closeResetPasswordModal() {
-    resetPasswordModal.classList.remove('show');
-    currentResetUserId = null;
-}
-
-// Handlers do modal
-document.addEventListener('click', function(e) {
-    if (e.target && e.target.id === 'cancelResetBtn') {
-        closeResetPasswordModal();
-    } else if (e.target && e.target.id === 'confirmResetBtn') {
-        const novaSenha = (document.getElementById('novaSenhaInput').value || '').trim();
-        if (!novaSenha) {
-            alert('Nova senha é obrigatória');
-            return;
-        }
-        fetch(`/api/usuarios/${currentResetUserId}/reset-password`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nova_senha: novaSenha })
-        })
-        .then(response => {
-            if (response.ok) return response.json();
-            throw new Error('Erro na resposta do servidor');
-        })
-        .then(data => {
-            alert(data.message || 'Senha resetada com sucesso!');
-            closeResetPasswordModal();
-        })
-        .catch(error => {
-            console.error('Erro:', error);
-            alert('Erro ao resetar senha');
-        });
-    }
-});
-
-// Fechar ao clicar fora do conteúdo
-resetPasswordModal.addEventListener('click', function(e) {
-    if (e.target === resetPasswordModal) {
-        closeResetPasswordModal();
-    }
-});
-
-// Submit com Enter
-document.addEventListener('keydown', function(e) {
-    const isOpen = resetPasswordModal.classList.contains('show');
-    if (isOpen && e.key === 'Enter') {
-        const confirmBtn = document.getElementById('confirmResetBtn');
-        if (confirmBtn) confirmBtn.click();
-    }
-});

@@ -125,6 +125,9 @@
                                     </div>
                                 </div>
                             </div>
+                            <nav aria-label="Paginação do estoque">
+                                <ul id="paginationEstoque" class="pagination justify-content-center mt-3"></ul>
+                            </nav>
                         </div>
                     </div>
                 </div>
@@ -159,20 +162,35 @@
 <script>
 let dadosEstoque = [];
 let dadosFiltrados = [];
+let itemsPerPage = 20;
+let currentPage = 1;
 
-// Carregar dados iniciais
-function carregarDados() {
+// Carregar dados com paginação
+function carregarDados(page = 1) {
+    currentPage = page;
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: itemsPerPage,
+        produto: document.getElementById('filtroProduto').value,
+        tipo: document.getElementById('filtroTipo').value,
+        status: document.getElementById('filtroStatus').value,
+        local: document.getElementById('filtroLocal').value
+    });
+
     Promise.all([
-        fetch('/api/estoque/hierarquia').then(r => r.json()),
+        fetch(`/api/estoque/hierarquia?${params.toString()}`).then(r => r.json()),
         fetch('/api/hierarquia/locais').then(r => r.json())
     ])
-    .then(([estoque, locais]) => {
+    .then(([resp, locais]) => {
+        const estoque = Array.isArray(resp.items) ? resp.items : (Array.isArray(resp) ? resp : []);
+        const pagination = resp.pagination || { page: currentPage, pages: 1 };
         dadosEstoque = estoque;
         dadosFiltrados = [...dadosEstoque];
-        
+
         preencherFiltroLocais(locais);
         atualizarResumo();
         renderizarTabela();
+        renderizarPaginacao(pagination);
     })
     .catch(error => {
         console.error('Erro ao carregar dados:', error);
@@ -181,6 +199,7 @@ function carregarDados() {
                 <i class="fas fa-exclamation-triangle"></i> Erro ao carregar dados do estoque
             </div>
         `;
+        document.getElementById('paginationEstoque').innerHTML = '';
     });
 }
 
@@ -223,52 +242,8 @@ function preencherFiltroLocais(locais) {
 
 // Aplicar filtros
 function aplicarFiltros() {
-    const filtroProduto = document.getElementById('filtroProduto').value.toLowerCase();
-    const filtroTipo = document.getElementById('filtroTipo').value;
-    const filtroStatus = document.getElementById('filtroStatus').value;
-    const filtroLocal = document.getElementById('filtroLocal').value;
-    
-    dadosFiltrados = dadosEstoque.filter(item => {
-        // Filtro por produto
-        if (filtroProduto && 
-            !item.produto_nome.toLowerCase().includes(filtroProduto) &&
-            !item.produto_codigo.toLowerCase().includes(filtroProduto)) {
-            return false;
-        }
-        
-        // Filtro por tipo
-        if (filtroTipo && item.local_tipo?.toLowerCase() !== filtroTipo) {
-            return false;
-        }
-        
-        // Filtro por local
-        if (filtroLocal && item.local_id != filtroLocal) {
-            return false;
-        }
-        
-        // Filtro por status
-        if (filtroStatus) {
-            const quantidade = parseFloat(item.quantidade_disponivel || 0);
-            switch (filtroStatus) {
-                case 'disponivel':
-                    if (quantidade <= 0) return false;
-                    break;
-                case 'baixo':
-                    // Considerar baixo se menor que 10% do estoque inicial ou menor que 5 unidades
-                    const inicial = parseFloat(item.quantidade_inicial || 0);
-                    if (quantidade > Math.max(inicial * 0.1, 5)) return false;
-                    break;
-                case 'zerado':
-                    if (quantidade > 0) return false;
-                    break;
-            }
-        }
-        
-        return true;
-    });
-    
-    atualizarResumo();
-    renderizarTabela();
+    // Com paginação server-side: refaz a consulta no servidor
+    carregarDados(1);
 }
 
 // Atualizar resumo
@@ -516,7 +491,42 @@ function atualizarDados() {
         </div>
     `;
     
-    carregarDados();
+    carregarDados(currentPage);
+}
+
+// Renderizar paginação
+function renderizarPaginacao(pagination) {
+    const paginationEl = document.getElementById('paginationEstoque');
+    if (!pagination || !pagination.pages || pagination.pages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    html += `
+        <li class="page-item ${pagination.page <= 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="carregarDados(${Math.max(1, pagination.page - 1)})">Anterior</a>
+        </li>
+    `;
+
+    for (let i = 1; i <= pagination.pages; i++) {
+        if (i === pagination.page || i === 1 || i === pagination.pages || (i >= pagination.page - 2 && i <= pagination.page + 2)) {
+            html += `
+                <li class="page-item ${i === pagination.page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="carregarDados(${i})">${i}</a>
+                </li>
+            `;
+        } else if (i === pagination.page - 3 || i === pagination.page + 3) {
+            html += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+        }
+    }
+
+    html += `
+        <li class="page-item ${pagination.page >= pagination.pages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="carregarDados(${Math.min(pagination.pages, pagination.page + 1)})">Próxima</a>
+        </li>
+    `;
+    paginationEl.innerHTML = html;
 }
 
 // Exportar para Excel
@@ -533,7 +543,7 @@ function exportarExcel() {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
-    carregarDados();
+    carregarDados(1);
     
     // Busca em tempo real
     let timeoutBusca = null;

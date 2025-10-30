@@ -186,9 +186,9 @@ def configuracoes_usuarios():
 
         # Coletar listas auxiliares
         centrais_docs = list(db['centrais'].find({}, {'_id': 1, 'nome': 1}))
-        almox_docs = list(db['almoxarifados'].find({}, {'_id': 1, 'nome': 1, 'central_id': 1}))
-        sub_docs = list(db['sub_almoxarifados'].find({}, {'_id': 1, 'nome': 1, 'almoxarifado_id': 1}))
-        setores_docs = list(db['setores'].find({}, {'_id': 1, 'nome': 1}))
+        almox_docs = list(db['almoxarifados'].find({}, {'_id': 1, 'id': 1, 'nome': 1, 'central_id': 1}))
+        sub_docs = list(db['sub_almoxarifados'].find({}, {'_id': 1, 'nome': 1, 'almoxarifado_id': 1, 'id': 1}))
+        setores_docs = list(db['setores'].find({}, {'_id': 1, 'nome': 1, 'sub_almoxarifado_id': 1, 'sub_almoxarifado_ids': 1}))
         categorias_docs = list(db['categorias'].find({}, {'_id': 1, 'nome': 1, 'codigo': 1, 'cor': 1}))
 
         # Mapas para resolução rápida
@@ -271,8 +271,122 @@ def configuracoes_usuarios():
         # Listas para selects do modal
         centrais = [{'id': str(d['_id']), 'nome': d.get('nome')} for d in centrais_docs]
         almoxarifados = [{'id': str(d['_id']), 'nome': d.get('nome'), 'central_id': str(d.get('central_id')) if d.get('central_id') else None} for d in almox_docs]
-        sub_almoxarifados = [{'id': str(d['_id']), 'nome': d.get('nome'), 'almoxarifado_id': str(d.get('almoxarifado_id')) if d.get('almoxarifado_id') else None} for d in sub_docs]
-        setores = [{'id': str(d['_id']), 'nome': d.get('nome')} for d in setores_docs]
+
+        # Normalizar o almoxarifado_id dos Sub-Almoxarifados para comparar com o value dos <option> de Almoxarifado (sempre ObjectId em string)
+        almox_seq_to_oid = {}
+        for a in almox_docs:
+            if a.get('id') is not None:
+                try:
+                    almox_seq_to_oid[int(a.get('id'))] = str(a.get('_id'))
+                except Exception:
+                    pass
+
+        def _norm_almox_id(val):
+            if val is None:
+                return None
+            try:
+                from bson import ObjectId as _OID
+            except Exception:
+                _OID = None
+            if isinstance(val, int):
+                return almox_seq_to_oid.get(val) or str(val)
+            if _OID and isinstance(val, _OID):
+                return str(val)
+            if isinstance(val, str):
+                v = val.strip()
+                if v.isdigit():
+                    try:
+                        return almox_seq_to_oid.get(int(v)) or v
+                    except Exception:
+                        return v
+                if len(v) == 24:
+                    return v
+                return v
+            return str(val)
+
+        # Normalização de Sub-Almoxarifado para sempre retornar ObjectId em string
+        sub_seq_to_oid = {}
+        for s in sub_docs:
+            if s.get('id') is not None:
+                try:
+                    sub_seq_to_oid[int(s.get('id'))] = str(s.get('_id'))
+                except Exception:
+                    pass
+
+        def _norm_sub_id(val):
+            if val is None:
+                return None
+            try:
+                from bson import ObjectId as _OID
+            except Exception:
+                _OID = None
+            if isinstance(val, int):
+                return sub_seq_to_oid.get(val) or str(val)
+            if _OID and isinstance(val, _OID):
+                return str(val)
+            if isinstance(val, str):
+                v = val.strip()
+                if v.isdigit():
+                    try:
+                        return sub_seq_to_oid.get(int(v)) or v
+                    except Exception:
+                        return v
+                if len(v) == 24:
+                    return v
+                return v
+            if isinstance(val, (list, tuple)):
+                for el in val:
+                    nid = _norm_sub_id(el)
+                    if nid:
+                        return nid
+                return None
+            return str(val)
+
+        # Mapas auxiliares para derivar almoxarifado e central a partir do sub
+        sub_by_oid = {str(d['_id']): d for d in sub_docs}
+        almox_by_oid = {str(a['_id']): a for a in almox_docs}
+        central_seq_to_oid = {}
+        for c in centrais_docs:
+            if c.get('id') is not None:
+                try:
+                    central_seq_to_oid[int(c.get('id'))] = str(c.get('_id'))
+                except Exception:
+                    pass
+
+        def _norm_central_id(val):
+            if val is None:
+                return None
+            try:
+                from bson import ObjectId as _OID
+            except Exception:
+                _OID = None
+            if isinstance(val, int):
+                return central_seq_to_oid.get(val) or str(val)
+            if _OID and isinstance(val, _OID):
+                return str(val)
+            if isinstance(val, str):
+                v = val.strip()
+                if v.isdigit():
+                    try:
+                        return central_seq_to_oid.get(int(v)) or v
+                    except Exception:
+                        return v
+                if len(v) == 24:
+                    return v
+                return v
+            return str(val)
+
+        sub_almoxarifados = [{'id': str(d['_id']), 'nome': d.get('nome'), 'almoxarifado_id': _norm_almox_id(d.get('almoxarifado_id'))} for d in sub_docs]
+        setores = []
+        for d in setores_docs:
+            sid_norm = _norm_sub_id(d.get('sub_almoxarifado_id')) if d.get('sub_almoxarifado_id') is not None else _norm_sub_id(d.get('sub_almoxarifado_ids'))
+            sub_doc = sub_by_oid.get(sid_norm) if sid_norm else None
+            almox_raw = sub_doc.get('almoxarifado_id') if sub_doc else None
+            almox_norm = _norm_almox_id(almox_raw) if almox_raw is not None else None
+            almox_doc = almox_by_oid.get(almox_norm) if almox_norm else None
+            central_raw = almox_doc.get('central_id') if almox_doc else None
+            central_norm = _norm_central_id(central_raw) if central_raw is not None else None
+            setores.append({'id': str(d['_id']), 'nome': d.get('nome'), 'sub_almoxarifado_id': sid_norm, 'almoxarifado_id': almox_norm, 'central_id': central_norm})
         categorias = [{'id': str(d['_id']), 'nome': d.get('nome'), 'codigo': d.get('codigo'), 'cor': d.get('cor')} for d in categorias_docs]
 
         return render_template('users/index.html',
@@ -2326,6 +2440,12 @@ def api_estoque_hierarquia():
     Retorna uma lista de itens com os campos esperados pelo template estoque.html.
     """
     items = []
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 20))
+    filtro_produto = (request.args.get('produto') or '').strip()
+    filtro_tipo = (request.args.get('tipo') or '').strip().lower()
+    filtro_status = (request.args.get('status') or '').strip().lower()
+    filtro_local = (request.args.get('local') or '').strip()
 
     def _find_by_id(coll_name: str, value):
         """Resolve documento por id sequencial ou ObjectId string."""
@@ -2358,7 +2478,130 @@ def api_estoque_hierarquia():
 
     try:
         coll = extensions.mongo_db['estoques']
-        cursor = coll.find({})
+
+        # Montar filtros
+        and_filters = []
+
+        # Filtro por produto (id, ObjectId, nome/código)
+        if filtro_produto:
+            pid_candidates = []
+            if str(filtro_produto).isdigit():
+                pid_candidates.append(int(filtro_produto))
+            pid_candidates.append(filtro_produto)
+            try:
+                pid_candidates.append(ObjectId(filtro_produto))
+            except Exception:
+                pass
+            try:
+                prod_coll = extensions.mongo_db['produtos']
+                regex = {'$regex': filtro_produto, '$options': 'i'}
+                for p in prod_coll.find({'$or': [{'nome': regex}, {'codigo': regex}]}, {'id': 1, '_id': 1}):
+                    if 'id' in p:
+                        pid_candidates.append(p['id'])
+                    if p.get('_id') is not None:
+                        pid_candidates.append(p['_id'])
+            except Exception:
+                pass
+            or_pid = []
+            for c in pid_candidates:
+                or_pid.append({'produto_id': c})
+                try:
+                    if isinstance(c, ObjectId):
+                        or_pid.append({'produto_id': str(c)})
+                except Exception:
+                    pass
+            if or_pid:
+                and_filters.append({'$or': or_pid})
+
+        # Filtro por tipo (local)
+        if filtro_tipo:
+            tipo_or = []
+            if filtro_tipo == 'central':
+                tipo_or = [{'central_id': {'$ne': None}}, {'local_tipo': 'central'}]
+            elif filtro_tipo == 'almoxarifado':
+                tipo_or = [{'almoxarifado_id': {'$ne': None}}, {'local_tipo': 'almoxarifado'}]
+            elif filtro_tipo == 'subalmoxarifado':
+                tipo_or = [{'sub_almoxarifado_id': {'$ne': None}}, {'local_tipo': 'subalmoxarifado'}]
+            elif filtro_tipo == 'setor':
+                tipo_or = [{'setor_id': {'$ne': None}}, {'local_tipo': 'setor'}]
+            if tipo_or:
+                and_filters.append({'$or': tipo_or})
+
+        # Filtro por local
+        if filtro_local:
+            local_candidates = []
+            if str(filtro_local).isdigit():
+                local_candidates.append(int(filtro_local))
+            local_candidates.append(filtro_local)
+            try:
+                local_candidates.append(ObjectId(filtro_local))
+            except Exception:
+                pass
+            or_local = []
+            for c in local_candidates:
+                or_local.extend([
+                    {'local_id': c},
+                    {'almoxarifado_id': c},
+                    {'sub_almoxarifado_id': c},
+                    {'setor_id': c},
+                    {'central_id': c}
+                ])
+                try:
+                    if isinstance(c, ObjectId):
+                        or_local.extend([
+                            {'local_id': str(c)},
+                            {'almoxarifado_id': str(c)},
+                            {'sub_almoxarifado_id': str(c)},
+                            {'setor_id': str(c)},
+                            {'central_id': str(c)}
+                        ])
+                except Exception:
+                    pass
+            if or_local:
+                and_filters.append({'$or': or_local})
+
+        # Filtro por status
+        if filtro_status:
+            qd_disp = {
+                '$ifNull': [
+                    '$quantidade_disponivel',
+                    {'$subtract': [
+                        {'$ifNull': ['$quantidade', 0]},
+                        {'$ifNull': ['$quantidade_reservada', 0]}
+                    ]}
+                ]
+            }
+            inicial_expr = {
+                '$ifNull': [
+                    '$quantidade_inicial',
+                    {'$ifNull': ['$quantidade', 0]}
+                ]
+            }
+            if filtro_status == 'disponivel':
+                and_filters.append({'$expr': {'$gt': [qd_disp, 0]}})
+            elif filtro_status == 'zerado':
+                and_filters.append({'$expr': {'$lte': [qd_disp, 0]}})
+            elif filtro_status == 'baixo':
+                and_filters.append({
+                    '$expr': {
+                        '$lte': [
+                            qd_disp,
+                            {'$max': [
+                                {'$multiply': [inicial_expr, 0.1]},
+                                5
+                            ]}
+                        ]
+                    }
+                })
+
+        filter_query = {'$and': and_filters} if and_filters else {}
+
+        total = coll.count_documents(filter_query)
+        pages = max(1, (total + per_page - 1) // per_page)
+        page = max(1, min(page, pages))
+        skip = max(0, (page - 1) * per_page)
+
+        cursor = coll.find(filter_query).sort('updated_at', -1).skip(skip).limit(per_page)
         for s in cursor:
             # Produto
             raw_pid = s.get('produto_id')
@@ -2440,7 +2683,17 @@ def api_estoque_hierarquia():
         # Em caso de erro, devolve lista vazia para não quebrar a página
         pass
 
-    return jsonify(items)
+    return jsonify({
+        'items': items,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': pages,
+            'has_prev': page > 1,
+            'has_next': page < pages
+        }
+    })
 
 @main_bp.route('/api/hierarquia/locais')
 @require_any_level
