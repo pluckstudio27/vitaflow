@@ -166,16 +166,21 @@ async function carregarDemandas() {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda encontrada.</div>';
             return;
         }
-        const rows = data.items.map(d => `
+        const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+        const rows = data.items.map(d => {
+            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
+            const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
+            return `
             <tr>
-                <td>${htmlEscape(d.id)}</td>
+                <td>${htmlEscape(d.display_id || d.id)}</td>
                 <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
-                <td class="text-end">${Number(d.quantidade_solicitada || 0).toFixed(2)}</td>
+                <td class="text-end">${qtdStr}${unidade}</td>
                 <td>${htmlEscape(d.destino_tipo || '')}</td>
                 <td><span class="badge bg-${d.status==='aprovado'?'success':d.status==='negado'?'danger':d.status==='atendido'?'primary':'secondary'}">${htmlEscape(d.status || '')}</span></td>
                 <td>${htmlEscape(d.created_at || '')}</td>
             </tr>
-        `).join('');
+            `;
+        }).join('');
         el.innerHTML = `
             <div class="table-responsive">
                 <table class="table table-sm table-striped">

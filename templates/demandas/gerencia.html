@@ -142,14 +142,17 @@ async function carregarDemandasGerencia() {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda pendente.</div>';
             return;
         }
+        const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
         const rows = data.items.map(d => {
             const dataAttr = encodeURIComponent(JSON.stringify(d));
+            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
+            const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
             return `
             <tr>
-                <td>${htmlEscape(d.id)}</td>
+                <td>${htmlEscape(d.display_id || d.id)}</td>
                 <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
                 <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
-                <td class="text-end">${Number(d.quantidade_solicitada || 0).toFixed(2)}</td>
+                <td class="text-end">${qtdStr}${unidade}</td>
                 <td>${htmlEscape(d.destino_tipo || '')}</td>
                 <td>
                     <div class="btn-group btn-group-sm" role="group">
@@ -206,15 +209,18 @@ async function carregarDemandasResolvidas() {
             try { return v ? Date.parse(v) : 0; } catch (_) { return 0; }
         };
         items.sort((a, b) => (parseDate(b.updated_at || b.created_at) - parseDate(a.updated_at || a.created_at)));
+        const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
         const rows = items.map(d => {
             const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : 'secondary');
             const when = htmlEscape(d.updated_at || d.created_at || '');
+            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
+            const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
             return `
             <tr>
-                <td>${htmlEscape(d.id)}</td>
+                <td>${htmlEscape(d.display_id || d.id)}</td>
                 <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
                 <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
-                <td class="text-end">${Number(d.quantidade_solicitada || 0).toFixed(2)}</td>
+                <td class="text-end">${qtdStr}${unidade}</td>
                 <td>${htmlEscape(d.destino_tipo || '')}</td>
                 <td><span class="badge bg-${badgeClass}">${htmlEscape(d.status || '')}</span></td>
                 <td class="text-muted">${when}</td>

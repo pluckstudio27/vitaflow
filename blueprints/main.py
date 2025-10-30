@@ -333,6 +333,8 @@ def api_setor_registro():
                 'destino_tipo': 'setor',
                 'destino_id': sid_out,
                 'destino_nome': 'Setor',
+                'usuario_responsavel': getattr(current_user, 'username', None),
+                'usuario_nome': getattr(current_user, 'nome_completo', None),
                 'observacoes': observacoes,
                 'created_at': now,
                 'updated_at': now
@@ -348,6 +350,8 @@ def api_setor_registro():
                 'origem_nome': 'Setor',
                 'destino_tipo': 'consumo',
                 'destino_nome': 'Consumo no setor',
+                'usuario_responsavel': getattr(current_user, 'username', None),
+                'usuario_nome': getattr(current_user, 'nome_completo', None),
                 'observacoes': observacoes,
                 'created_at': now,
                 'updated_at': now
@@ -3780,6 +3784,10 @@ def api_movimentacoes():
         except Exception:
             usuarios_coll = None
 
+        # Priorizar nome já resolvido no documento, se presente
+        if mov_doc.get('usuario_nome'):
+            return mov_doc.get('usuario_nome')
+
         if usuarios_coll is None:
             return (mov_doc.get('usuario_nome')
                     or mov_doc.get('usuario_responsavel')
@@ -4579,6 +4587,7 @@ def api_movimentacoes_saida():
                 'destino_id': setor_id_out,
                 'destino_nome': setor_nome,
                 'usuario_responsavel': getattr(current_user, 'username', None),
+                'usuario_nome': getattr(current_user, 'nome_completo', None),
                 'motivo': data.get('motivo'),
                 'observacoes': data.get('observacoes'),
                 'created_at': now
@@ -4782,7 +4791,12 @@ def api_demandas_create():
             return jsonify({'error': 'Setor inválido'}), 400
 
         now = datetime.utcnow()
+        # Gerar id sequencial amigável para futuras referências humanas
+        last_cursor = demandas.find({'id': {'$exists': True}}).sort('id', -1).limit(1)
+        last_doc = next(last_cursor, None)
+        next_id = (last_doc['id'] + 1) if (last_doc and isinstance(last_doc.get('id'), int)) else 1
         doc = {
+            'id': next_id,
             'produto_id': prod_doc.get('id') if prod_doc.get('id') is not None else str(prod_doc.get('_id')),
             'setor_id': setor_id,
             'sub_almoxarifado_id': sub_id,
@@ -4883,6 +4897,7 @@ def api_demandas_list():
         for d in cursor:
             # Resolver nome do produto
             pname = None
+            punidade = None
             try:
                 pid = d.get('produto_id')
                 pdoc = None
@@ -4894,8 +4909,29 @@ def api_demandas_list():
                     pdoc = produtos.find_one({'_id': pid}) or produtos.find_one({'id': pid})
                 if pdoc:
                     pname = pdoc.get('nome') or pdoc.get('descricao')
+                    punidade = pdoc.get('unidade_medida')
             except Exception:
                 pass
+
+            # Construir ID amigável para exibição
+            display_id = None
+            try:
+                seq_id = d.get('id') if isinstance(d.get('id'), int) else None
+                if seq_id is not None:
+                    display_id = f"DEM-{str(seq_id).zfill(5)}"
+                else:
+                    raw_oid = d.get('_id')
+                    oid_str = str(raw_oid) if raw_oid is not None else None
+                    # Incluir data (YYMMDD) do ObjectId + sufixo curto do hex
+                    try:
+                        gen = raw_oid.generation_time if raw_oid is not None else None
+                        date_part = gen.strftime('%y%m%d') if gen else ''
+                    except Exception:
+                        date_part = ''
+                    suffix = (oid_str[-4:].upper()) if oid_str else ''
+                    display_id = f"DEM-{date_part}-{suffix}".strip('-')
+            except Exception:
+                display_id = None
 
             # Resolver nome do setor
             sname = None
@@ -4917,6 +4953,7 @@ def api_demandas_list():
                 'id': str(d.get('_id')) if d.get('_id') is not None else d.get('id'),
                 'produto_id': d.get('produto_id'),
                 'produto_nome': pname,
+                'unidade_medida': punidade,
                 'setor_id': d.get('setor_id'),
                 'setor_nome': sname,
                 'quantidade_solicitada': float(d.get('quantidade_solicitada', 0) or 0),
@@ -4924,7 +4961,8 @@ def api_demandas_list():
                 'destino_tipo': d.get('destino_tipo'),
                 'observacoes': d.get('observacoes'),
                 'created_at': _isoformat_or_str(d.get('created_at')),
-                'updated_at': _isoformat_or_str(d.get('updated_at'))
+                'updated_at': _isoformat_or_str(d.get('updated_at')),
+                'display_id': display_id
             })
 
         pages = max(1, (total + per_page - 1) // per_page)
