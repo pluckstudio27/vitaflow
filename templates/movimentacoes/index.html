@@ -55,6 +55,11 @@
             <!-- Lista de Movimentações -->
             <div class="card">
                 <div class="card-body">
+                    <div class="d-flex justify-content-end mb-2">
+                        <button type="button" id="btnOrdenacaoMovs" class="btn btn-outline-secondary btn-sm" onclick="toggleOrdenacaoMovs()" title="Mostrar mais antigas primeiro">
+                            <i class="fas fa-sort-amount-down"></i> Mais recentes primeiro
+                        </button>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead class="table-light">
@@ -100,6 +105,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <div id="transferenciaMsg" class="alert alert-warning d-none" role="alert"></div>
                 <form id="transferenciaForm">
                     <div class="row">
                         <div class="col-md-6">
@@ -186,6 +192,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <div id="distribuicaoMsg" class="alert alert-warning d-none" role="alert"></div>
                 <form id="distribuicaoForm">
                     <div class="row">
                         <div class="col-md-6">
@@ -268,6 +275,7 @@
 <script>
 let currentPage = 1;
 const itemsPerPage = 20;
+let ordemMovimentacoes = 'desc'; // 'desc' = mais recentes primeiro (padrão), 'asc' = mais antigas primeiro
 
 // Carregar dados dos locais
 const centraisEl = document.getElementById('centrais-data');
@@ -300,7 +308,8 @@ function carregarMovimentacoes(page = 1) {
         data_inicio: document.getElementById('filtroDataInicio').value,
         data_fim: document.getElementById('filtroDataFim').value,
         page: page,
-        per_page: itemsPerPage
+        per_page: itemsPerPage,
+        ordem: ordemMovimentacoes
     };
     
     const params = new URLSearchParams();
@@ -330,6 +339,28 @@ function carregarMovimentacoes(page = 1) {
                 </tr>
             `;
         });
+}
+
+// Alternar ordenação das movimentações (mais recentes/mais antigas)
+function atualizarBotaoOrdenacao() {
+    const btn = document.getElementById('btnOrdenacaoMovs');
+    if (!btn) return;
+    if (ordemMovimentacoes === 'desc') {
+        btn.innerHTML = '<i class="fas fa-sort-amount-down"></i> Mais recentes primeiro';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-outline-secondary');
+        btn.title = 'Mostrar mais antigas primeiro';
+    } else {
+        btn.innerHTML = '<i class="fas fa-sort-amount-up"></i> Mais antigas primeiro';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-outline-primary');
+        btn.title = 'Mostrar mais recentes primeiro';
+    }
+}
+function toggleOrdenacaoMovs() {
+    ordemMovimentacoes = (ordemMovimentacoes === 'desc' ? 'asc' : 'desc');
+    atualizarBotaoOrdenacao();
+    carregarMovimentacoes(1);
 }
 
 // Renderizar movimentações na tabela
@@ -1101,37 +1132,81 @@ function executarTransferencia() {
     const localDestino = document.getElementById('localDestinoTransferencia').value;
     const motivo = document.getElementById('motivoTransferencia').value;
     const observacoes = document.getElementById('observacoesTransferencia').value;
+    const msgEl = document.getElementById('transferenciaMsg');
+    if (msgEl) { msgEl.classList.add('d-none'); msgEl.textContent = ''; }
     
     // Validações básicas
     if (!produtoId || !quantidade || !tipoOrigem || !localOrigem || !tipoDestino || !localDestino) {
-        alert('Preencha todos os campos obrigatórios');
+        if (msgEl) {
+            msgEl.textContent = 'Preencha todos os campos obrigatórios.';
+            msgEl.classList.remove('d-none');
+            msgEl.classList.remove('alert-danger');
+            msgEl.classList.add('alert-warning');
+        } else {
+            alert('Preencha todos os campos obrigatórios.');
+        }
         return;
     }
     
     if (USE_MONGO) {
         // Em Mongo, IDs são strings
         if (!localOrigem || typeof localOrigem !== 'string') {
-            alert('Por favor, selecione um local de origem válido.');
+            if (msgEl) {
+                msgEl.textContent = 'Por favor, selecione um local de origem válido.';
+                msgEl.classList.remove('d-none');
+                msgEl.classList.remove('alert-danger');
+                msgEl.classList.add('alert-warning');
+            } else {
+                alert('Por favor, selecione um local de origem válido.');
+            }
             return;
         }
         if (!localDestino || typeof localDestino !== 'string') {
-            alert('Por favor, selecione um local de destino válido.');
+            if (msgEl) {
+                msgEl.textContent = 'Por favor, selecione um local de destino válido.';
+                msgEl.classList.remove('d-none');
+                msgEl.classList.remove('alert-danger');
+                msgEl.classList.add('alert-warning');
+            } else {
+                alert('Por favor, selecione um local de destino válido.');
+            }
             return;
         }
     } else {
         // SQL: validar IDs numéricos
         if (!localOrigem || localOrigem === '' || localOrigem === 'undefined' || localOrigem === undefined || localOrigem === null || isNaN(parseInt(localOrigem)) || parseInt(localOrigem) <= 0) {
-            alert('Por favor, selecione um local de origem válido.');
+            if (msgEl) {
+                msgEl.textContent = 'Por favor, selecione um local de origem válido.';
+                msgEl.classList.remove('d-none');
+                msgEl.classList.remove('alert-danger');
+                msgEl.classList.add('alert-warning');
+            } else {
+                alert('Por favor, selecione um local de origem válido.');
+            }
             return;
         }
         if (!localDestino || localDestino === '' || localDestino === 'undefined' || localDestino === undefined || localDestino === null || isNaN(parseInt(localDestino)) || parseInt(localDestino) <= 0) {
-            alert('Por favor, selecione um local de destino válido.');
+            if (msgEl) {
+                msgEl.textContent = 'Por favor, selecione um local de destino válido.';
+                msgEl.classList.remove('d-none');
+                msgEl.classList.remove('alert-danger');
+                msgEl.classList.add('alert-warning');
+            } else {
+                alert('Por favor, selecione um local de destino válido.');
+            }
             return;
         }
     }
     
     if (parseFloat(quantidade) <= 0) {
-        alert('Quantidade deve ser maior que zero');
+        if (msgEl) {
+            msgEl.textContent = 'Quantidade deve ser maior que zero.';
+            msgEl.classList.remove('d-none');
+            msgEl.classList.remove('alert-danger');
+            msgEl.classList.add('alert-warning');
+        } else {
+            alert('Quantidade deve ser maior que zero.');
+        }
         return;
     }
     
@@ -1142,7 +1217,14 @@ function executarTransferencia() {
     
     // Validar se origem e destino são diferentes
     if (tipoOrigem === tipoDestino && origemId === destinoId) {
-        alert('Não é possível transferir de um local para ele mesmo. Por favor, selecione um local de destino diferente.');
+        if (msgEl) {
+            msgEl.textContent = 'Origem e destino não podem ser o mesmo local. Selecione um destino diferente.';
+            msgEl.classList.remove('d-none');
+            msgEl.classList.remove('alert-danger');
+            msgEl.classList.add('alert-warning');
+        } else {
+            alert('Origem e destino não podem ser o mesmo local. Selecione um destino diferente.');
+        }
         return;
     }
 
@@ -1171,7 +1253,14 @@ function executarTransferencia() {
     const centralOrigem = getCentralIdByLocal(tipoOrigem, origemId);
     const centralDestino = getCentralIdByLocal(tipoDestino, destinoId);
     if (centralOrigem && centralDestino && centralOrigem !== centralDestino) {
-        alert('Não é possível transferir entre locais de centrais diferentes.');
+        if (msgEl) {
+            msgEl.textContent = 'Não é possível transferir entre locais de centrais diferentes.';
+            msgEl.classList.remove('d-none');
+            msgEl.classList.remove('alert-danger');
+            msgEl.classList.add('alert-warning');
+        } else {
+            alert('Não é possível transferir entre locais de centrais diferentes.');
+        }
         return;
     }
 
@@ -1199,6 +1288,7 @@ function executarTransferencia() {
         body: JSON.stringify(dadosTransferencia)
     })
     .then(result => {
+        if (msgEl) { msgEl.classList.add('d-none'); msgEl.textContent = ''; }
         alert('Transferência executada com sucesso!');
         
         // Fechar modal
@@ -1213,7 +1303,14 @@ function executarTransferencia() {
     })
     .catch(error => {
         console.error('Erro:', error);
-        alert('Erro ao executar transferência: ' + error.message);
+        if (msgEl) {
+            msgEl.textContent = 'Erro ao executar transferência: ' + (error && error.message ? error.message : String(error));
+            msgEl.classList.remove('d-none');
+            msgEl.classList.remove('alert-warning');
+            msgEl.classList.add('alert-danger');
+        } else {
+            alert('Erro ao executar transferência: ' + error.message);
+        }
     });
 }
 
@@ -1225,6 +1322,8 @@ function executarDistribuicao() {
     const localOrigem = document.getElementById('localOrigemDistribuicao').value;
     const motivo = document.getElementById('motivoDistribuicao').value;
     const observacoes = document.getElementById('observacoesDistribuicao').value;
+    const msgElDist = document.getElementById('distribuicaoMsg');
+    if (msgElDist) { msgElDist.classList.add('d-none'); msgElDist.textContent = ''; }
     
     // Coletar setor selecionado (seleção única)
     const radioSel = document.querySelector('#setoresDistribuicao input[type="radio"]:checked');
@@ -1232,17 +1331,38 @@ function executarDistribuicao() {
     
     // Validações
     if (!produtoId || !quantidade || !tipoOrigem || !localOrigem) {
-        alert('Preencha todos os campos obrigatórios');
+        if (msgElDist) {
+            msgElDist.textContent = 'Preencha todos os campos obrigatórios.';
+            msgElDist.classList.remove('d-none');
+            msgElDist.classList.remove('alert-danger');
+            msgElDist.classList.add('alert-warning');
+        } else {
+            alert('Preencha todos os campos obrigatórios.');
+        }
         return;
     }
     
     if (setoresSelecionados.length === 0) {
-        alert('Selecione um setor de destino');
+        if (msgElDist) {
+            msgElDist.textContent = 'Selecione um setor de destino.';
+            msgElDist.classList.remove('d-none');
+            msgElDist.classList.remove('alert-danger');
+            msgElDist.classList.add('alert-warning');
+        } else {
+            alert('Selecione um setor de destino.');
+        }
         return;
     }
     
     if (parseFloat(quantidade) <= 0) {
-        alert('Quantidade deve ser maior que zero');
+        if (msgElDist) {
+            msgElDist.textContent = 'Quantidade deve ser maior que zero.';
+            msgElDist.classList.remove('d-none');
+            msgElDist.classList.remove('alert-danger');
+            msgElDist.classList.add('alert-warning');
+        } else {
+            alert('Quantidade deve ser maior que zero.');
+        }
         return;
     }
     
@@ -1267,6 +1387,7 @@ function executarDistribuicao() {
         body: JSON.stringify(dadosDistribuicao)
     })
     .then(result => {
+        if (msgElDist) { msgElDist.classList.add('d-none'); msgElDist.textContent = ''; }
         alert(`Saída executada com sucesso! ${result.movimentacoes_criadas} movimentações criadas.`);
         
         // Fechar modal
@@ -1284,8 +1405,42 @@ function executarDistribuicao() {
     })
     .catch(error => {
         console.error('Erro:', error);
-        alert('Erro ao executar saída: ' + error.message);
+        if (msgElDist) {
+            msgElDist.textContent = 'Erro ao executar saída: ' + (error && error.message ? error.message : String(error));
+            msgElDist.classList.remove('d-none');
+            msgElDist.classList.remove('alert-warning');
+            msgElDist.classList.add('alert-danger');
+        } else {
+            alert('Erro ao executar saída: ' + error.message);
+        }
     });
+}
+
+// Validação reativa: mostrar/ocultar alerta quando Origem/Destino forem iguais
+function atualizarMensagemTransferencia() {
+    const tipoOrigem = document.getElementById('tipoOrigemTransferencia').value;
+    const localOrigem = document.getElementById('localOrigemTransferencia').value;
+    const tipoDestino = document.getElementById('tipoDestinoTransferencia').value;
+    const localDestino = document.getElementById('localDestinoTransferencia').value;
+    const msgEl = document.getElementById('transferenciaMsg');
+    if (!msgEl) return;
+    // Se campos ainda não preenchidos, esconder alerta
+    if (!tipoOrigem || !localOrigem || !tipoDestino || !localDestino) {
+        msgEl.classList.add('d-none');
+        msgEl.textContent = '';
+        return;
+    }
+    const origemId = USE_MONGO ? String(localOrigem) : parseInt(localOrigem);
+    const destinoId = USE_MONGO ? String(localDestino) : parseInt(localDestino);
+    if (tipoOrigem === tipoDestino && origemId === destinoId) {
+        msgEl.textContent = 'Origem e destino não podem ser o mesmo local. Selecione um destino diferente.';
+        msgEl.classList.remove('d-none');
+        msgEl.classList.remove('alert-danger');
+        msgEl.classList.add('alert-warning');
+    } else {
+        msgEl.classList.add('d-none');
+        msgEl.textContent = '';
+    }
 }
 
 // Event listeners
@@ -1322,6 +1477,7 @@ function debounce(func, wait) {
 
 // Carregar dados iniciais
 document.addEventListener('DOMContentLoaded', () => {
+    atualizarBotaoOrdenacao();
     carregarMovimentacoes(1);
     carregarProdutos();
     // Limpa a lista de setores inicialmente
@@ -1351,6 +1507,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+    // Conectar validação reativa na modal de transferência
+    const tipoOrigemTransf = document.getElementById('tipoOrigemTransferencia');
+    const localOrigemTransf = document.getElementById('localOrigemTransferencia');
+    const tipoDestinoTransf = document.getElementById('tipoDestinoTransferencia');
+    const localDestinoTransf = document.getElementById('localDestinoTransferencia');
+    [tipoOrigemTransf, localOrigemTransf, tipoDestinoTransf, localDestinoTransf].forEach(el => {
+        if (el) {
+            el.addEventListener('change', atualizarMensagemTransferencia);
+        }
+    });
+    const modalTransf = document.getElementById('novaTransferenciaModal');
+    if (modalTransf) {
+        modalTransf.addEventListener('shown.bs.modal', atualizarMensagemTransferencia);
+    }
 });
 </script>
 {% endblock %}

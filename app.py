@@ -1,4 +1,5 @@
 from flask import Flask
+import os
 from config import Config
 from extensions import db, migrate, init_mongo
 from blueprints.main import main_bp
@@ -31,4 +32,4 @@ def create_app(config_class=Config):
 app = create_app()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='127.0.0.1', port=int(os.environ.get('PORT', 5000)))

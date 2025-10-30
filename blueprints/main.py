@@ -12,19 +12,44 @@ import extensions
 from pymongo import ReturnDocument
 from datetime import datetime
 from datetime import datetime, date, timedelta
+import os
+try:
+    from zoneinfo import ZoneInfo
+    APP_TZ_NAME = os.environ.get('APP_TIMEZONE', 'America/Sao_Paulo')
+    APP_TZ = ZoneInfo(APP_TZ_NAME)
+except Exception:
+    ZoneInfo = None
+    APP_TZ = None
 from bson import ObjectId
 
 main_bp = Blueprint('main', __name__)
 
-# Helper para serialização consistente de datas em ISO 8601 (sem timezone)
+# Helper para serialização consistente de datas em ISO 8601 com indicação de UTC quando aplicável
 def _isoformat_or_str(value):
-    """Serialize datetime to ISO 8601 string; normalize strings to ISO if possible."""
+    """Serializa datetime para ISO 8601; garante sufixo 'Z' para UTC.
+
+    - Datetimes sem tzinfo são tratados como UTC e recebem 'Z'.
+    - Strings ISO são normalizadas; 'Z' é preservado.
+    """
     try:
         if isinstance(value, datetime):
-            return value.isoformat()
+            s = value.isoformat()
+            # Datetime ingênuo: considerar UTC e anexar 'Z'
+            if value.tzinfo is None:
+                if s.endswith('+00:00'):
+                    return s[:-6] + 'Z'
+                # Sem tzinfo e sem offset: anexar 'Z'
+                return s + 'Z'
+            # tz-aware: se for UTC, normalizar para 'Z'
+            if s.endswith('+00:00'):
+                return s[:-6] + 'Z'
+            return s
         if isinstance(value, str) and value:
             try:
-                return datetime.fromisoformat(value).isoformat()
+                # Normalizar 'Z' para parsing, depois reserializar com _isoformat_or_str
+                s = value.strip()
+                dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                return _isoformat_or_str(dt)
             except Exception:
                 return value
     except Exception:
@@ -2957,9 +2982,13 @@ def api_produto_movimentacoes(produto_id):
             s = str(val).strip()
             # Tentar ISO
             try:
-                # Remover 'Z' se presente
-                s2 = s.replace('Z', '')
+                # Normalizar 'Z' para parsing e converter para UTC ingênuo
+                s2 = s.replace('Z', '+00:00')
                 dt = datetime.fromisoformat(s2)
+                if dt.tzinfo is None and APP_TZ:
+                    dt = dt.replace(tzinfo=APP_TZ)
+                if ZoneInfo:
+                    dt = dt.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
                 return dt
             except Exception:
                 pass
@@ -2981,12 +3010,24 @@ def api_produto_movimentacoes(produto_id):
                 if len(y) == 4 and len(d) <= 2 and len(m) <= 2:
                     # detectar se já está YYYY-MM-DD
                     if int(d) > 31:  # improvável, então trate como YYYY-MM-DD
-                        return datetime(int(d), int(m), int(y), hh, mm)
+                        dt_local = datetime(int(d), int(m), int(y), hh, mm)
+                        if APP_TZ and ZoneInfo:
+                            dt_local = dt_local.replace(tzinfo=APP_TZ)
+                            return dt_local.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                        return dt_local
                 # Se primeiro campo parecer ano (4 dígitos) e separador '-', considerar YYYY-MM-DD
                 if sep == '-' and len(d) == 4:
-                    return datetime(int(d), int(m), int(y), hh, mm)
+                    dt_local = datetime(int(d), int(m), int(y), hh, mm)
+                    if APP_TZ and ZoneInfo:
+                        dt_local = dt_local.replace(tzinfo=APP_TZ)
+                        return dt_local.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                    return dt_local
                 # Caso padrão: DD/MM/YYYY
-                return datetime(int(y), int(m), int(d), hh, mm)
+                dt_local = datetime(int(y), int(m), int(d), hh, mm)
+                if APP_TZ and ZoneInfo:
+                    dt_local = dt_local.replace(tzinfo=APP_TZ)
+                    return dt_local.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                return dt_local
             except Exception:
                 return None
 
@@ -3605,17 +3646,42 @@ def api_movimentacoes():
         else:
             query['$or'] = prod_match
 
-    # Filtro por data
+    # Filtro por data (converter para UTC ingênuo para compatibilidade com Mongo)
     date_range = {}
     def parse_date_str(s):
         try:
-            # aceitar formatos ISO e dd/mm/yyyy
-            if '-' in s:
-                return datetime.fromisoformat(s)
-            else:
-                # dd/mm/yyyy
-                d, m, y = s.split('/')
-                return datetime(int(y), int(m), int(d))
+            raw = (s or '').strip()
+            if not raw:
+                return None
+            # ISO: pode ter timezone. Normalizar para UTC ingênuo.
+            if '-' in raw and (':' in raw or 'T' in raw):
+                try:
+                    dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+                    # Se não houver tzinfo, assumir APP_TZ como horário local
+                    if dt.tzinfo is None and APP_TZ:
+                        dt = dt.replace(tzinfo=APP_TZ)
+                    # Converter para UTC e remover tzinfo para persistência/consulta
+                    dt_utc_naive = dt.astimezone(ZoneInfo('UTC')).replace(tzinfo=None) if ZoneInfo else dt
+                    return dt_utc_naive
+                except Exception:
+                    pass
+            # dd/mm/yyyy
+            if '/' in raw:
+                d, m, y = raw.split('/')
+                dt_local = datetime(int(y), int(m), int(d))
+                if APP_TZ and ZoneInfo:
+                    dt_local = dt_local.replace(tzinfo=APP_TZ)
+                    return dt_local.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                return dt_local
+            # yyyy-mm-dd
+            parts = raw.split('-')
+            if len(parts) == 3 and all(p.isdigit() for p in parts):
+                y, m, d = parts
+                dt_local = datetime(int(y), int(m), int(d))
+                if APP_TZ and ZoneInfo:
+                    dt_local = dt_local.replace(tzinfo=APP_TZ)
+                    return dt_local.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                return dt_local
         except Exception:
             return None
     if filtros['data_inicio']:
@@ -3625,9 +3691,16 @@ def api_movimentacoes():
     if filtros['data_fim']:
         df = parse_date_str(filtros['data_fim'])
         if df:
-            # incluir final do dia corretamente (23:59:59.999999)
+            # incluir final do dia corretamente (23:59:59.999999) considerando fuso
             try:
-                df = df.replace(hour=23, minute=59, second=59, microsecond=999999)
+                if APP_TZ and ZoneInfo:
+                    df_local = df
+                    # df pode já estar em UTC ingênuo; tornar local para aplicar fim do dia
+                    df_local = df_local.replace(tzinfo=ZoneInfo('UTC')).astimezone(APP_TZ)
+                    df_local = df_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    df = df_local.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                else:
+                    df = df.replace(hour=23, minute=59, second=59, microsecond=999999)
             except Exception:
                 pass
             date_range['$lte'] = df
@@ -3730,7 +3803,11 @@ def api_movimentacoes():
     per_page = max(1, min(per_page, 100))
     skip = max(0, (page - 1) * per_page)
 
-    cursor = coll.find(query or {}).sort('data_movimentacao', -1).skip(skip).limit(per_page)
+    # Ordenação: 'desc' (padrão) = mais recentes primeiro; 'asc' = mais antigas primeiro
+    raw_ordem = (request.args.get('ordem') or request.args.get('order') or 'desc').strip().lower()
+    sort_dir = -1 if raw_ordem != 'asc' else 1
+
+    cursor = coll.find(query or {}).sort('data_movimentacao', sort_dir).skip(skip).limit(per_page)
 
     # caches para resolução
     prod_cache = {}
@@ -4025,12 +4102,43 @@ def api_produto_recebimento(produto_id):
         # Datas
         now = datetime.utcnow()
         def _parse_date(value):
+            """Parsa string de data/ISO, assumindo horário local quando sem tz,
+            e converte para UTC ingênuo para persistência.
+            """
             if not value:
                 return None
             if isinstance(value, datetime):
+                # Se vier tz-aware, normalizar para UTC ingênuo
+                if value.tzinfo is not None and ZoneInfo:
+                    return value.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
                 return value
             try:
-                return datetime.fromisoformat(str(value))
+                s = str(value).strip()
+                dt = None
+                # ISO; preservar 'Z' como UTC
+                try:
+                    dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                except Exception:
+                    dt = None
+                if dt is None:
+                    # dd/mm/yyyy ou yyyy-mm-dd
+                    if '/' in s:
+                        d, m, y = s.split('/')
+                        dt = datetime(int(y), int(m), int(d))
+                    elif '-' in s:
+                        parts = s.split('-')
+                        if len(parts) == 3 and all(p.isdigit() for p in parts):
+                            y, m, d = parts
+                            dt = datetime(int(y), int(m), int(d))
+                if dt is None:
+                    return None
+                # Se não há tzinfo, assumir APP_TZ como local
+                if dt.tzinfo is None and APP_TZ and ZoneInfo:
+                    dt = dt.replace(tzinfo=APP_TZ)
+                    dt = dt.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                elif dt.tzinfo is not None and ZoneInfo:
+                    dt = dt.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                return dt
             except Exception:
                 return None
         data_recebimento = _parse_date(data.get('data_recebimento')) or now
