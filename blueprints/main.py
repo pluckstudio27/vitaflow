@@ -11,7 +11,7 @@ from auth import (require_any_level, require_manager_or_above, require_admin_or_
 from config.ui_blocks import get_ui_blocks_config
 import extensions
 from pymongo import ReturnDocument
-from datetime import datetime
+from datetime import datetime, timezone
 from datetime import timedelta
 from bson import ObjectId
 import csv
@@ -223,7 +223,20 @@ def produtos_cadastro():
 def produtos_detalhes(id):
     """Página de detalhes do produto (placeholder)"""
     produto = None
-    return render_template('produtos/detalhes.html', produto=produto)
+    try:
+        can_edit = bool(getattr(current_user, 'is_authenticated', False)) and (
+            getattr(current_user, 'nivel_acesso', None) in ['super_admin', 'admin_central']
+        )
+    except Exception:
+        can_edit = False
+    return render_template('produtos/detalhes.html', produto=produto, can_editar_entrada_lote=can_edit)
+
+@main_bp.route('/produtos')
+@main_bp.route('/produtos/')
+@require_any_level
+def produtos_index():
+    """Página de listagem de produtos"""
+    return render_template('produtos/index.html')
 
 @main_bp.route('/produtos/<string:id>/recebimento')
 @require_any_level
@@ -2080,10 +2093,10 @@ def api_setores():
     per_page = int(request.args.get('per_page', 20))
 
     coll = extensions.mongo_db['setores']
-    # Scope awareness
+    # Escopo: admin_central não possui restrição
     nivel = getattr(current_user, 'nivel_acesso', None)
     central_user = getattr(current_user, 'central_id', None)
-    enforce_scope = (nivel == 'admin_central' and central_user is not None)
+    enforce_scope = False
 
     base_query = {}
     total = coll.count_documents(base_query)
@@ -2103,7 +2116,7 @@ def api_setores():
 
     items = []
     for doc in cursor:
-        # Enforce scope: incluir apenas setores que pertencem à central do admin
+        # Sem restrição para admin_central; manter lógica apenas se enforce_scope estiver ativo
         if enforce_scope:
             allowed = False
             raw_sid = doc.get('sub_almoxarifado_id')
@@ -3133,8 +3146,24 @@ def api_produto_movimentacoes(produto_id):
 
             usuario_resp = m.get('usuario_responsavel') or m.get('usuario') or m.get('usuario_nome')
 
+            # Serializar data como ISO com timezone, tratando valores naive como UTC
+            data_mov_raw = m.get('data_movimentacao') or m.get('created_at') or m.get('updated_at')
+            data_mov_dt = None
+            if isinstance(data_mov_raw, datetime):
+                data_mov_dt = data_mov_raw
+            elif isinstance(data_mov_raw, str):
+                try:
+                    data_mov_dt = datetime.fromisoformat(data_mov_raw)
+                except Exception:
+                    data_mov_dt = None
+            if data_mov_dt is None:
+                data_mov_dt = datetime.now(timezone.utc)
+            elif data_mov_dt.tzinfo is None:
+                data_mov_dt = data_mov_dt.replace(tzinfo=timezone.utc)
+            data_mov_str = data_mov_dt.isoformat()
+
             items.append({
-                'data_movimentacao': m.get('data_movimentacao') or m.get('created_at') or m.get('updated_at'),
+                'data_movimentacao': data_mov_str,
                 'tipo_movimentacao': tipo_mov,
                 'quantidade': m.get('quantidade') or m.get('quantidade_movimentada') or 0,
                 'local': local_str,
@@ -3572,10 +3601,10 @@ def api_hierarquia_locais():
     """
     locais = []
 
-    # Scope awareness
+    # Escopo: admin_central não possui restrição
     nivel = getattr(current_user, 'nivel_acesso', None)
     central_user = getattr(current_user, 'central_id', None)
-    enforce_scope = (nivel == 'admin_central' and central_user is not None)
+    enforce_scope = False
 
     # Preload mappings to evaluate scope relationships when needed
     almox_coll = extensions.mongo_db['almoxarifados']
@@ -3880,7 +3909,7 @@ def api_dashboard_vencimentos():
         dias_aviso = int(request.args.get('dias_aviso', 30))
         dias_aviso = max(1, min(dias_aviso, 180))
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         def _parse_date(value):
             if not value:
@@ -4071,16 +4100,18 @@ def api_dashboard_movimentacoes_recentes():
             else:
                 local_str = destino_nome or origem_nome or '-'
 
-            # Data
+            # Data: tratar strings/naive como UTC e exibir no horário local
             data_mov = m.get('data_movimentacao') or m.get('created_at') or m.get('updated_at')
             if isinstance(data_mov, str):
                 try:
                     data_mov = datetime.fromisoformat(data_mov)
                 except Exception:
-                    data_mov = datetime.utcnow()
+                    data_mov = None
             if not isinstance(data_mov, datetime):
-                data_mov = datetime.utcnow()
-            data_fmt = data_mov.strftime('%d/%m/%Y %H:%M')
+                data_mov = datetime.now(timezone.utc)
+            if data_mov.tzinfo is None:
+                data_mov = data_mov.replace(tzinfo=timezone.utc)
+            data_fmt = data_mov.astimezone().strftime('%d/%m/%Y %H:%M')
 
             items.append({
                 'tipo': tipo_mov or '-',
@@ -4311,7 +4342,7 @@ def api_movimentacoes():
         # Usuário
         usuario_resp = m.get('usuario_responsavel') or m.get('usuario') or m.get('usuario_nome') or '-'
 
-        # Data (serializar em ISO string para consumo no frontend)
+        # Data (serializar em ISO string com timezone para consumo no frontend)
         data_mov_raw = m.get('data_movimentacao') or m.get('created_at') or m.get('updated_at')
         data_mov_dt = None
         if isinstance(data_mov_raw, datetime):
@@ -4322,7 +4353,10 @@ def api_movimentacoes():
             except Exception:
                 data_mov_dt = None
         if data_mov_dt is None:
-            data_mov_dt = datetime.utcnow()
+            data_mov_dt = datetime.now(timezone.utc)
+        elif data_mov_dt.tzinfo is None:
+            # tratar datetime naive como UTC para consistência
+            data_mov_dt = data_mov_dt.replace(tzinfo=timezone.utc)
         data_mov_str = data_mov_dt.isoformat()
 
         items.append({
@@ -4475,7 +4509,7 @@ def api_produto_recebimento(produto_id):
         aid_out = almox.get('id') if almox.get('id') is not None else str(almox.get('_id'))
 
         # Datas
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         def _parse_date(value):
             if not value:
                 return None
@@ -4569,6 +4603,196 @@ def api_produto_recebimento(produto_id):
         })
     except Exception as e:
         return jsonify({'error': f'Falha ao registrar recebimento: {e}'}), 500
+
+@main_bp.route('/api/produtos/<string:produto_id>/lotes/<string:numero_lote>/entrada', methods=['GET', 'PATCH'])
+@require_level('super_admin', 'admin_central')
+def api_produto_lote_entrada(produto_id, numero_lote):
+    """Permite leitura e edição dos dados de entrada de um lote específico.
+    - GET: retorna última movimentação de entrada para o lote informado
+    - PATCH: atualiza campos editáveis (data_recebimento, nota_fiscal, preco_unitario, fornecedor, observacoes)
+    Somente 'super_admin' e 'admin_central' podem acessar.
+    """
+    try:
+        db = extensions.mongo_db
+        coll = db['movimentacoes']
+
+        # Construir candidatos de produto_id (id sequencial, ObjectId, string)
+        pid_candidates = [produto_id]
+        try:
+            if str(produto_id).isdigit():
+                pid_candidates.append(int(produto_id))
+        except Exception:
+            pass
+        try:
+            oid = ObjectId(str(produto_id))
+            pid_candidates.append(oid)
+            pid_candidates.append(str(oid))
+        except Exception:
+            pass
+        # Também tentar resolver via coleção de produtos
+        try:
+            prod_doc = None
+            if str(produto_id).isdigit():
+                prod_doc = db['produtos'].find_one({'id': int(produto_id)})
+            if not prod_doc:
+                try:
+                    prod_doc = db['produtos'].find_one({'_id': ObjectId(str(produto_id))})
+                except Exception:
+                    prod_doc = db['produtos'].find_one({'_id': produto_id})
+            if prod_doc:
+                if prod_doc.get('id') is not None:
+                    pid_candidates.append(prod_doc['id'])
+                if prod_doc.get('_id') is not None:
+                    pid_candidates.append(prod_doc['_id'])
+                    pid_candidates.append(str(prod_doc['_id']))
+        except Exception:
+            pass
+
+        query = {'produto_id': {'$in': pid_candidates}, 'tipo': 'entrada', 'lote': numero_lote}
+        entrada = None
+        try:
+            cursor = coll.find(query).sort('data_movimentacao', -1).limit(1)
+            for doc in cursor:
+                entrada = doc
+                break
+            if not entrada:
+                # fallback por created_at
+                cursor = coll.find(query).sort('created_at', -1).limit(1)
+                for doc in cursor:
+                    entrada = doc
+                    break
+        except Exception:
+            entrada = None
+
+        if request.method == 'GET':
+            if not entrada:
+                return jsonify({'success': False, 'error': 'Entrada de lote não encontrada'}), 404
+            data_mov = entrada.get('data_movimentacao') or entrada.get('created_at') or entrada.get('updated_at')
+            if isinstance(data_mov, str):
+                try:
+                    data_mov = datetime.fromisoformat(data_mov)
+                except Exception:
+                    data_mov = None
+            if not isinstance(data_mov, datetime):
+                data_mov = datetime.now(timezone.utc)
+            if data_mov.tzinfo is None:
+                data_mov = data_mov.replace(tzinfo=timezone.utc)
+
+            return jsonify({'success': True, 'entrada': {
+                'id': str(entrada.get('_id')) if entrada.get('_id') is not None else None,
+                'lote': entrada.get('lote'),
+                'nota_fiscal': entrada.get('nota_fiscal'),
+                'preco_unitario': entrada.get('preco_unitario'),
+                'fornecedor': entrada.get('origem_nome'),
+                'observacoes': entrada.get('observacoes'),
+                'data_recebimento': data_mov.isoformat(),
+                'destino_nome': entrada.get('destino_nome'),
+                'quantidade': entrada.get('quantidade') or entrada.get('quantidade_movimentada')
+            }})
+
+        # PATCH
+        if not entrada:
+            return jsonify({'success': False, 'error': 'Entrada de lote não encontrada para atualização'}), 404
+
+        payload = request.get_json(silent=True) or {}
+        now = datetime.now(timezone.utc)
+
+        def _parse_date(value):
+            if not value:
+                return None
+            if isinstance(value, datetime):
+                return value
+            try:
+                dt = datetime.fromisoformat(str(value))
+            except Exception:
+                dt = None
+            return dt
+
+        dr = _parse_date(payload.get('data_recebimento')) or None
+        if dr and dr.tzinfo is None:
+            dr = dr.replace(tzinfo=timezone.utc)
+
+        set_fields = {'updated_at': now}
+        if dr is not None:
+            set_fields['data_movimentacao'] = dr
+        if 'nota_fiscal' in payload:
+            set_fields['nota_fiscal'] = payload.get('nota_fiscal')
+        if 'preco_unitario' in payload:
+            try:
+                set_fields['preco_unitario'] = float(payload.get('preco_unitario')) if payload.get('preco_unitario') not in (None, '') else None
+            except Exception:
+                pass
+        if 'fornecedor' in payload:
+            set_fields['origem_nome'] = payload.get('fornecedor')
+        if 'observacoes' in payload:
+            set_fields['observacoes'] = payload.get('observacoes')
+
+        # Atualização de quantidade: ajustar movimentação, estoque e lote
+        quantidade_nova = None
+        if 'quantidade' in payload:
+            try:
+                q_raw = payload.get('quantidade')
+                quantidade_nova = float(q_raw) if q_raw not in (None, '') else None
+            except Exception:
+                quantidade_nova = None
+            if quantidade_nova is not None:
+                if quantidade_nova <= 0:
+                    return jsonify({'success': False, 'error': 'Quantidade deve ser maior que zero'}), 400
+                quantidade_antiga = float(entrada.get('quantidade') or entrada.get('quantidade_movimentada') or 0)
+                diff = quantidade_nova - quantidade_antiga
+                set_fields['quantidade'] = quantidade_nova
+                # Ajustar estoque do almoxarifado destino
+                try:
+                    estoques = extensions.mongo_db['estoques']
+                    produto_id_out = entrada.get('produto_id')
+                    # destino/local id
+                    local_id = entrada.get('local_id') or entrada.get('almoxarifado_id') or entrada.get('destino_id')
+                    # tipo do local
+                    local_tipo = entrada.get('local_tipo') or entrada.get('destino_tipo') or 'almoxarifado'
+                    if produto_id_out is not None and local_id is not None:
+                        estoque_filter = {'produto_id': produto_id_out, 'local_tipo': local_tipo, 'local_id': local_id}
+                        estoques.find_one_and_update(
+                            estoque_filter,
+                            {
+                                '$inc': {
+                                    'quantidade': diff,
+                                    'quantidade_disponivel': diff
+                                },
+                                '$set': {
+                                    'updated_at': now
+                                }
+                            }
+                        )
+                except Exception:
+                    pass
+
+                # Ajustar quantidade do lote
+                try:
+                    lotes = extensions.mongo_db['lotes']
+                    pid_out = entrada.get('produto_id')
+                    lote_num = entrada.get('lote')
+                    almox_id = entrada.get('local_id') or entrada.get('almoxarifado_id')
+                    if pid_out is not None and lote_num and almox_id is not None:
+                        lote_filter = {'produto_id': pid_out, 'lote': lote_num, 'almoxarifado_id': almox_id}
+                        lotes.find_one_and_update(
+                            lote_filter,
+                            {
+                                '$inc': {
+                                    'quantidade_atual': diff
+                                },
+                                '$set': {
+                                    'updated_at': now
+                                }
+                            }
+                        )
+                except Exception:
+                    pass
+
+        res = coll.update_one({'_id': entrada.get('_id')}, {'$set': set_fields})
+        ok = bool(getattr(res, 'modified_count', 0))
+        return jsonify({'success': True, 'updated': ok})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Erro ao editar entrada de lote: {e}'})
 
 @main_bp.route('/api/movimentacoes/transferencia', methods=['POST'])
 @require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox')
@@ -4767,7 +4991,7 @@ def api_movimentacoes_transferencia():
         except Exception:
             return jsonify({'error': 'Falha ao verificar escopo de movimentação'}), 403
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # localizar estoque de origem e validar disponibilidade
         origem_filter1 = {'produto_id': pid_out, 'local_tipo': str(origem_tipo).lower(), 'local_id': origem_id_out}
@@ -4990,7 +5214,7 @@ def api_movimentacoes_distribuicao():
         except Exception:
             return jsonify({'error': 'Falha ao verificar escopo da origem'}), 403
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # estoque origem e disponibilidade
         origem_filter1 = {'produto_id': pid_out, 'local_tipo': str(origem_tipo).lower(), 'local_id': origem_id_out}
@@ -5343,7 +5567,7 @@ def api_demandas():
     if sid is None:
         return jsonify({'error': 'Usuário não possui setor associado'}), 400
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     doc = {
         'produto_id': prod_doc.get('id') if prod_doc.get('id') is not None else str(prod_doc.get('_id')),
         'setor_id': sid,

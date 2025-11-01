@@ -30,6 +30,28 @@
 
 <script>
 (function() {
+  // Parse flexível de data (ISO, timestamp, DD/MM/YYYY)
+  function parseDateFlexible(value) {
+    if (!value) return null;
+    try {
+      if (value instanceof Date) return value;
+      if (typeof value === 'number') return new Date(value);
+      const s = String(value).trim();
+      const dm = s.match(/^([0-3]?\d)[\/-]([0-1]?\d)[\/-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+      if (dm) {
+        const d = parseInt(dm[1], 10);
+        const m = parseInt(dm[2], 10) - 1;
+        const y = parseInt(dm[3], 10);
+        const hh = dm[4] ? parseInt(dm[4], 10) : 0;
+        const mm = dm[5] ? parseInt(dm[5], 10) : 0;
+        return new Date(y, m, d, hh, mm);
+      }
+      const iso = new Date(s);
+      if (!isNaN(iso.getTime())) return iso;
+    } catch (_) {}
+    return null;
+  }
+
   function formatDateISO(s) {
     try {
       const d = new Date(s);
@@ -51,15 +73,71 @@
   }
 
   async function loadVencimentos() {
+    const content = document.getElementById('vencimentos-content');
+    const vencidosEl = document.getElementById('vencidos-count');
+    const proximosEl = document.getElementById('proximos-count');
+    const DIAS_AVISO = 30;
     try {
-      const data = await fetchJson('/api/dashboard/vencimentos?limit=5');
-      const content = document.getElementById('vencimentos-content');
-      const vencidosEl = document.getElementById('vencidos-count');
-      const proximosEl = document.getElementById('proximos-count');
-      if (vencidosEl) vencidosEl.textContent = Number(data.total_vencidos || 0);
-      if (proximosEl) proximosEl.textContent = Number(data.total_proximos || 0);
+      // Buscar produtos ativos (paginação ampla)
+      const prodResp = await fetchJson('/api/produtos?per_page=200&ativo=true', { headers: { 'Accept': 'application/json' } });
+      const produtos = Array.isArray(prodResp.items) ? prodResp.items : (Array.isArray(prodResp) ? prodResp : []);
+      if (!produtos.length) {
+        content.innerHTML = `
+          <div class="text-center text-success">
+            <i class="fas fa-check-circle fa-2x mb-2"></i>
+            <p class="mb-0">Nenhum lote vencido ou próximo ao vencimento.</p>
+          </div>
+        `;
+        if (vencidosEl) vencidosEl.textContent = 0;
+        if (proximosEl) proximosEl.textContent = 0;
+        return;
+      }
 
-      const items = Array.isArray(data.items) ? data.items : [];
+      const hoje = new Date();
+      let items = [];
+      let totalVencidos = 0;
+      let totalProximos = 0;
+
+      // Percorrer produtos e coletar lotes
+      for (const p of produtos) {
+        try {
+          const lotResp = await fetchJson(`/api/produtos/${encodeURIComponent(p.id)}/lotes`, { headers: { 'Accept': 'application/json' } });
+          const lotes = Array.isArray(lotResp.items) ? lotResp.items : (Array.isArray(lotResp) ? lotResp : []);
+          for (const l of lotes) {
+            const dv = parseDateFlexible(l.data_vencimento);
+            if (!dv) continue;
+            const dias = Math.ceil((dv - hoje) / (1000 * 60 * 60 * 24));
+            let status = null;
+            if (dias < 0) { status = 'vencido'; totalVencidos++; }
+            else if (dias <= DIAS_AVISO) { status = 'proximo'; totalProximos++; }
+            else { continue; }
+
+            items.push({
+              produto_id: p.id,
+              produto_nome: p.nome || 'Produto',
+              numero_lote: l.numero_lote || l.lote || '-',
+              data_vencimento: dv.toISOString(),
+              dias_para_vencer: dias,
+              status
+            });
+          }
+        } catch (_) {
+          // Ignorar erros de produto/lotes individuais
+        }
+      }
+
+      // Ordenar e limitar
+      items.sort((a, b) => {
+        const ra = a.status === 'vencido' ? 0 : 1;
+        const rb = b.status === 'vencido' ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+        return a.dias_para_vencer - b.dias_para_vencer;
+      });
+      items = items.slice(0, 5);
+
+      if (vencidosEl) vencidosEl.textContent = Number(totalVencidos || 0);
+      if (proximosEl) proximosEl.textContent = Number(totalProximos || 0);
+
       if (items.length === 0) {
         content.innerHTML = `
           <div class="text-center text-success">
@@ -93,9 +171,8 @@
       }
       html += '</div>';
       content.innerHTML = html;
-    } catch (e) {
-      console.error('Erro ao carregar vencimentos:', e);
-      const content = document.getElementById('vencimentos-content');
+    } catch (_) {
+      // Evitar logs no console; mostrar estado de erro na UI
       content.innerHTML = `
         <div class="text-center text-danger">
           <i class="fas fa-exclamation-circle fa-2x mb-2"></i>

@@ -163,6 +163,49 @@
         resumo[level] = mAvg;
       }
 
+      // Ajuste solicitado: linha "Central" deve refletir o estoque da rede
+      // (central + almoxarifado + sub_almoxarifado), como exibido em /estoque.
+      if (!isOperador) {
+        try {
+          const estResp = await fetchJson(`/api/estoque/hierarquia?per_page=1000`);
+          const estItems = Array.isArray(estResp.items) ? estResp.items : (Array.isArray(estResp) ? estResp : []);
+          let totalRede = 0;
+          for (const it of estItems) {
+            const tipo = normalizeTipo(it.local_tipo || '');
+            const q = Number(it.quantidade_disponivel ?? it.quantidade ?? 0);
+            if (['central', 'almoxarifado', 'sub_almoxarifado'].includes(tipo)) {
+              totalRede += isFinite(q) ? q : 0;
+            }
+          }
+
+          // Série constante usando o total atual do estoque de rede
+          const centralSeries = days.map(() => totalRede);
+          const centralAvg7 = movingAverage(centralSeries, 7);
+
+          const idxCentral = datasets.findIndex(ds => String(ds.label || '').toLowerCase().includes('central'));
+          if (idxCentral >= 0) {
+            datasets[idxCentral].data = centralAvg7;
+            datasets[idxCentral].label = 'Central';
+            datasets[idxCentral].borderColor = COLORS.central;
+            datasets[idxCentral].backgroundColor = COLORS.central;
+          } else {
+            datasets.unshift({
+              label: 'Central',
+              data: centralAvg7,
+              borderColor: COLORS.central,
+              backgroundColor: COLORS.central,
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 2
+            });
+          }
+          const last7Central = centralAvg7.slice(-7);
+          resumo.central = last7Central.length ? (last7Central.reduce((a, b) => a + b, 0) / last7Central.length) : 0;
+        } catch (_) {
+          // Em caso de erro no estoque, manter comportamento anterior
+        }
+      }
+
       const ctx = document.getElementById('consumoMedioChart');
       if (ctx) {
         new Chart(ctx, {

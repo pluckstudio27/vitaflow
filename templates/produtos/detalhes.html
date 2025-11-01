@@ -255,6 +255,9 @@
     </div>
 </div>
 
+<!-- Permissão embutida no DOM para evitar sintaxe Jinja dentro de JS -->
+<div id="perm-edit-lote" data-can="{{ 1 if can_editar_entrada_lote else 0 }}" style="display:none"></div>
+
 <script>
 let produtoId = null;
 let produtoDetalhes = null;
@@ -263,6 +266,9 @@ let estoquePromise = null;
 let estoqueDadosCache = null;
 let lotesExpandido = false;
 const LOTES_LIMITE = 10;
+// Permissão: controlada via atributo de dados para evitar erros de lint em JS
+let canEditarEntradaLote = false;
+let loteEditando = null;
 
 // Extrair ID do produto da URL
 function obterProdutoId() {
@@ -719,6 +725,11 @@ document.getElementById('salvarRecebimento').addEventListener('click', function(
 });
 document.addEventListener('DOMContentLoaded', function() {
     carregarProduto();
+    // Inicializar permissão de edição de entrada de lote
+    const permEl = document.getElementById('perm-edit-lote');
+    if (permEl && permEl.dataset) {
+        canEditarEntradaLote = permEl.dataset.can === '1';
+    }
     // Cálculo automático do valor total
     const qtdEl = document.getElementById('quantidade');
     const precoEl = document.getElementById('preco_unitario');
@@ -784,6 +795,7 @@ function renderizarTabelaLotes(lotes) {
                 <th>Data Vencimento</th>
                 <th>Status</th>
                 <th>Observações</th>
+                ${canEditarEntradaLote ? '<th>Ações</th>' : ''}
             </tr>
         </thead>
         <tbody>
@@ -806,6 +818,7 @@ function renderizarTabelaLotes(lotes) {
                 <td>${lote.data_vencimento ? parseDateFlexible(lote.data_vencimento).toLocaleDateString('pt-BR') : '-'}</td>
                 <td>${statusBadge}</td>
                 <td class="text-muted">${lote.observacoes || '-'}</td>
+                ${canEditarEntradaLote ? `<td><button class="btn btn-sm btn-outline-primary" onclick="abrirEditarEntradaLote('${String(lote.numero_lote || '').replace(/'/g, "\\'")}')"><i class="fas fa-edit"></i> Editar entrada de lote</button></td>` : ''}
             </tr>
         `;
     });
@@ -863,6 +876,142 @@ function verificarVencimentoModal() {
         alertaDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Validade adequada</span>';
     }
 }
+</script>
+<!-- Modal de Edição de Entrada de Lote -->
+<div class="modal fade" id="editarEntradaModal" tabindex="-1" aria-labelledby="editarEntradaModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="editarEntradaModalLabel">Editar entrada do lote</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="formEditarEntrada">
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label for="edit_data_recebimento" class="form-label">Data do Recebimento</label>
+              <input type="datetime-local" class="form-control" id="edit_data_recebimento" name="edit_data_recebimento">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label for="edit_destino_nome" class="form-label">Almoxarifado (destino)</label>
+              <input type="text" class="form-control" id="edit_destino_nome" name="edit_destino_nome" readonly>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label for="edit_fornecedor" class="form-label">Fornecedor</label>
+              <input type="text" class="form-control" id="edit_fornecedor" name="edit_fornecedor" placeholder="Nome do fornecedor">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label for="edit_nota_fiscal" class="form-label">Nota Fiscal</label>
+              <input type="text" class="form-control" id="edit_nota_fiscal" name="edit_nota_fiscal" placeholder="Número da nota fiscal">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label for="edit_preco_unitario" class="form-label">Preço Unitário</label>
+              <div class="input-group">
+                <span class="input-group-text">R$</span>
+                <input type="number" step="0.01" class="form-control" id="edit_preco_unitario" name="edit_preco_unitario" placeholder="0,00">
+              </div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label for="edit_observacoes" class="form-label">Observações</label>
+              <textarea class="form-control" id="edit_observacoes" name="edit_observacoes" rows="3" placeholder="Correções ou observações..."></textarea>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label for="edit_quantidade" class="form-label">Quantidade</label>
+              <input type="number" step="0.01" min="0" class="form-control" id="edit_quantidade" name="edit_quantidade" placeholder="0,00">
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="salvarEdicaoEntrada"><i class="fas fa-save"></i> Salvar alterações</button>
+      </div>
+    </div>
+  </div>
+  </div>
+
+<script>
+// Funções para editar entrada de lote
+let editarEntradaModalInstance = null;
+
+function abrirEditarEntradaLote(numeroLote) {
+  if (!canEditarEntradaLote) return;
+  loteEditando = numeroLote || null;
+  const modalEl = document.getElementById('editarEntradaModal');
+  editarEntradaModalInstance = window.bootstrap ? new bootstrap.Modal(modalEl) : null;
+  if (!produtoId || !loteEditando) {
+    alert('Dados insuficientes para editar a entrada do lote.');
+    return;
+  }
+  fetchJson(`/api/produtos/${produtoId}/lotes/${encodeURIComponent(loteEditando)}/entrada`)
+    .then(resp => {
+      if (!resp.success) throw new Error(resp.error || 'Falha ao carregar entrada do lote');
+      const ent = resp.entrada || {};
+      document.getElementById('edit_destino_nome').value = ent.destino_nome || '';
+      document.getElementById('edit_fornecedor').value = ent.fornecedor || '';
+      document.getElementById('edit_nota_fiscal').value = ent.nota_fiscal || '';
+      document.getElementById('edit_preco_unitario').value = ent.preco_unitario ?? '';
+      document.getElementById('edit_quantidade').value = ent.quantidade ?? '';
+      document.getElementById('edit_observacoes').value = ent.observacoes || '';
+      const dt = ent.data_recebimento ? new Date(ent.data_recebimento) : new Date();
+      // Converter para input datetime-local (sem timezone)
+      const pad = n => String(n).padStart(2, '0');
+      const isoLocal = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+      document.getElementById('edit_data_recebimento').value = isoLocal;
+      if (editarEntradaModalInstance) editarEntradaModalInstance.show();
+    })
+    .catch(err => {
+      console.error('Erro ao carregar entrada do lote:', err);
+      alert(`Erro: ${err.message}`);
+    });
+}
+
+document.getElementById('salvarEdicaoEntrada')?.addEventListener('click', () => {
+  if (!canEditarEntradaLote) return;
+  if (!produtoId || !loteEditando) {
+    alert('Produto ou lote inválido.');
+    return;
+  }
+  const dtStr = document.getElementById('edit_data_recebimento').value;
+  const qStr = document.getElementById('edit_quantidade').value;
+  const quantidade = qStr ? parseFloat(qStr) : null;
+  if (quantidade !== null && !(quantidade > 0)) {
+    alert('Quantidade deve ser maior que zero');
+    return;
+  }
+  // Interpretar como local e enviar em ISO
+  const payload = {
+    data_recebimento: dtStr ? new Date(dtStr).toISOString() : null,
+    fornecedor: document.getElementById('edit_fornecedor').value || null,
+    nota_fiscal: document.getElementById('edit_nota_fiscal').value || null,
+    preco_unitario: document.getElementById('edit_preco_unitario').value || null,
+    observacoes: document.getElementById('edit_observacoes').value || null,
+    quantidade: quantidade
+  };
+  fetch(`/api/produtos/${produtoId}/lotes/${encodeURIComponent(loteEditando)}/entrada`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (!resp.success) throw new Error(resp.error || 'Falha ao salvar alterações');
+    carregarLotes();
+    if (editarEntradaModalInstance) editarEntradaModalInstance.hide();
+  })
+  .catch(err => {
+    console.error('Erro ao salvar edição de entrada:', err);
+    alert(`Erro: ${err.message}`);
+  });
+});
 </script>
 <style>
 .limited-section { max-height: 360px; overflow-y: auto; }

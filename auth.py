@@ -218,10 +218,9 @@ class MongoUser:
             return True
         if central_id is None:
             return False
+        # Admin central sem restrição: acesso a qualquer central
         if level == 'admin_central':
-            u_cid = self._central_id_of_local('central', self.central_id)
-            t_cid = self._central_id_of_local('central', central_id)
-            return (u_cid is not None) and (t_cid is not None) and str(u_cid) == str(t_cid)
+            return True
         if level == 'gerente_almox' and self.almoxarifado_id is not None:
             u_cid = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
             t_cid = self._central_id_of_local('central', central_id)
@@ -245,10 +244,9 @@ class MongoUser:
         a = self._find_by_id('almoxarifados', almoxarifado_id)
         if not a:
             return False
+        # Admin central sem restrição: acesso a qualquer almoxarifado
         if level == 'admin_central':
-            a_cid = self._central_id_of_local('almoxarifado', almoxarifado_id)
-            u_cid = self._central_id_of_local('central', self.central_id)
-            return (a_cid is not None) and (u_cid is not None) and str(a_cid) == str(u_cid)
+            return True
         if level == 'gerente_almox':
             a1 = self._find_by_id('almoxarifados', almoxarifado_id)
             a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
@@ -276,10 +274,9 @@ class MongoUser:
         s = self._find_by_id('sub_almoxarifados', sub_almoxarifado_id)
         if not s:
             return False
+        # Admin central sem restrição: acesso a qualquer sub-almoxarifado
         if level == 'admin_central':
-            s_cid = self._central_id_of_local('sub_almoxarifado', sub_almoxarifado_id)
-            u_cid = self._central_id_of_local('central', self.central_id)
-            return (s_cid is not None) and (u_cid is not None) and str(s_cid) == str(u_cid)
+            return True
         if level == 'gerente_almox':
             a1 = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
             a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
@@ -306,10 +303,9 @@ class MongoUser:
         se = self._find_by_id('setores', setor_id)
         if not se:
             return False
+        # Admin central sem restrição: acesso a qualquer setor
         if level == 'admin_central':
-            cid_t = self._central_id_of_local('setor', setor_id)
-            cid_u = self._central_id_of_local('central', self.central_id)
-            return (cid_t is not None) and (cid_u is not None) and str(cid_t) == str(cid_u)
+            return True
         if level == 'gerente_almox':
             cid_t = self._central_id_of_local('setor', setor_id)
             cid_u = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
@@ -386,8 +382,8 @@ class MongoUser:
           - operador_setor: não pode movimentar
         """
         level = self.nivel_acesso
-        # Liberar completamente movimentações para super_admin e, por solicitação, para gerente_almox
-        if level == 'super_admin' or level == 'gerente_almox':
+        # Liberar completamente movimentações para super_admin e admin_central
+        if level in ('super_admin', 'admin_central'):
             return True
 
         o_tipo = (origem or {}).get('tipo')
@@ -430,8 +426,8 @@ class MongoUser:
         o_cid = self._central_id_of_local(o_tipo, o_id)
         d_cid = self._central_id_of_local(d_tipo, d_id)
         if level == 'admin_central':
-            u_cid = self._central_id_of_local('central', self.central_id)
-            return (u_cid is not None) and str(o_cid) == str(u_cid) and str(d_cid) == str(u_cid)
+            # Sem restrição por central
+            return True
         if level == 'gerente_almox' or level == 'resp_sub_almox':
             return str(o_cid) == str(d_cid)
         # operador_setor já retornaria False
