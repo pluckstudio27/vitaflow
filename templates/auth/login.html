@@ -179,6 +179,7 @@
         {% endwith %}
         
         <form method="POST" id="loginForm">
+            <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
             <div class="form-floating">
                 <input type="text" class="form-control" id="username" name="username" placeholder="Usuário" required>
                 <label for="username"><i class="bi bi-person"></i> Usuário</label>

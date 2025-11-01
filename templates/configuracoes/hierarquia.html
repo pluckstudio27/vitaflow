@@ -313,6 +313,13 @@
                     </div>
                     <div class="mb-3">
                         <label for="setor-sub-almoxarifado" class="form-label">Sub-Almoxarifados (múltiplos) *</label>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <input type="text" id="setor-sub-search" class="form-control form-control-sm" placeholder="Filtrar por nome do sub‑almoxarifado" style="max-width: 320px;">
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary" id="setor-sub-select-all">Selecionar todos</button>
+                                <button type="button" class="btn btn-outline-secondary" id="setor-sub-clear">Limpar seleção</button>
+                            </div>
+                        </div>
                         <select class="form-select" id="setor-sub-almoxarifado" name="sub_almoxarifado_ids" multiple required>
                             <option value="">Selecione um ou mais sub-almoxarifados</option>
                         </select>
@@ -643,11 +650,14 @@ function loadSetores() {
             }
             
             data.forEach(setor => {
+                const subDisplay = (Array.isArray(setor.sub_almoxarifado_nomes) && setor.sub_almoxarifado_nomes.length)
+                    ? setor.sub_almoxarifado_nomes.join(', ')
+                    : (setor.sub_almoxarifado_nome || '-');
                 const row = `
                     <tr>
                         <td>${setor.id}</td>
                         <td><strong>${setor.nome}</strong></td>
-                        <td>${setor.sub_almoxarifado_nome || '-'}</td>
+                        <td>${subDisplay}</td>
                         <td>${setor.almoxarifado_nome || '-'}</td>
                         <td>${setor.central_nome || '-'}</td>
                         <td>${setor.descricao || '-'}</td>
@@ -787,7 +797,7 @@ function onSetorCentralChange() {
         // Carregar almoxarifados da central selecionada
         $.get('/api/almoxarifados')
             .done(function(response) {
-                almoxSelect.find('option:first').text('Selecione um almoxarifado');
+                almoxSelect.find('option:first').text('Selecione um ou mais almoxarifados');
                 
                 const data = response.items || [];
                 data.forEach(almox => {
@@ -980,11 +990,21 @@ function handleSetorSubmit(e) {
     
     const nome = $('#setor-nome').val().trim();
     const descricao = $('#setor-descricao').val().trim();
-    const almoxarifadoIds = ($('#setor-almoxarifado').val() || []).map(v => parseInt(v));
-    const subAlmoxarifadoIds = ($('#setor-sub-almoxarifado').val() || []).map(v => parseInt(v));
+    const centralId = $('#setor-central').val() ? ($('#setor-central').val()) : null;
+    const almoxarifadoIds = ($('#setor-almoxarifado').val() || []).map(v => (String(v).match(/^\d+$/) ? parseInt(v) : v));
+    const subAlmoxarifadoIdsRaw = ($('#setor-sub-almoxarifado').val() || []).map(v => (String(v).match(/^\d+$/) ? parseInt(v) : v));
 
-    if (!nome || subAlmoxarifadoIds.length === 0) {
+    if (!nome || subAlmoxarifadoIdsRaw.length === 0) {
         showAlert('Informe o nome e selecione ao menos um sub-almoxarifado.', 'warning');
+        return;
+    }
+
+    // Validação robusta: garantir que sub‑almoxarifados pertencem aos almoxarifados selecionados
+    // Usa cache local gerado em onSetorAlmoxarifadoChange (setorSubCache)
+    const permitidos = (typeof setorSubCache !== 'undefined' && Array.isArray(setorSubCache)) ? new Set(setorSubCache.map(it => String(it.id))) : new Set();
+    const subAlmoxarifadoIds = subAlmoxarifadoIdsRaw.filter(id => permitidos.size === 0 || permitidos.has(String(id)));
+    if (subAlmoxarifadoIds.length === 0) {
+        showAlert('Selecione sub-almoxarifados válidos para os almoxarifados escolhidos.', 'warning');
         return;
     }
 
@@ -994,6 +1014,7 @@ function handleSetorSubmit(e) {
         // Novo: múltiplos vínculos
         almoxarifado_ids: almoxarifadoIds,
         sub_almoxarifado_ids: subAlmoxarifadoIds,
+        central_id: centralId,
         nome,
         descricao,
         ativo: true

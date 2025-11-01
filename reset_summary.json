@@ -1,0 +1,13 @@
+{
+  "database": "almox_sms",
+  "counts": {
+    "usuarios": 1,
+    "produtos": 0,
+    "estoques": 0,
+    "movimentacoes": 0,
+    "lotes": 0,
+    "setores": 0,
+    "almoxarifados": 0,
+    "sub_almoxarifados": 0
+  }
+}

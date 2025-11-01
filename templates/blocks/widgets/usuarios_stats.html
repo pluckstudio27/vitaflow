@@ -1,0 +1,77 @@
+<!-- Widget de Estatísticas de Usuários -->
+<div class="card h-100">
+    <div class="card-header bg-secondary text-white">
+        <h6 class="card-title mb-0">
+            <i class="fas fa-users me-2"></i>
+            Usuários por Nível
+        </h6>
+    </div>
+    <div class="card-body">
+        <div id="usuarios-stats-content">
+            <div class="text-center">
+                <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2 mb-0 text-muted">Carregando estatísticas de usuários...</p>
+            </div>
+        </div>
+    </div>
+    <div class="card-footer bg-light">
+        <a href="{{ url_for('main.users') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-user-cog me-1"></i>
+            Gerenciar Usuários
+        </a>
+    </div>
+</div>
+
+<script>
+// Carrega estatísticas de usuários por nível
+function loadUsuariosStats() {
+    fetch('/api/dashboard/usuarios-stats')
+        .then(response => response.json())
+        .then(data => {
+            const content = document.getElementById('usuarios-stats-content');
+            if (data.success && data.stats) {
+                const levels = [
+                    { key: 'super_admin', label: 'Super Admin' },
+                    { key: 'admin_central', label: 'Admin Central' },
+                    { key: 'gerente_almox', label: 'Gerente de Almoxarifado' },
+                    { key: 'resp_sub_almox', label: 'Responsável de Sub-Almoxarifado' },
+                    { key: 'operador_setor', label: 'Operador de Setor' },
+                ];
+                let html = '<div class="row text-center">';
+                levels.forEach(lvl => {
+                    const val = data.stats[lvl.key] || 0;
+                    html += `
+                        <div class="col-6 mb-3">
+                            <div class="border-end">
+                                <h4 class="mb-1">${val}</h4>
+                                <small class="text-muted">${lvl.label}</small>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="fas fa-users-slash fa-2x mb-2"></i>
+                        <p class="mb-0">Sem dados de usuários</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao carregar estatísticas de usuários:', error);
+            document.getElementById('usuarios-stats-content').innerHTML = `
+                <div class="text-center text-danger">
+                    <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
+                    <p class="mb-0">Erro ao carregar dados</p>
+                </div>
+            `;
+        });
+}
+
+document.addEventListener('DOMContentLoaded', loadUsuariosStats);
+</script>

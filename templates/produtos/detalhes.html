@@ -330,8 +330,13 @@ function renderizarProduto(produto) {
             <div class="col-md-6">
                 <div class="row">
                     <div class="col-6">
-                        <strong>Categoria:</strong><br>
-                        ${produto.categoria || 'Não informada'}
+                        <strong>Categoria Principal:</strong><br>
+                        ${produto.categoria_produto ? 
+                            `<span class="badge" style="background-color: ${produto.categoria_produto.cor}; color: white;">
+                                ${produto.categoria_produto.codigo}
+                            </span>
+                            <small class="text-muted d-block">${produto.categoria_produto.nome}</small>`
+                            : (produto.categoria || 'Não informada')}
                     </div>
                     <div class="col-6">
                         <strong>Criado em:</strong><br>
@@ -348,6 +353,8 @@ function renderizarProduto(produto) {
     carregarLotes();
     carregarMovimentacoes();
 }
+
+// Removido: categorias adicionais e fallback de carregamento
 
 // Carregar resumo de estoque
 function carregarResumoEstoque() {

@@ -256,6 +256,37 @@
                                 {% endfor %}
                             </select>
                         </div>
+
+                        <!-- Operador Setor: seleção múltipla de Almoxarifados -->
+                        <div class="col-12" id="operador-almox-multi-field" style="display: none;">
+                            <label class="form-label">Almoxarifados (múltiplos)</label>
+                            <div class="border rounded p-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <input type="text" id="operador-almox-search" class="form-control form-control-sm" placeholder="Filtrar por nome do almoxarifado" style="max-width: 320px;">
+                                    <div class="btn-group btn-group-sm">
+                                        <button type="button" class="btn btn-outline-secondary" id="operador-almox-select-all">Selecionar todos</button>
+                                        <button type="button" class="btn btn-outline-secondary" id="operador-almox-clear">Limpar seleção</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive" style="max-height: 240px; overflow: auto;">
+                                    <table class="table table-sm table-hover mb-2">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 64px;">ID</th>
+                                                <th>Almoxarifado</th>
+                                                <th>Central</th>
+                                                <th style="width: 100px;">Selecionar</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="operador-almox-table-body">
+                                            <!-- Linhas injetadas via JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="operador-almox-selected-chips" class="mt-2"></div>
+                                <div class="form-text">Use Central e Almoxarifados para filtrar os setores disponíveis.</div>
+                            </div>
+                        </div>
                         
                         <div class="col-md-6" id="sub-almoxarifado-field" style="display: none;">
                             <label for="user-sub-almoxarifado" class="form-label">Sub-Almoxarifado</label>
@@ -266,13 +297,52 @@
                                 {% endfor %}
                             </select>
                         </div>
+
+                        <!-- Operador Setor: seleção múltipla de Sub‑Almoxarifados -->
+                        <div class="col-12" id="operador-sub-multi-field" style="display: none;">
+                            <label class="form-label">Sub‑Almoxarifados (múltiplos)</label>
+                            <div class="border rounded p-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <input type="text" id="operador-sub-search" class="form-control form-control-sm" placeholder="Filtrar por nome do sub‑almoxarifado" style="max-width: 320px;">
+                                    <div class="btn-group btn-group-sm">
+                                        <button type="button" class="btn btn-outline-secondary" id="operador-sub-select-all">Selecionar todos</button>
+                                        <button type="button" class="btn btn-outline-secondary" id="operador-sub-clear">Limpar seleção</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive" style="max-height: 240px; overflow: auto;">
+                                    <table class="table table-sm table-hover mb-2">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 64px;">ID</th>
+                                                <th>Sub‑Almoxarifado</th>
+                                                <th>Almoxarifado</th>
+                                                <th style="width: 100px;">Selecionar</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="operador-sub-table-body">
+                                            <!-- Linhas injetadas via JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="operador-sub-selected-chips" class="mt-2"></div>
+                                <div class="form-text">O setor selecionado poderá receber materiais dos sub‑almoxarifados marcados.</div>
+                            </div>
+                        </div>
                         
                         <div class="col-md-6" id="setor-field" style="display: none;">
                             <label for="user-setor" class="form-label">Setor</label>
                             <select class="form-select" id="user-setor" name="setor_id">
                                 <option value="">Selecione...</option>
                                 {% for setor in setores %}
-                                    <option value="{{ setor.id }}" data-sub-almoxarifado="{{ setor.sub_almoxarifado_id }}" data-almoxarifado="{{ setor.almoxarifado_id }}" data-central="{{ setor.central_id }}">{{ setor.nome }}</option>
+                                    <option value="{{ setor.id }}"
+                                            data-sub-almoxarifado="{{ setor.sub_almoxarifado_id }}"
+                                            data-almoxarifado="{{ setor.almoxarifado_id }}"
+                                            data-central="{{ setor.central_id }}"
+                                            data-sub-almoxarifado-ids="{{ setor.sub_almoxarifado_ids|join(',') }}"
+                                            data-almoxarifado-ids="{{ setor.almoxarifado_ids|join(',') }}"
+                                            data-central-ids="{{ setor.central_ids|join(',') }}">
+                                        {{ setor.nome }}
+                                    </option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -415,15 +485,11 @@ function openUserModal(userId = null) {
         carregarCategoriasEspecificas();
     }
     
-    // Se não for super admin, desabilitar campos sensíveis
+    // Se não for super admin, desabilitar campos sensíveis, mas manter hierarquia visível
     if (!IS_SUPER_ADMIN) {
         document.getElementById('user-nivel').setAttribute('disabled', 'disabled');
         document.getElementById('user-ativo').setAttribute('disabled', 'disabled');
-        // Também esconder campos de hierarquia e categorias específicas
-        document.getElementById('central-field').style.display = 'none';
-        document.getElementById('almoxarifado-field').style.display = 'none';
-        document.getElementById('sub-almoxarifado-field').style.display = 'none';
-        document.getElementById('setor-field').style.display = 'none';
+        // Campos de hierarquia permanecem visíveis e serão filtrados pelos listeners
     }
 
     updateHierarchyFields();
@@ -438,9 +504,64 @@ function openUserModal(userId = null) {
         subSelect.removeEventListener('change', onUserAlmoxChange);
         subSelect.addEventListener('change', onUserAlmoxChange);
     }
+    // Ao mudar Setor, sincronizar sub‑almoxarifados que ele recebe produtos
+    const setorSelect = document.getElementById('user-setor');
+    if (setorSelect) {
+        setorSelect.addEventListener('change', function(){
+            try { syncOperadorSubsFromSetor(); } catch (_) {}
+            try { refreshOperadorSubTable(); } catch (_) {}
+        });
+    }
     // Aplicar filtros iniciais
     onUserCentralChange();
     onUserAlmoxChange();
+
+    // Normalização global dos pais de Sub‑Almoxarifados (sequencial → ObjectId)
+    // Executa uma vez ao abrir o modal para evitar inconsistências futuras.
+    (async function normalizeSubSelectParents() {
+        try {
+            const almoxSelect = document.getElementById('user-almoxarifado');
+            const subSelect = document.getElementById('user-sub-almoxarifado');
+            if (!almoxSelect || !subSelect) return;
+            const knownAlmoxIds = new Set();
+            almoxSelect.querySelectorAll('option').forEach(opt => {
+                const v = String(opt.value || '');
+                if (v) knownAlmoxIds.add(v);
+            });
+            const subOptions = Array.from(subSelect.querySelectorAll('option'));
+            const toMap = [];
+            subOptions.forEach((opt, idx) => {
+                if (idx === 0) return;
+                const parentId = String(opt.getAttribute('data-almoxarifado') || '');
+                if (!parentId) return;
+                const looksSeq = /^[0-9]+$/.test(parentId);
+                const unknownToKnown = !knownAlmoxIds.has(parentId);
+                if (looksSeq || unknownToKnown) {
+                    toMap.push(parentId);
+                }
+            });
+            const unique = [...new Set(toMap.filter(Boolean))];
+            if (unique.length === 0) return;
+            const results = await Promise.all(unique.map(id => fetchJson(`/api/almoxarifados/${encodeURIComponent(id)}`).catch(() => null)));
+            for (let i = 0; i < unique.length; i++) {
+                const resp = results[i];
+                if (!resp) continue;
+                const rawId = String(resp.id || '');
+                if (!rawId) continue;
+                subOptions.forEach((opt, idx) => {
+                    if (idx === 0) return;
+                    const parentId = String(opt.getAttribute('data-almoxarifado') || '');
+                    if (parentId === unique[i]) {
+                        opt.setAttribute('data-almoxarifado', rawId);
+                    }
+                });
+            }
+            // Reaplicar filtros após normalização
+            onUserAlmoxChange();
+        } catch (e) {
+            console.warn('Falha ao normalizar pais de Sub‑Almoxarifado (global):', e);
+        }
+    })();
     
     // Abrir o modal
     const modalInstance = new bootstrap.Modal(modal);
@@ -455,13 +576,15 @@ function updateHierarchyFields() {
     document.getElementById('central-field').style.display = 'none';
     document.getElementById('almoxarifado-field').style.display = 'none';
     document.getElementById('sub-almoxarifado-field').style.display = 'none';
+    const operadorSubMultiField = document.getElementById('operador-sub-multi-field');
+    if (operadorSubMultiField) operadorSubMultiField.style.display = 'none';
+    const operadorAlmoxMultiField = document.getElementById('operador-almox-multi-field');
+    if (operadorAlmoxMultiField) operadorAlmoxMultiField.style.display = 'none';
     document.getElementById('setor-field').style.display = 'none';
     if (operadorNote) operadorNote.style.display = 'none';
     
-    // Se não for super admin, manter oculto e sair
-    if (!IS_SUPER_ADMIN) {
-        return;
-    }
+    // Permitir exibição dos campos mesmo para não‑super admins;
+    // filtros e listeners já limitam conforme Central/Almox selecionados.
     
     // Mostrar campos baseado no nível
     switch(nivel) {
@@ -479,11 +602,479 @@ function updateHierarchyFields() {
             break;
         case 'operador_setor':
             document.getElementById('central-field').style.display = 'block';
-            document.getElementById('almoxarifado-field').style.display = 'block';
-            document.getElementById('sub-almoxarifado-field').style.display = 'block';
+            // Substituir select simples por tabela de múltiplos Almoxarifados
+            if (operadorAlmoxMultiField) operadorAlmoxMultiField.style.display = 'block';
+            // Para Operador Setor, usar tabela de múltiplos Sub‑Almoxarifados
+            if (operadorSubMultiField) operadorSubMultiField.style.display = 'block';
             document.getElementById('setor-field').style.display = 'block';
             if (operadorNote) operadorNote.style.display = 'block';
+            // Reaplicar filtros para garantir que o select de Setor apareça
+            // imediatamente após a seleção do nível de acesso.
+            try { onUserCentralChange(); } catch (_) {}
+            try { initOperadorAlmoxTable(); refreshOperadorAlmoxTable(); onOperadorAlmoxMultiChange(); } catch (_) {}
+            try { initOperadorSubTable(); refreshOperadorSubTable(); } catch (_) {}
             break;
+    }
+}
+
+// ================= Operador Setor: Tabela múltipla de Almoxarifados =================
+let operadorAlmoxSelecionados = [];
+let operadorAlmoxTableInitialized = false;
+
+function initOperadorAlmoxTable() {
+    if (operadorAlmoxTableInitialized) return;
+    const body = document.getElementById('operador-almox-table-body');
+    if (!body) return;
+
+    const almoxSelect = document.getElementById('user-almoxarifado');
+    const centralSelect = document.getElementById('user-central');
+    const centralNomePorId = {};
+
+    // Mapear nomes de centrais do select
+    if (centralSelect) {
+        centralSelect.querySelectorAll('option').forEach(opt => {
+            const val = opt.value;
+            const nome = opt.textContent.trim();
+            if (val) centralNomePorId[String(val)] = nome;
+        });
+    }
+
+    const rows = [];
+    if (almoxSelect) {
+        almoxSelect.querySelectorAll('option').forEach((opt, idx) => {
+            if (idx === 0) return;
+            const id = opt.value;
+            const nome = opt.textContent.trim();
+            const centralId = opt.getAttribute('data-central') || '';
+            const centralNome = centralNomePorId[String(centralId)] || centralId || '';
+            rows.push({ id, nome, centralId, centralNome });
+        });
+    }
+
+    body.innerHTML = rows.map(r => `
+        <tr data-id="${r.id}" data-central="${r.centralId}">
+            <td>${r.id}</td>
+            <td>${r.nome}</td>
+            <td>${r.centralNome}</td>
+            <td>
+                <input type="checkbox" class="form-check-input operador-almox-check" value="${r.id}">
+            </td>
+        </tr>
+    `).join('');
+
+    // Listeners de seleção
+    body.querySelectorAll('.operador-almox-check').forEach(chk => {
+        chk.addEventListener('change', function() {
+            const id = this.value;
+            if (this.checked) {
+                if (!operadorAlmoxSelecionados.includes(id)) operadorAlmoxSelecionados.push(id);
+            } else {
+                operadorAlmoxSelecionados = operadorAlmoxSelecionados.filter(v => String(v) !== String(id));
+            }
+            renderOperadorAlmoxChips();
+            try { onOperadorAlmoxMultiChange(); } catch (_) {}
+            try { refreshOperadorSubTable(); } catch (_) {}
+        });
+    });
+
+    // Botões utilitários
+    const btnAll = document.getElementById('operador-almox-select-all');
+    const btnClear = document.getElementById('operador-almox-clear');
+    const search = document.getElementById('operador-almox-search');
+    if (btnAll) btnAll.addEventListener('click', function(){
+        document.querySelectorAll('#operador-almox-table-body tr').forEach(row => {
+            if (row.style.display === 'none') return;
+            const chk = row.querySelector('.operador-almox-check');
+            if (!chk) return;
+            chk.checked = true;
+            const id = chk.value;
+            if (!operadorAlmoxSelecionados.includes(id)) operadorAlmoxSelecionados.push(id);
+        });
+        renderOperadorAlmoxChips();
+        try { onOperadorAlmoxMultiChange(); } catch (_) {}
+        try { refreshOperadorSubTable(); } catch (_) {}
+    });
+    if (btnClear) btnClear.addEventListener('click', function(){
+        operadorAlmoxSelecionados = [];
+        document.querySelectorAll('#operador-almox-table-body .operador-almox-check').forEach(chk => { chk.checked = false; });
+        renderOperadorAlmoxChips();
+        try { onOperadorAlmoxMultiChange(); } catch (_) {}
+        try { refreshOperadorSubTable(); } catch (_) {}
+    });
+    if (search) search.addEventListener('input', refreshOperadorAlmoxTable);
+
+    operadorAlmoxTableInitialized = true;
+}
+
+function refreshOperadorAlmoxTable() {
+    const centralId = document.getElementById('user-central')?.value || '';
+    const term = (document.getElementById('operador-almox-search')?.value || '').toLowerCase();
+    const rows = document.querySelectorAll('#operador-almox-table-body tr');
+    let anyVisible = false;
+    rows.forEach(row => {
+        const cId = row.getAttribute('data-central') || '';
+        const nome = row.children[1]?.textContent?.toLowerCase() || '';
+        let show = centralId ? (String(cId) === String(centralId)) : true;
+        if (term) show = show && nome.includes(term);
+        row.style.display = show ? '' : 'none';
+        if (show) anyVisible = true;
+    });
+    // Se nada visível com a central atual, tentar normalizar ID da central
+    if (centralId && !anyVisible) {
+        fetchJson(`/api/centrais/${encodeURIComponent(centralId)}`)
+            .then(data => {
+                const mappedCentral = String(data.id || centralId);
+                rows.forEach(row => {
+                    const cId = row.getAttribute('data-central') || '';
+                    const nome = row.children[1]?.textContent?.toLowerCase() || '';
+                    let show = String(cId) === String(mappedCentral);
+                    if (term) show = show && nome.includes(term);
+                    row.style.display = show ? '' : 'none';
+                });
+            })
+            .catch(() => { /* no-op */ });
+    }
+}
+
+function renderOperadorAlmoxChips() {
+    const container = document.getElementById('operador-almox-selected-chips');
+    if (!container) return;
+    container.innerHTML = '';
+    if (operadorAlmoxSelecionados.length === 0) {
+        container.innerHTML = '<div class="text-muted">Nenhum almoxarifado selecionado</div>';
+        return;
+    }
+    operadorAlmoxSelecionados.forEach(id => {
+        const row = document.querySelector(`#operador-almox-table-body tr[data-id="${CSS.escape(String(id))}"]`);
+        const nome = row ? (row.children[1]?.textContent || id) : id;
+        const chip = document.createElement('div');
+        chip.className = 'badge bg-secondary me-2 mb-2 d-inline-flex align-items-center';
+        chip.innerHTML = `${nome}<button type="button" class="btn-close btn-close-white ms-2" aria-label="Remover"></button>`;
+        chip.querySelector('button').addEventListener('click', function(){
+            operadorAlmoxSelecionados = operadorAlmoxSelecionados.filter(v => String(v) !== String(id));
+            const chk = document.querySelector(`#operador-almox-table-body .operador-almox-check[value="${CSS.escape(String(id))}"]`);
+            if (chk) chk.checked = false;
+            renderOperadorAlmoxChips();
+            try { onOperadorAlmoxMultiChange(); } catch (_) {}
+            try { refreshOperadorSubTable(); } catch (_) {}
+        });
+        container.appendChild(chip);
+    });
+}
+
+function onOperadorAlmoxMultiChange() {
+    const setorSelect = document.getElementById('user-setor');
+    const centralId = document.getElementById('user-central')?.value || '';
+    if (!setorSelect) return;
+    const setorOptions = setorSelect.querySelectorAll('option');
+    const selectedSubs = operadorSubsSelecionados.slice().map(String);
+    const selectedAlmox = operadorAlmoxSelecionados.slice().map(String);
+
+    let setorVisible = 0;
+    setorOptions.forEach((opt, idx) => {
+        if (idx === 0) return;
+        const sid = opt.getAttribute('data-sub-almoxarifado') || '';
+        const aid = opt.getAttribute('data-almoxarifado') || '';
+        const cid = opt.getAttribute('data-central') || '';
+        const sidMulti = (opt.getAttribute('data-sub-almoxarifado-ids') || '').split(',').filter(Boolean);
+        const aidMulti = (opt.getAttribute('data-almoxarifado-ids') || '').split(',').filter(Boolean);
+        const cidMulti = (opt.getAttribute('data-central-ids') || '').split(',').filter(Boolean);
+        let show = false;
+        if (selectedSubs.length > 0) {
+            const matchSub = selectedSubs.some(x => String(sid) === String(x) || sidMulti.includes(String(x)));
+            show = matchSub;
+        } else if (selectedAlmox.length > 0) {
+            const matchAlmox = selectedAlmox.some(x => String(aid) === String(x) || aidMulti.includes(String(x)));
+            show = matchAlmox;
+        } else if (centralId) {
+            const matchCentral = String(cid) === String(centralId) || cidMulti.includes(String(centralId));
+            show = matchCentral;
+        } else {
+            show = true;
+        }
+        opt.style.display = show ? '' : 'none';
+        if (show) setorVisible++;
+    });
+
+    const selectedSetor = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+    if (selectedSetor && selectedSetor.style.display === 'none') {
+        setorSelect.value = '';
+    }
+    setorSelect.disabled = setorVisible === 0;
+
+    // Fallbacks: normalizar Central quando necessário
+    const onlyCentralFiltering = !!centralId && selectedAlmox.length === 0 && selectedSubs.length === 0 && setorVisible === 0;
+    if (onlyCentralFiltering) {
+        fetchJson(`/api/centrais/${encodeURIComponent(centralId)}`)
+            .then(data => {
+                const mappedCentral = String(data.id || centralId);
+                let setorVisible2 = 0;
+                setorOptions.forEach((opt, idx) => {
+                    if (idx === 0) return;
+                    const cid = opt.getAttribute('data-central') || '';
+                    const cidMulti = (opt.getAttribute('data-central-ids') || '').split(',').filter(Boolean);
+                    const show = String(cid) === String(mappedCentral) || cidMulti.includes(String(mappedCentral));
+                    opt.style.display = show ? '' : 'none';
+                    if (show) setorVisible2++;
+                });
+                const selectedSetor2 = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+                if (selectedSetor2 && selectedSetor2.style.display === 'none') {
+                    setorSelect.value = '';
+                }
+                setorSelect.disabled = setorVisible2 === 0;
+            })
+            .catch(() => { /* no-op */ });
+    }
+
+    try { syncOperadorSubsFromSetor(); } catch (_) {}
+}
+
+// ================= Operador Setor: Tabela múltipla de Sub‑Almoxarifados =================
+let operadorSubsSelecionados = [];
+let operadorSubTableInitialized = false;
+
+function initOperadorSubTable() {
+    if (operadorSubTableInitialized) return;
+    const body = document.getElementById('operador-sub-table-body');
+    if (!body) return;
+
+    // Mapear nomes de almoxarifado
+    const almoxSelect = document.getElementById('user-almoxarifado');
+    const almoxNomePorId = {};
+    const almoxCentralPorId = {};
+    if (almoxSelect) {
+        almoxSelect.querySelectorAll('option').forEach(opt => {
+            const val = opt.value;
+            const nome = opt.textContent.trim();
+            if (val) {
+                almoxNomePorId[String(val)] = nome;
+                almoxCentralPorId[String(val)] = opt.getAttribute('data-central') || '';
+            }
+        });
+    }
+
+    // Construir linhas a partir do select de sub‑almoxarifados já fornecido pelo template
+    const subSelect = document.getElementById('user-sub-almoxarifado');
+    const rows = [];
+    subSelect.querySelectorAll('option').forEach((opt, idx) => {
+        if (idx === 0) return;
+        const id = opt.value;
+        const nome = opt.textContent.trim();
+        const almoxId = opt.getAttribute('data-almoxarifado') || '';
+        const almoxNome = almoxNomePorId[String(almoxId)] || almoxId || '';
+        rows.push({ id, nome, almoxId, almoxNome });
+    });
+
+    // Montar tabela
+    body.innerHTML = rows.map(r => `
+        <tr data-id="${r.id}" data-almox="${r.almoxId}" data-central="${almoxCentralPorId[String(r.almoxId)] || ''}">
+            <td>${r.id}</td>
+            <td>${r.nome}</td>
+            <td>${r.almoxNome}</td>
+            <td>
+                <input type="checkbox" class="form-check-input operador-sub-check" value="${r.id}">
+            </td>
+        </tr>
+    `).join('');
+
+    // Listeners de seleção
+    body.querySelectorAll('.operador-sub-check').forEach(chk => {
+        chk.addEventListener('change', function() {
+            const id = this.value;
+            if (this.checked) {
+                if (!operadorSubsSelecionados.includes(id)) operadorSubsSelecionados.push(id);
+            } else {
+                operadorSubsSelecionados = operadorSubsSelecionados.filter(v => String(v) !== String(id));
+            }
+            renderOperadorSubChips();
+        });
+    });
+
+    // Botões utilitários
+    const btnAll = document.getElementById('operador-sub-select-all');
+    const btnClear = document.getElementById('operador-sub-clear');
+    const search = document.getElementById('operador-sub-search');
+    if (btnAll) btnAll.addEventListener('click', function(){
+        // Selecionar apenas os visíveis (pertencentes à Central e filtros atuais)
+        document.querySelectorAll('#operador-sub-table-body tr').forEach(row => {
+            if (row.style.display === 'none') return;
+            const chk = row.querySelector('.operador-sub-check');
+            if (!chk) return;
+            chk.checked = true;
+            const id = chk.value;
+            if (!operadorSubsSelecionados.includes(id)) operadorSubsSelecionados.push(id);
+        });
+        renderOperadorSubChips();
+    });
+    if (btnClear) btnClear.addEventListener('click', function(){
+        operadorSubsSelecionados = [];
+        document.querySelectorAll('#operador-sub-table-body .operador-sub-check').forEach(chk => { chk.checked = false; });
+        renderOperadorSubChips();
+    });
+    if (search) search.addEventListener('input', refreshOperadorSubTable);
+
+    // Normalizar IDs e Central das linhas (corrige mismatch entre sequenciais e ObjectId)
+    (async function normalizeOperadorSubRows() {
+        try {
+            const almoxSelect = document.getElementById('user-almoxarifado');
+            if (!almoxSelect) return;
+            const knownAlmoxIds = new Set();
+            almoxSelect.querySelectorAll('option').forEach(opt => knownAlmoxIds.add(String(opt.value)));
+
+            const tableRows = Array.from(document.querySelectorAll('#operador-sub-table-body tr'));
+            const unknownIds = [...new Set(tableRows
+                .map(r => String(r.getAttribute('data-almox') || ''))
+                .filter(id => id && !knownAlmoxIds.has(id))
+            )];
+
+            if (unknownIds.length === 0) return;
+
+            const results = await Promise.all(unknownIds.map(id => fetchJson(`/api/almoxarifados/${encodeURIComponent(id)}`).catch(() => null)));
+            for (let i = 0; i < unknownIds.length; i++) {
+                const resp = results[i];
+                if (!resp) continue;
+                const normalizedId = String(resp.id || '');
+                const centralId = String(resp.central_id ?? '');
+
+                let normalizedName = normalizedId;
+                const opt = almoxSelect.querySelector(`option[value="${CSS.escape(normalizedId)}"]`);
+                if (opt) normalizedName = opt.textContent.trim();
+
+                document.querySelectorAll(`#operador-sub-table-body tr[data-almox="${CSS.escape(unknownIds[i])}"]`).forEach(row => {
+                    row.setAttribute('data-almox', normalizedId);
+                    row.setAttribute('data-central', centralId);
+                    const cellName = row.children[2];
+                    if (cellName) cellName.textContent = normalizedName;
+                });
+            }
+            // Reaplicar filtro após normalização
+            refreshOperadorSubTable();
+        } catch (e) {
+            console.warn('Falha ao normalizar linhas de Sub‑Almoxarifados:', e);
+        }
+    })();
+
+    operadorSubTableInitialized = true;
+}
+
+function refreshOperadorSubTable() {
+    const almoxIdSingle = document.getElementById('user-almoxarifado')?.value || '';
+    const centralId = document.getElementById('user-central')?.value || '';
+    const setorId = document.getElementById('user-setor')?.value || '';
+    const term = (document.getElementById('operador-sub-search')?.value || '').toLowerCase();
+    const rows = document.querySelectorAll('#operador-sub-table-body tr');
+    const almoxIds = (operadorAlmoxSelecionados && operadorAlmoxSelecionados.length > 0)
+        ? operadorAlmoxSelecionados.slice().map(String)
+        : (almoxIdSingle ? [String(almoxIdSingle)] : []);
+    const applyAlmoxFilter = almoxIds.length > 0 && !setorId; // Quando Setor está selecionado, não restringir por Almox
+    let effectiveCentralId = centralId;
+    let anyVisible = false;
+    rows.forEach(row => {
+        const aId = row.getAttribute('data-almox') || '';
+        const cId = row.getAttribute('data-central') || '';
+        const nome = row.children[1]?.textContent?.toLowerCase() || '';
+        let show = !!effectiveCentralId && (String(cId) === String(effectiveCentralId));
+        if (applyAlmoxFilter) show = show && (almoxIds.some(x => String(aId) === String(x)));
+        if (term) show = show && nome.includes(term);
+        row.style.display = show ? '' : 'none';
+        if (show) anyVisible = true;
+    });
+
+    // Fallback: se nada visível com a central atual, tentar normalizar ID da central
+    if (centralId && !anyVisible) {
+        fetchJson(`/api/centrais/${encodeURIComponent(centralId)}`)
+            .then(data => {
+                effectiveCentralId = String(data.id || centralId);
+                let anyVisible2 = false;
+                rows.forEach(row => {
+                    const aId = row.getAttribute('data-almox') || '';
+                    const cId = row.getAttribute('data-central') || '';
+                    const nome = row.children[1]?.textContent?.toLowerCase() || '';
+                    let show = !!effectiveCentralId && (String(cId) === String(effectiveCentralId));
+                    if (applyAlmoxFilter) show = show && (almoxIds.some(x => String(aId) === String(x)));
+                    if (term) show = show && nome.includes(term);
+                    row.style.display = show ? '' : 'none';
+                    if (show) anyVisible2 = true;
+                });
+                // Podar/atualizar seleção após refiltro
+                const visibleIds = new Set();
+                rows.forEach(row => { if (row.style.display !== 'none') visibleIds.add(String(row.getAttribute('data-id') || '')); });
+                const before = operadorSubsSelecionados.slice();
+                operadorSubsSelecionados = operadorSubsSelecionados.filter(id => visibleIds.has(String(id)));
+                document.querySelectorAll('#operador-sub-table-body .operador-sub-check').forEach(chk => {
+                    chk.checked = operadorSubsSelecionados.includes(chk.value) && (chk.closest('tr').style.display !== 'none');
+                });
+                const changed = before.length !== operadorSubsSelecionados.length || before.some((v,i) => v !== operadorSubsSelecionados[i]);
+                if (changed) renderOperadorSubChips();
+            })
+            .catch(() => { /* ignora */ });
+    }
+
+    // Podar seleção para IDs visíveis e sincronizar checkboxes/chips
+    const visibleIds = new Set();
+    rows.forEach(row => { if (row.style.display !== 'none') visibleIds.add(String(row.getAttribute('data-id') || '')); });
+    const before = operadorSubsSelecionados.slice();
+    operadorSubsSelecionados = operadorSubsSelecionados.filter(id => visibleIds.has(String(id)));
+    // Atualizar checkboxes conforme seleção
+    document.querySelectorAll('#operador-sub-table-body .operador-sub-check').forEach(chk => {
+        chk.checked = operadorSubsSelecionados.includes(chk.value) && (chk.closest('tr').style.display !== 'none');
+    });
+    // Se houve alteração, re-render chips
+    const changed = before.length !== operadorSubsSelecionados.length || before.some((v,i) => v !== operadorSubsSelecionados[i]);
+    if (changed) renderOperadorSubChips();
+}
+
+function renderOperadorSubChips() {
+    const container = document.getElementById('operador-sub-selected-chips');
+    if (!container) return;
+    container.innerHTML = '';
+    if (operadorSubsSelecionados.length === 0) {
+        container.innerHTML = '<div class="text-muted">Nenhum sub‑almoxarifado selecionado</div>';
+        return;
+    }
+    operadorSubsSelecionados.forEach(id => {
+        const row = document.querySelector(`#operador-sub-table-body tr[data-id="${CSS.escape(String(id))}"]`);
+        const nome = row ? (row.children[1]?.textContent || id) : id;
+        const chip = document.createElement('div');
+        chip.className = 'badge bg-secondary me-2 mb-2 d-inline-flex align-items-center';
+        chip.innerHTML = `${nome}<button type="button" class="btn-close btn-close-white ms-2" aria-label="Remover"></button>`;
+        chip.querySelector('button').addEventListener('click', function(){
+            operadorSubsSelecionados = operadorSubsSelecionados.filter(v => String(v) !== String(id));
+            const chk = document.querySelector(`#operador-sub-table-body .operador-sub-check[value="${CSS.escape(String(id))}"]`);
+            if (chk) chk.checked = false;
+            renderOperadorSubChips();
+        });
+        container.appendChild(chip);
+    });
+}
+
+function syncOperadorSubsFromSetor() {
+    const setorSelect = document.getElementById('user-setor');
+    if (!setorSelect) return;
+    const opt = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+    const idsStr = opt ? (opt.getAttribute('data-sub-almoxarifado-ids') || '') : '';
+    const ids = idsStr.split(',').filter(Boolean);
+    operadorSubsSelecionados = ids.slice();
+    // Marcar checkboxes
+    document.querySelectorAll('#operador-sub-table-body .operador-sub-check').forEach(chk => {
+        chk.checked = operadorSubsSelecionados.includes(chk.value);
+    });
+    renderOperadorSubChips();
+
+    // Fallback: se não houver dados no option, buscar do endpoint de Setor
+    if (operadorSubsSelecionados.length === 0 && setorSelect.value) {
+        fetchJson(`/api/setores/${encodeURIComponent(setorSelect.value)}`)
+            .then(resp => {
+                const arr = (resp && resp.sub_almoxarifado_ids) ? resp.sub_almoxarifado_ids : [];
+                if (Array.isArray(arr) && arr.length > 0) {
+                    operadorSubsSelecionados = arr.map(String);
+                    document.querySelectorAll('#operador-sub-table-body .operador-sub-check').forEach(chk => {
+                        chk.checked = operadorSubsSelecionados.includes(chk.value);
+                    });
+                    renderOperadorSubChips();
+                }
+            })
+            .catch(err => console.warn('Não foi possível carregar vínculos de sub‑almoxarifados do Setor:', err));
     }
 }
 
@@ -556,6 +1147,10 @@ function onUserCentralChange() {
     if (setorSelect) {
         onUserAlmoxChange();
     }
+    // Atualizar tabela de subs (filtro por almox)
+    try { refreshOperadorSubTable(); } catch (_) {}
+    // Atualizar tabela de almox múltiplos e cascade de Setor, quando modo Operador Setor
+    try { refreshOperadorAlmoxTable(); onOperadorAlmoxMultiChange(); } catch (_) {}
     }
 }
 
@@ -569,53 +1164,184 @@ function onUserAlmoxChange() {
     const centralSelect = document.getElementById('user-central');
     const centralId = centralSelect ? (centralSelect.value || '') : '';
 
-    // Filtrar sub-almoxarifados pelo data-almoxarifado
+    // Filtrar sub-almoxarifados pelo data-almoxarifado, com fallback de mapeamento
     const subOptions = subSelect.querySelectorAll('option');
+    let visibleCount = 0;
     subOptions.forEach((opt, idx) => {
         if (idx === 0) return;
         const parentId = opt.getAttribute('data-almoxarifado') || '';
         if (!almoxId) {
             opt.style.display = 'none';
         } else {
-            opt.style.display = (parentId === almoxId) ? '' : 'none';
+            const show = (String(parentId) === String(almoxId));
+            opt.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
         }
     });
 
-    // Resetar seleção e desabilitar se necessário
-    const selectedSub = subSelect.querySelector(`option[value="${subSelect.value}"]`);
-    if (selectedSub && selectedSub.style.display === 'none') {
-        subSelect.value = '';
-    }
-    subSelect.disabled = !almoxId;
-
-    // Cascade para setores
-    if (setorSelect) {
-        const subId = subSelect.value || '';
-        const setorOptions = setorSelect.querySelectorAll('option');
-        let visibleCount = 0;
-        setorOptions.forEach((opt, idx) => {
+    const looksLikeOid = typeof almoxId === 'string' && almoxId.length === 24;
+    const looksLikeSeq = /^[0-9]+$/.test(String(almoxId));
+    const refilterWith = (matchId) => {
+        visibleCount = 0;
+        subOptions.forEach((opt, idx) => {
             if (idx === 0) return;
-            const sid = opt.getAttribute('data-sub-almoxarifado') || '';
-            const aid = opt.getAttribute('data-almoxarifado') || '';
-            const cid = opt.getAttribute('data-central') || '';
-            let show = false;
-            if (subId) {
-                show = (sid === subId);
-            } else if (almoxId) {
-                show = (aid === almoxId);
-            } else if (centralId) {
-                show = (cid === centralId);
-            } else {
-                show = false;
-            }
+            const parentId = opt.getAttribute('data-almoxarifado') || '';
+            const show = !!matchId && (String(parentId) === String(matchId));
             opt.style.display = show ? '' : 'none';
             if (show) visibleCount++;
         });
-        const selectedSetor = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
-        if (selectedSetor && selectedSetor.style.display === 'none') {
-            setorSelect.value = '';
+        return visibleCount;
+    };
+
+    // Se nada ficou visível, tentar mapear o ID via API para normalizar (ObjectId ↔ sequencial)
+    if (almoxId && visibleCount === 0 && (looksLikeOid || looksLikeSeq)) {
+        fetchJson(`/api/almoxarifados/${encodeURIComponent(almoxId)}`)
+            .then(data => {
+                const seqId = String((data.id_normalized ?? '') || '');
+                const rawId = String((data.id ?? '') || '');
+                const normalizedVisible = refilterWith(seqId || rawId);
+                // Caso ainda não haja opções visíveis, normalizar os parents dos Sub‑Almoxarifados (sequencial → ObjectId)
+                if (normalizedVisible === 0) {
+                    normalizeSubParentsByApi().then(() => {
+                        const normalizedVisible2 = refilterWith(seqId || rawId);
+                        finalizeState(seqId || almoxId, normalizedVisible2, rawId || almoxId);
+                    }).catch(() => {
+                        finalizeState(seqId || almoxId, normalizedVisible, rawId || almoxId);
+                    });
+                } else {
+                    finalizeState(seqId || almoxId, normalizedVisible, rawId || almoxId);
+                }
+            })
+            .catch(() => {
+                finalizeState(almoxId, visibleCount, almoxId);
+            });
+    } else {
+        finalizeState(almoxId, visibleCount, almoxId);
+    }
+
+    // Normaliza os atributos data-almoxarifado das opções do Sub‑Almoxarifado, convertendo IDs sequenciais para ObjectId
+    function normalizeSubParentsByApi() {
+        const uniqueSeqParents = new Set();
+        subOptions.forEach((opt, idx) => {
+            if (idx === 0) return;
+            const parentId = opt.getAttribute('data-almoxarifado') || '';
+            if (/^[0-9]+$/.test(String(parentId))) uniqueSeqParents.add(String(parentId));
+        });
+        if (uniqueSeqParents.size === 0) return Promise.resolve();
+        const promises = Array.from(uniqueSeqParents).map(pid => {
+            return fetchJson(`/api/almoxarifados/${encodeURIComponent(pid)}`).then(data => {
+                const rawId = String((data.id ?? '') || '');
+                if (rawId) {
+                    subOptions.forEach((opt, idx) => {
+                        if (idx === 0) return;
+                        if (String(opt.getAttribute('data-almoxarifado') || '') === String(pid)) {
+                            opt.setAttribute('data-almoxarifado', rawId);
+                        }
+                    });
+                }
+            }).catch(() => {});
+        });
+        return Promise.all(promises);
+    }
+
+    function finalizeState(normalizedAlmoxId, subVisible, rawAlmoxId) {
+        // Resetar seleção e desabilitar se necessário
+        const selectedSub = subSelect.querySelector(`option[value="${subSelect.value}"]`);
+        if (selectedSub && selectedSub.style.display === 'none') {
+            subSelect.value = '';
         }
-        setorSelect.disabled = visibleCount === 0;
+        subSelect.disabled = !normalizedAlmoxId || subVisible === 0;
+
+        // Cascade para setores, usando ID normalizado quando disponível
+        if (setorSelect) {
+            const subId = subSelect.value || '';
+            const setorOptions = setorSelect.querySelectorAll('option');
+            let setorVisible = 0;
+            setorOptions.forEach((opt, idx) => {
+                if (idx === 0) return;
+                const sid = opt.getAttribute('data-sub-almoxarifado') || '';
+                const aid = opt.getAttribute('data-almoxarifado') || '';
+                const cid = opt.getAttribute('data-central') || '';
+                const sidMulti = (opt.getAttribute('data-sub-almoxarifado-ids') || '').split(',').filter(Boolean);
+                const aidMulti = (opt.getAttribute('data-almoxarifado-ids') || '').split(',').filter(Boolean);
+                const cidMulti = (opt.getAttribute('data-central-ids') || '').split(',').filter(Boolean);
+                let show = false;
+                if (subId) {
+                    const subMatch = String(sid) === String(subId) || sidMulti.includes(String(subId));
+                    show = subMatch;
+                } else if (normalizedAlmoxId) {
+                    const almoxCandidates = [String(normalizedAlmoxId), String(rawAlmoxId || '')].filter(Boolean);
+                    const almoxMatch = almoxCandidates.some(x => String(aid) === x || aidMulti.includes(x));
+                    show = almoxMatch;
+                } else if (centralId) {
+                    const centralMatch = String(cid) === String(centralId) || cidMulti.includes(String(centralId));
+                    show = centralMatch;
+                } else {
+                    // Sem filtro selecionado: mostrar todos os setores
+                    show = true;
+                }
+                opt.style.display = show ? '' : 'none';
+                if (show) setorVisible++;
+            });
+            const selectedSetor = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+            if (selectedSetor && selectedSetor.style.display === 'none') {
+                setorSelect.value = '';
+            }
+            setorSelect.disabled = setorVisible === 0;
+
+            // Fallback: se apenas central estiver selecionada e nada visível, tentar normalizar central
+            const onlyCentralFiltering = !!centralId && !normalizedAlmoxId && !subId;
+            if (onlyCentralFiltering && setorVisible === 0) {
+                fetchJson(`/api/centrais/${encodeURIComponent(centralId)}`)
+                    .then(data => {
+                        const mappedCentral = String(data.id || centralId);
+                        let setorVisible2 = 0;
+                        setorOptions.forEach((opt, idx) => {
+                            if (idx === 0) return;
+                            const cid = opt.getAttribute('data-central') || '';
+                            const cidMulti = (opt.getAttribute('data-central-ids') || '').split(',').filter(Boolean);
+                            const show = String(cid) === String(mappedCentral) || cidMulti.includes(String(mappedCentral));
+                            opt.style.display = show ? '' : 'none';
+                            if (show) setorVisible2++;
+                        });
+                        const selectedSetor2 = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+                        if (selectedSetor2 && selectedSetor2.style.display === 'none') {
+                            setorSelect.value = '';
+                        }
+                        setorSelect.disabled = setorVisible2 === 0;
+                    })
+                    .catch(() => { /* no-op */ });
+            }
+
+            // Fallback: se almoxarifado estiver selecionado e nada visível, tentar normalizar almox e refiltrar
+            const almoxFiltering = !!normalizedAlmoxId && setorVisible === 0;
+            if (almoxFiltering) {
+                const almoxIdToMap = String(rawAlmoxId || normalizedAlmoxId);
+                fetchJson(`/api/almoxarifados/${encodeURIComponent(almoxIdToMap)}`)
+                    .then(data => {
+                        const seqId = String((data.id_normalized ?? '') || '');
+                        const idRaw = String((data.id ?? '') || '');
+                        let setorVisible3 = 0;
+                        setorOptions.forEach((opt, idx) => {
+                            if (idx === 0) return;
+                            const aid = opt.getAttribute('data-almoxarifado') || '';
+                            const aidMulti = (opt.getAttribute('data-almoxarifado-ids') || '').split(',').filter(Boolean);
+                            const candidates = [seqId, idRaw].filter(Boolean);
+                            const show = candidates.some(x => String(aid) === String(x) || aidMulti.includes(String(x)));
+                            opt.style.display = show ? '' : 'none';
+                            if (show) setorVisible3++;
+                        });
+                        const selectedSetor3 = setorSelect.querySelector(`option[value="${setorSelect.value}"]`);
+                        if (selectedSetor3 && selectedSetor3.style.display === 'none') {
+                            setorSelect.value = '';
+                        }
+                        setorSelect.disabled = setorVisible3 === 0;
+                    })
+                    .catch(() => { /* no-op */ });
+            }
+        }
+        // Ao mudar listas, sincronizar seleção de subs a partir do setor
+        try { syncOperadorSubsFromSetor(); } catch (_) {}
     }
 }
 
@@ -799,6 +1525,17 @@ document.getElementById('userForm').addEventListener('submit', function(e) {
         setor_id: data.setor_id || null,
         categoria_id: data.categoria_id || null
     };
+
+    // Para Operador Setor, usar seleção primária dos widgets múltiplos como fallback
+    try {
+        const nivelAtual = document.getElementById('user-nivel').value;
+        if (nivelAtual === 'operador_setor') {
+            const almoxPrimario = (operadorAlmoxSelecionados && operadorAlmoxSelecionados[0]) ? String(operadorAlmoxSelecionados[0]) : null;
+            const subPrimario = (operadorSubsSelecionados && operadorSubsSelecionados[0]) ? String(operadorSubsSelecionados[0]) : null;
+            if (almoxPrimario) apiData.almoxarifado_id = almoxPrimario;
+            if (subPrimario) apiData.sub_almoxarifado_id = subPrimario;
+        }
+    } catch (_) {}
     
     // Adicionar senha (obrigatória na criação, opcional na edição)
     if (!isEditMode) {
@@ -826,13 +1563,37 @@ document.getElementById('userForm').addEventListener('submit', function(e) {
         body: JSON.stringify(apiData)
     })
     .then(data => {
+        // Se nível é Operador Setor, persistir múltiplos sub‑almoxarifados no setor
+        const nivelAtual = document.getElementById('user-nivel').value;
+        const setorIdAtual = document.getElementById('user-setor').value || null;
+        const subsSelecionados = operadorSubsSelecionados.slice();
+        const centralIdAtual = document.getElementById('user-central')?.value || '';
+        // Garantir que apenas sub‑almoxarifados da Central selecionada sejam persistidos
+        const subsDaCentral = subsSelecionados.filter(id => {
+            const row = document.querySelector(`#operador-sub-table-body tr[data-id="${CSS.escape(String(id))}"]`);
+            if (!row) return false;
+            const cId = row.getAttribute('data-central') || '';
+            return centralIdAtual ? String(cId) === String(centralIdAtual) : true;
+        });
+        const persistPromise = (nivelAtual === 'operador_setor' && setorIdAtual)
+            ? fetchJson(`/api/setores/${encodeURIComponent(setorIdAtual)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sub_almoxarifado_ids: subsDaCentral })
+              }).catch(err => {
+                console.error('Falha ao atualizar sub‑almoxarifados do setor:', err);
+                throw new Error('Usuário salvo, porém houve erro ao atualizar vínculos de sub‑almoxarifados do setor.');
+              })
+            : Promise.resolve();
+        return persistPromise.then(() => data);
+    })
+    .then(data => {
         // Se é criação de usuário e há categorias selecionadas, adicioná-las
         if (!isEditMode && categoriasSelecionadas.length > 0) {
             return adicionarCategoriasAposCreacao(data.id);
-        } else {
-            alert('Usuário salvo com sucesso!');
-            location.reload();
         }
+        alert('Usuário salvo com sucesso!');
+        location.reload();
     })
     .catch(error => {
         console.error('Erro:', error);

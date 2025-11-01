@@ -15,7 +15,7 @@ migrate = Migrate()
 mongo_client: MongoClient | None = None
 mongo_db = None
 
-def ensure_collections_and_indexes(db):
+def ensure_collections_and_indexes(db, logger=None):
     """Cria coleções essenciais e índices (idempotente)."""
     try:
         required = [
@@ -42,7 +42,10 @@ def ensure_collections_and_indexes(db):
         db['logs_auditoria'].create_index([('timestamp', ASCENDING)], name='idx_audit_time')
         db['logs_auditoria'].create_index([('usuario_id', ASCENDING)], name='idx_audit_user')
     except Exception as e:
-        print(f'[Mongo Init] Falha ao criar coleções/índices: {e}')
+        if logger is not None:
+            logger.error(f'[Mongo Init] Falha ao criar coleções/índices: {e}')
+        else:
+            print(f'[Mongo Init] Falha ao criar coleções/índices: {e}')
 
 def _sanitize_mongo_uri(uri: str) -> str:
     """Mascara credenciais em uma URI Mongo para evitar exposição em logs."""
@@ -67,8 +70,8 @@ def init_mongo(app):
         timeout_connect = int(os.environ.get('MONGO_TIMEOUT_CONNECT_MS', '12000'))
         timeout_socket = int(os.environ.get('MONGO_TIMEOUT_SOCKET_MS', '12000'))
         allow_invalid = os.environ.get('MONGO_TLS_ALLOW_INVALID', 'false').lower() == 'true'
-        print(f"[Mongo Init] Conectando em URI={_sanitize_mongo_uri(mongo_uri)} DB={dbname}")
-        print(f"[Mongo Init] Options: select={timeout_select}ms connect={timeout_connect}ms socket={timeout_socket}ms tlsAllowInvalid={allow_invalid}")
+        app.logger.info(f"[Mongo Init] Conectando em URI={_sanitize_mongo_uri(mongo_uri)} DB={dbname}")
+        app.logger.info(f"[Mongo Init] Options: select={timeout_select}ms connect={timeout_connect}ms socket={timeout_socket}ms tlsAllowInvalid={allow_invalid}")
         try:
             client_kwargs = {
                 'serverSelectionTimeoutMS': timeout_select,
@@ -89,7 +92,7 @@ def init_mongo(app):
             mongo_db = mongo_client[dbname]
 
             # Garantir coleções e índices
-            ensure_collections_and_indexes(mongo_db)
+            ensure_collections_and_indexes(mongo_db, logger=app.logger)
             
             # Seed/Upsert de usuário admin padrão
             try:
@@ -115,13 +118,47 @@ def init_mongo(app):
                     upsert=True
                 )
                 if result.matched_count:
-                    print('[Mongo Seed] Usuário admin existente atualizado com senha padrão "admin".')
+                    app.logger.info('[Mongo Seed] Usuário admin existente atualizado com senha padrão "admin".')
                 else:
-                    print('[Mongo Seed] Usuário admin criado com senha padrão "admin".')
+                    app.logger.info('[Mongo Seed] Usuário admin criado com senha padrão "admin".')
             except Exception as e:
-                print(f'[Mongo Seed] Falha ao semear/atualizar usuário admin: {e}')
+                app.logger.error(f'[Mongo Seed] Falha ao semear/atualizar usuário admin: {e}')
         except (ServerSelectionTimeoutError, AutoReconnect, Exception) as e:
-            print(f"[Mongo Init] Conexão MongoDB indisponível: {type(e).__name__}: {e}")
-            mongo_client = None
-            mongo_db = None
+            app.logger.error(f"[Mongo Init] Conexão MongoDB indisponível: {type(e).__name__}: {e}")
+            # Fallback: tentar iniciar banco em memória com mongomock para desenvolvimento/teste
+            try:
+                import mongomock
+                app.logger.warning("[Mongo Init] Usando mongomock (banco em memória) como fallback de desenvolvimento.")
+                mongo_client = mongomock.MongoClient()
+                mongo_db = mongo_client[dbname]
+                # Garantir coleções, índices e usuário admin padrão
+                ensure_collections_and_indexes(mongo_db, logger=app.logger)
+                try:
+                    usuarios_col = mongo_db['usuarios']
+                    usuarios_col.create_index([('username', ASCENDING)], unique=True, name='idx_unique_username')
+                    admin_fields = {
+                        'email': 'admin@local',
+                        'nome': 'Administrador',
+                        'password_hash': generate_password_hash('admin'),
+                        'ativo': True,
+                        'nivel_acesso': 'super_admin',
+                        'data_criacao': datetime.utcnow(),
+                        'ultimo_login': None,
+                        'central_id': None,
+                        'almoxarifado_id': None,
+                        'sub_almoxarifado_id': None,
+                        'setor_id': None,
+                    }
+                    usuarios_col.update_one(
+                        {'username': 'admin'},
+                        {'$set': {'username': 'admin', **admin_fields}},
+                        upsert=True
+                    )
+                    app.logger.info('[Mongo Seed] (mongomock) Usuário admin disponível com senha padrão "admin".')
+                except Exception as se:
+                    app.logger.error(f'[Mongo Seed] (mongomock) Falha ao preparar usuário admin: {se}')
+            except Exception as e2:
+                app.logger.error(f"[Mongo Init] Fallback mongomock indisponível: {type(e2).__name__}: {e2}")
+                mongo_client = None
+                mongo_db = None
     return mongo_client, mongo_db

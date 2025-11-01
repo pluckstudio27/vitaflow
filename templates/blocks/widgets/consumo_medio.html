@@ -1,0 +1,207 @@
+<div class="card border-0 shadow-sm h-100">
+  <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+    <h5 class="card-title mb-0">
+      <i class="fas fa-chart-line me-2"></i>
+      {% if is_operador_setor %}Consumo Médio do Setor (30 dias){% else %}Consumo Médio por Nível (30 dias){% endif %}
+    </h5>
+    <div class="d-flex align-items-center gap-2">
+      {% if is_operador_setor %}
+        <span class="badge bg-warning text-dark">Setor</span>
+      {% else %}
+        <span class="badge bg-primary">Central</span>
+        <span class="badge bg-success">Almox</span>
+        <span class="badge bg-info text-dark">Sub</span>
+        <span class="badge bg-warning text-dark">Setor</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    <!-- Contexto do usuário para filtro (hidden) -->
+    <div id="consumo-context" data-is-operador="{{ 'true' if is_operador_setor else 'false' }}" data-setor-id="{{ user.setor_id or '' }}" style="display:none"></div>
+    <div style="height:260px">
+      <canvas id="consumoMedioChart"></canvas>
+    </div>
+    <div class="mt-3">
+      <small class="text-muted" id="consumo-medio-resumo">Carregando dados de consumo...</small>
+    </div>
+  </div>
+</div>
+
+<!-- Chart.js CDN scoped to widget -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  const COLORS = {
+    central: '#2563eb',
+    almoxarifado: '#22c55e',
+    sub_almoxarifado: '#06b6d4',
+    setor: '#f59e0b'
+  };
+
+  function normalizeTipo(t) {
+    const s = String(t || '').toLowerCase();
+    if (!s) return '';
+    if (s.startsWith('sub') && s.includes('almox')) return 'sub_almoxarifado';
+    if (s.includes('almox') && !s.includes('sub')) return 'almoxarifado';
+    if (s.startsWith('cen')) return 'central';
+    if (s.startsWith('set')) return 'setor';
+    return s;
+  }
+
+  function formatDateKey(date) {
+    const d = new Date(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function getLastNDays(n) {
+    const days = [];
+    const today = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      days.push(formatDateKey(d));
+    }
+    return days;
+  }
+
+  function movingAverage(series, windowSize) {
+    const result = [];
+    let sum = 0;
+    const q = [];
+    for (let i = 0; i < series.length; i++) {
+      sum += series[i];
+      q.push(series[i]);
+      if (q.length > windowSize) sum -= q.shift();
+      const denom = Math.min(windowSize, i + 1);
+      result.push(sum / denom);
+    }
+    return result;
+  }
+
+  // Normaliza possíveis formatos de IDs vindos do backend (ObjectId('...'), números, strings)
+  function normalizeIdStr(val) {
+    const s = String(val ?? '').trim();
+    if (!s) return '';
+    const m = s.match(/ObjectId\(['"]?([0-9a-fA-F]{24})['"]?\)/);
+    if (m && m[1]) return m[1];
+    // Remove aspas envolventes se houver
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith('\'') && s.endsWith('\''))) {
+      return s.slice(1, -1);
+    }
+    return s;
+  }
+
+  async function loadConsumoMedio() {
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      const data_inicio = start.toISOString().substring(0, 10);
+      const data_fim = end.toISOString().substring(0, 10);
+
+      const resp = await fetchJson(`/api/movimentacoes?per_page=1000&data_inicio=${encodeURIComponent(data_inicio)}&data_fim=${encodeURIComponent(data_fim)}`);
+      let items = Array.isArray(resp.items) ? resp.items : [];
+
+      // Contexto operador/setor
+      const ctxEl = document.getElementById('consumo-context');
+      const isOperador = !!ctxEl && String(ctxEl.dataset.isOperador) === 'true';
+      const setorId = ctxEl ? normalizeIdStr(ctxEl.dataset.setorId || '') : '';
+      const LEVELS = isOperador ? ['setor'] : ['central', 'almoxarifado', 'sub_almoxarifado', 'setor'];
+
+      // Quando operador de setor, considerar apenas movimentos cuja origem é o próprio setor
+      if (isOperador && setorId) {
+        items = items.filter(m => {
+          const origemTipo = normalizeTipo(m.origem_tipo || m.local_tipo || '');
+          const origemId = normalizeIdStr(m.origem_id || m.local_id || '');
+          return origemTipo === 'setor' && origemId === setorId;
+        });
+      }
+
+      // Inicializa mapa de dias -> nível -> total
+      const days = getLastNDays(30);
+      const daily = {};
+      for (const day of days) {
+        daily[day] = { central: 0, almoxarifado: 0, sub_almoxarifado: 0, setor: 0 };
+      }
+
+      // Tipos de movimento que representam saída/consumo
+      const tiposSaida = new Set(['transferencia', 'saida', 'consumo', 'retirada']);
+
+      for (const m of items) {
+        const tipoMov = String(m.tipo_movimentacao || m.tipo || '').toLowerCase();
+        if (!tiposSaida.has(tipoMov)) continue;
+        const dayKey = formatDateKey(m.data_movimentacao || m.created_at || Date.now());
+        if (!daily[dayKey]) continue; // fora da janela
+        const origem = normalizeTipo(m.origem_tipo || m.local_tipo || '');
+        if (!LEVELS.includes(origem)) continue; // ignorar tipos desconhecidos
+        const qty = Number(m.quantidade || 0);
+        if (!isFinite(qty) || qty <= 0) continue;
+        daily[dayKey][origem] += qty;
+      }
+
+      // Construir séries e médias móveis de 7 dias
+      const datasets = [];
+      const resumo = {};
+      for (const level of LEVELS) {
+        const series = days.map(d => daily[d][level] || 0);
+        const avg7 = movingAverage(series, 7);
+        datasets.push({
+          label: level.charAt(0).toUpperCase() + level.slice(1).replace('_', ' '),
+          data: avg7,
+          borderColor: COLORS[level],
+          backgroundColor: COLORS[level],
+          tension: 0.25,
+          pointRadius: 0,
+          borderWidth: 2
+        });
+        // média dos últimos 7 dias
+        const last7 = avg7.slice(-7);
+        const mAvg = last7.length ? (last7.reduce((a, b) => a + b, 0) / last7.length) : 0;
+        resumo[level] = mAvg;
+      }
+
+      const ctx = document.getElementById('consumoMedioChart');
+      if (ctx) {
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: days.map(d => d.substring(5)), // MM-DD
+            datasets
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: true, position: 'bottom' },
+              tooltip: { mode: 'index', intersect: false }
+            },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+              y: { beginAtZero: true, title: { display: true, text: 'Consumo (média 7d)' } },
+              x: { title: { display: true, text: 'Últimos 30 dias' } }
+            }
+          }
+        });
+      }
+
+      const resumoEl = document.getElementById('consumo-medio-resumo');
+      if (resumoEl) {
+        if (isOperador) {
+          resumoEl.textContent = `Média (7d) — Setor: ${Number(resumo.setor || 0).toFixed(1)}`;
+        } else {
+          resumoEl.textContent = `Média (7d) — Central: ${Number(resumo.central || 0).toFixed(1)}, Almox: ${Number(resumo.almoxarifado || 0).toFixed(1)}, Sub: ${Number(resumo.sub_almoxarifado || 0).toFixed(1)}, Setor: ${Number(resumo.setor || 0).toFixed(1)}`;
+        }
+      }
+    } catch (e) {
+      const resumoEl = document.getElementById('consumo-medio-resumo');
+      if (resumoEl) resumoEl.textContent = 'Não foi possível carregar dados de consumo.';
+    }
+  }
+
+  // Inicialização quando o widget estiver no DOM
+  document.addEventListener('DOMContentLoaded', loadConsumoMedio);
+})();
+</script>

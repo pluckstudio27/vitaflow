@@ -1,4 +1,4 @@
-﻿from functools import wraps
+from functools import wraps
 from flask import request, jsonify, session, redirect, url_for, flash, current_app
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -8,9 +8,34 @@ import json
 import extensions
 from bson.objectid import ObjectId
 from config.ui_blocks import get_ui_blocks_config
+import secrets
 
 # ConfiguraÃ§Ã£o do Flask-Login
 login_manager = LoginManager()
+
+# CSRF helpers
+def ensure_csrf_token(renew: bool = False) -> str:
+    """Ensure there is a CSRF token in session; optionally renew.
+
+    Returns the current token (new or existing).
+    """
+    token = session.get('csrf_token')
+    if renew or not token:
+        token = secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return token
+
+def get_csrf_token() -> str | None:
+    """Get CSRF token from session without generating."""
+    return session.get('csrf_token')
+
+def extract_csrf_header() -> str | None:
+    """Retrieve CSRF token from common header names."""
+    return (
+        request.headers.get('X-CSRF-Token')
+        or request.headers.get('X-CSRFToken')
+        or request.headers.get('X-CSRF')
+    )
 
 # Classe de usuÃ¡rio para MongoDB
 class MongoUser:
@@ -96,18 +121,373 @@ class MongoUser:
             'ativo': self.is_active
         }
     
-    # Stubs de acesso por escopo (ajuste posterior conforme hierarquia Mongo)
+    # Acesso por escopo (MongoDB)
+    def _find_by_id(self, coll_name: str, raw_id):
+        """Resolve um documento por id numérico, ObjectId ou string direta."""
+        try:
+            db = extensions.mongo_db
+            if db is None:
+                return None
+            coll = db[coll_name]
+            doc = None
+            # id sequencial
+            try:
+                if isinstance(raw_id, int) or (isinstance(raw_id, str) and raw_id.isdigit()):
+                    doc = coll.find_one({'id': int(raw_id)})
+            except Exception:
+                doc = None
+            # ObjectId
+            if not doc:
+                try:
+                    oid = ObjectId(str(raw_id))
+                    doc = coll.find_one({'_id': oid})
+                except Exception:
+                    doc = None
+            # String direta (fallback)
+            if not doc and isinstance(raw_id, str):
+                doc = coll.find_one({'id': raw_id})
+            return doc
+        except Exception:
+            return None
+
+    def _central_id_of_local(self, tipo: str, raw_id):
+        """Obtém o central_id do local (almoxarifado/sub_almoxarifado/setor/central)."""
+        tipo = (tipo or '').lower()
+        if tipo == 'central':
+            c = self._find_by_id('centrais', raw_id)
+            try:
+                return str((c or {}).get('_id')) if c else None
+            except Exception:
+                return (c or {}).get('id')
+        if tipo == 'almoxarifado':
+            a = self._find_by_id('almoxarifados', raw_id)
+            cid = (a or {}).get('central_id')
+            c = self._find_by_id('centrais', cid)
+            try:
+                return str((c or {}).get('_id')) if c else None
+            except Exception:
+                return cid
+        if tipo == 'sub_almoxarifado':
+            s = self._find_by_id('sub_almoxarifados', raw_id)
+            if not s:
+                return None
+            a = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+            cid = (a or {}).get('central_id')
+            c = self._find_by_id('centrais', cid)
+            try:
+                return str((c or {}).get('_id')) if c else None
+            except Exception:
+                return cid
+        if tipo == 'setor':
+            se = self._find_by_id('setores', raw_id)
+            if not se:
+                return None
+            # Primeiro, tentar resolver via sub_almoxarifado vinculado ao setor
+            a = None
+            try:
+                s = self._find_by_id('sub_almoxarifados', (se or {}).get('sub_almoxarifado_id'))
+            except Exception:
+                s = None
+            if s:
+                a = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+            # Fallback: setor vinculado diretamente a um almoxarifado
+            if not a:
+                try:
+                    a = self._find_by_id('almoxarifados', (se or {}).get('almoxarifado_id'))
+                except Exception:
+                    a = None
+            # Fallback: lista de almoxarifados associados ao setor
+            if not a:
+                try:
+                    aids = (se or {}).get('almoxarifado_ids') or []
+                    if isinstance(aids, list) and len(aids) > 0:
+                        a = self._find_by_id('almoxarifados', aids[0])
+                except Exception:
+                    a = None
+            cid = (a or {}).get('central_id')
+            c = self._find_by_id('centrais', cid)
+            try:
+                return str((c or {}).get('_id')) if c else None
+            except Exception:
+                return cid
+        return None
+
     def can_access_central(self, central_id):
-        return True
+        level = self.nivel_acesso
+        if level == 'super_admin':
+            return True
+        if central_id is None:
+            return False
+        if level == 'admin_central':
+            u_cid = self._central_id_of_local('central', self.central_id)
+            t_cid = self._central_id_of_local('central', central_id)
+            return (u_cid is not None) and (t_cid is not None) and str(u_cid) == str(t_cid)
+        if level == 'gerente_almox' and self.almoxarifado_id is not None:
+            u_cid = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
+            t_cid = self._central_id_of_local('central', central_id)
+            return (u_cid is not None) and (t_cid is not None) and str(u_cid) == str(t_cid)
+        if level == 'resp_sub_almox' and self.sub_almoxarifado_id is not None:
+            u_cid = self._central_id_of_local('sub_almoxarifado', self.sub_almoxarifado_id)
+            t_cid = self._central_id_of_local('central', central_id)
+            return (u_cid is not None) and (t_cid is not None) and str(u_cid) == str(t_cid)
+        if level == 'operador_setor' and self.setor_id is not None:
+            u_cid = self._central_id_of_local('setor', self.setor_id)
+            t_cid = self._central_id_of_local('central', central_id)
+            return (u_cid is not None) and (t_cid is not None) and str(u_cid) == str(t_cid)
+        return False
     
     def can_access_almoxarifado(self, almoxarifado_id):
-        return True
+        level = self.nivel_acesso
+        if level == 'super_admin':
+            return True
+        if almoxarifado_id is None:
+            return False
+        a = self._find_by_id('almoxarifados', almoxarifado_id)
+        if not a:
+            return False
+        if level == 'admin_central':
+            a_cid = self._central_id_of_local('almoxarifado', almoxarifado_id)
+            u_cid = self._central_id_of_local('central', self.central_id)
+            return (a_cid is not None) and (u_cid is not None) and str(a_cid) == str(u_cid)
+        if level == 'gerente_almox':
+            a1 = self._find_by_id('almoxarifados', almoxarifado_id)
+            a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
+            try:
+                return (a1 is not None) and (a2 is not None) and str(a1.get('_id')) == str(a2.get('_id'))
+            except Exception:
+                return str(almoxarifado_id) == str(self.almoxarifado_id)
+        if level == 'resp_sub_almox' and self.sub_almoxarifado_id is not None:
+            s = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
+            a1 = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+            a2 = self._find_by_id('almoxarifados', almoxarifado_id)
+            try:
+                return (a1 is not None) and (a2 is not None) and str(a1.get('_id')) == str(a2.get('_id'))
+            except Exception:
+                return str((s or {}).get('almoxarifado_id')) == str(almoxarifado_id)
+        # operador_setor não tem acesso direto a almoxarifado
+        return False
     
     def can_access_sub_almoxarifado(self, sub_almoxarifado_id):
-        return True
+        level = self.nivel_acesso
+        if level == 'super_admin':
+            return True
+        if sub_almoxarifado_id is None:
+            return False
+        s = self._find_by_id('sub_almoxarifados', sub_almoxarifado_id)
+        if not s:
+            return False
+        if level == 'admin_central':
+            s_cid = self._central_id_of_local('sub_almoxarifado', sub_almoxarifado_id)
+            u_cid = self._central_id_of_local('central', self.central_id)
+            return (s_cid is not None) and (u_cid is not None) and str(s_cid) == str(u_cid)
+        if level == 'gerente_almox':
+            a1 = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+            a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
+            try:
+                return (a1 is not None) and (a2 is not None) and str(a1.get('_id')) == str(a2.get('_id'))
+            except Exception:
+                return str((s or {}).get('almoxarifado_id')) == str(self.almoxarifado_id)
+        if level == 'resp_sub_almox':
+            s1 = self._find_by_id('sub_almoxarifados', sub_almoxarifado_id)
+            s2 = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
+            try:
+                return (s1 is not None) and (s2 is not None) and str(s1.get('_id')) == str(s2.get('_id'))
+            except Exception:
+                return str(sub_almoxarifado_id) == str(self.sub_almoxarifado_id)
+        # operador_setor não tem acesso direto a sub_almoxarifado
+        return False
     
     def can_access_setor(self, setor_id):
-        return True
+        level = self.nivel_acesso
+        if level == 'super_admin':
+            return True
+        if setor_id is None:
+            return False
+        se = self._find_by_id('setores', setor_id)
+        if not se:
+            return False
+        if level == 'admin_central':
+            cid_t = self._central_id_of_local('setor', setor_id)
+            cid_u = self._central_id_of_local('central', self.central_id)
+            return (cid_t is not None) and (cid_u is not None) and str(cid_t) == str(cid_u)
+        if level == 'gerente_almox':
+            cid_t = self._central_id_of_local('setor', setor_id)
+            cid_u = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
+            return (cid_t is not None) and (cid_u is not None) and str(cid_t) == str(cid_u)
+        if level == 'resp_sub_almox':
+            # Permitir acesso a setores do MESMO sub_almox do usuário
+            s1 = self._find_by_id('sub_almoxarifados', (se or {}).get('sub_almoxarifado_id'))
+            s2 = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
+            try:
+                if (s1 is not None) and (s2 is not None) and str(s1.get('_id')) == str(s2.get('_id')):
+                    return True
+            except Exception:
+                if str((se or {}).get('sub_almoxarifado_id')) == str(self.sub_almoxarifado_id):
+                    return True
+            # Permitir acesso se setor listar explicitamente o sub_almox do usuário
+            try:
+                sub_ids = (se or {}).get('sub_almoxarifado_ids') or []
+                for sid in sub_ids:
+                    if str(sid) == str(self.sub_almoxarifado_id):
+                        return True
+            except Exception:
+                pass
+            # Permitir acesso a setores do mesmo ALMOXARIFADO do sub_almox do usuário
+            try:
+                u_sub = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
+                u_almox_id = (u_sub or {}).get('almoxarifado_id')
+            except Exception:
+                u_almox_id = None
+            if u_almox_id is not None:
+                # Checar vínculo direto
+                try:
+                    if str((se or {}).get('almoxarifado_id')) == str(u_almox_id):
+                        return True
+                except Exception:
+                    pass
+                # Checar lista de vínculos
+                try:
+                    aids = (se or {}).get('almoxarifado_ids') or []
+                    for aid in aids:
+                        if str(aid) == str(u_almox_id):
+                            return True
+                except Exception:
+                    pass
+            return False
+        if level == 'operador_setor':
+            se1 = self._find_by_id('setores', setor_id)
+            se2 = self._find_by_id('setores', self.setor_id)
+            try:
+                return (se1 is not None) and (se2 is not None) and str(se1.get('_id')) == str(se2.get('_id'))
+            except Exception:
+                return str(setor_id) == str(self.setor_id)
+        return False
+
+    def can_access_local(self, tipo: str, local_id):
+        tipo = (tipo or '').lower()
+        if tipo == 'central':
+            return self.can_access_central(local_id)
+        if tipo == 'almoxarifado':
+            return self.can_access_almoxarifado(local_id)
+        if tipo == 'sub_almoxarifado':
+            return self.can_access_sub_almoxarifado(local_id)
+        if tipo == 'setor':
+            return self.can_access_setor(local_id)
+        return False
+
+    def can_move_between(self, origem: dict, destino: dict) -> bool:
+        """
+        Verifica se o usuário pode movimentar entre origem e destino.
+        Regras por nível:
+          - super_admin: pode tudo
+          - admin_central: pode entre locais da sua central, incluindo 'central'
+          - gerente_almox: apenas entre 'almoxarifado'/'sub_almoxarifado'/'setor' do seu almoxarifado
+          - resp_sub_almox: apenas entre seu 'sub_almoxarifado' e seus 'setores'
+          - operador_setor: não pode movimentar
+        """
+        level = self.nivel_acesso
+        # Liberar completamente movimentações para super_admin e, por solicitação, para gerente_almox
+        if level == 'super_admin' or level == 'gerente_almox':
+            return True
+
+        o_tipo = (origem or {}).get('tipo')
+        o_id = (origem or {}).get('id')
+        d_tipo = (destino or {}).get('tipo')
+        d_id = (destino or {}).get('id')
+
+        if not (o_tipo and o_id and d_tipo and d_id):
+            return False
+
+        # Deve ter acesso a ambos
+        if not (self.can_access_local(o_tipo, o_id) and self.can_access_local(d_tipo, d_id)):
+            return False
+
+        allowed_types = {
+            'admin_central': {'central', 'almoxarifado', 'sub_almoxarifado', 'setor'},
+            'gerente_almox': {'almoxarifado', 'sub_almoxarifado', 'setor'},
+            'resp_sub_almox': {'almoxarifado', 'sub_almoxarifado', 'setor'},
+            'operador_setor': set(),
+        }
+        if level in allowed_types:
+            if o_tipo not in allowed_types[level] or d_tipo not in allowed_types[level]:
+                return False
+            # Restrição adicional para resp_sub_almox:
+            # permitir apenas movimentações entre seu sub_almoxarifado e seus setores,
+            # e transferência de almoxarifado -> sub_almoxarifado (mesma central/escopo).
+            if level == 'resp_sub_almox':
+                allowed_pairs = {
+                    ('sub_almoxarifado', 'setor'),
+                    ('setor', 'sub_almoxarifado'),
+                    ('almoxarifado', 'sub_almoxarifado'),
+                }
+                if (str(o_tipo).lower(), str(d_tipo).lower()) not in allowed_pairs:
+                    return False
+        else:
+            # níveis não catalogados
+            return False
+
+        # Garantir que ambos pertencerem à mesma central para níveis abaixo de super_admin
+        o_cid = self._central_id_of_local(o_tipo, o_id)
+        d_cid = self._central_id_of_local(d_tipo, d_id)
+        if level == 'admin_central':
+            u_cid = self._central_id_of_local('central', self.central_id)
+            return (u_cid is not None) and str(o_cid) == str(u_cid) and str(d_cid) == str(u_cid)
+        if level == 'gerente_almox' or level == 'resp_sub_almox':
+            return str(o_cid) == str(d_cid)
+        # operador_setor já retornaria False
+        return False
+
+    def can_access_produto(self, produto_id):
+        level = self.nivel_acesso
+        if level == 'super_admin':
+            return True
+        p = self._find_by_id('produtos', produto_id)
+        if not p:
+            return False
+        p_cid = (p or {}).get('central_id')
+        if level == 'admin_central':
+            # Normalizar central do produto e do usuário para evitar mismatch entre 'id' sequencial e ObjectId
+            try:
+                p_central = self._find_by_id('centrais', p_cid)
+                u_central = self._find_by_id('centrais', self.central_id)
+                if p_central and u_central:
+                    return str(p_central.get('_id')) == str(u_central.get('_id'))
+            except Exception:
+                pass
+            return str(p_cid) == str(self.central_id)
+        if level in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+            # Produtos vinculados à central do usuário
+            # Para níveis inferiores, checamos apenas a central
+            # (regra de movimentação já impede operações fora do escopo)
+            expected_cid = None
+            if self.central_id is not None:
+                expected_cid = self.central_id
+            else:
+                # derivar pelo local do usuário
+                if level == 'gerente_almox' and self.almoxarifado_id is not None:
+                    a = self._find_by_id('almoxarifados', self.almoxarifado_id)
+                    expected_cid = (a or {}).get('central_id')
+                elif level == 'resp_sub_almox' and self.sub_almoxarifado_id is not None:
+                    s = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
+                    a = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+                    expected_cid = (a or {}).get('central_id')
+                elif level == 'operador_setor' and self.setor_id is not None:
+                    se = self._find_by_id('setores', self.setor_id)
+                    s = self._find_by_id('sub_almoxarifados', (se or {}).get('sub_almoxarifado_id'))
+                    a = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+                    expected_cid = (a or {}).get('central_id')
+            if expected_cid is None:
+                return False
+            # Normalizar ambos contra coleção de centrais para suportar ids inteiros e ObjectIds
+            try:
+                p_central = self._find_by_id('centrais', p_cid)
+                e_central = self._find_by_id('centrais', expected_cid)
+                if p_central and e_central:
+                    return str(p_central.get('_id')) == str(e_central.get('_id'))
+            except Exception:
+                pass
+            return str(p_cid) == str(expected_cid)
+        return False
 
 
 def init_login_manager(app):
@@ -155,27 +535,29 @@ def log_auditoria(acao, tabela=None, registro_id=None, dados_anteriores=None, da
                 'timestamp': datetime.utcnow(),
             })
     except Exception as e:
-        print(f"Erro ao registrar log de auditoria: {e}")
+        try:
+            current_app.logger.error(f"Erro ao registrar log de auditoria: {e}")
+        except Exception:
+            pass
 
 
 def authenticate_user(username, password):
     """Autentica um usuário (MongoDB)"""
     try:
         if extensions.mongo_db is None:
-            print('MongoDB não inicializado')
+            current_app.logger.error('MongoDB não inicializado')
             return None
-        print(f"AUTH DEBUG: tentando autenticar username='{username}'")
+        current_app.logger.debug(f"AUTH: tentando autenticar username='{username}'")
         doc = extensions.mongo_db['usuarios'].find_one({'username': username})
-        print(f"AUTH DEBUG: usuario encontrado? {bool(doc)}")
+        current_app.logger.debug(f"AUTH: usuario encontrado? {bool(doc)}")
         if doc:
-            print(f"AUTH DEBUG: ativo={doc.get('ativo')} has_hash={'password_hash' in doc}")
-            print(f"AUTH DEBUG: hash='{doc.get('password_hash', '')}'")
+            current_app.logger.debug(f"AUTH: ativo={doc.get('ativo')} has_hash={'password_hash' in doc}")
             pwd_ok = check_password_hash(doc.get('password_hash', ''), password)
             # Permitir login dev para admin se necessário
             if (not pwd_ok) and username == 'admin' and password == 'admin' and current_app.config.get('DEBUG', True):
-                print('AUTH DEBUG: override dev para admin/admin')
+                current_app.logger.warning('AUTH: override dev para admin/admin em modo DEBUG')
                 pwd_ok = True
-            print(f"AUTH DEBUG: senha confere? {pwd_ok}")
+            current_app.logger.debug(f"AUTH: senha confere? {pwd_ok}")
             if doc.get('ativo', True) and pwd_ok:
                 usuario = MongoUser(doc)
                 extensions.mongo_db['usuarios'].update_one({'_id': doc['_id']}, {'$set': {'ultimo_login': datetime.utcnow()}})
@@ -183,7 +565,10 @@ def authenticate_user(username, password):
                 return usuario
         return None
     except Exception as e:
-        print(f"Erro na autenticação: {e}")
+        try:
+            current_app.logger.error(f"Erro na autenticação: {e}")
+        except Exception:
+            pass
         return None
 
 
@@ -194,7 +579,10 @@ def logout_user_with_audit():
             log_auditoria('LOGOUT')
         logout_user()
     except Exception as e:
-        print(f"Erro no logout: {e}")
+        try:
+            current_app.logger.error(f"Erro no logout: {e}")
+        except Exception:
+            pass
 
 # Decoradores de autorizaÃ§Ã£o por nÃ­vel hierÃ¡rquico
 
@@ -542,6 +930,12 @@ def get_user_context():
         ui_config = get_ui_blocks_config()
         menu_blocks = ui_config.get_menu_blocks_for_user(current_user.nivel_acesso)
         dashboard_widgets = ui_config.get_dashboard_widgets_for_user(current_user.nivel_acesso)
+        try:
+            current_app.logger.debug(
+                f"CTX: nivel={current_user.nivel_acesso} menus={len(menu_blocks)} widgets={len(dashboard_widgets)}"
+            )
+        except Exception:
+            pass
         level = current_user.nivel_acesso or ''
         flags = {
             'is_super_admin': level == 'super_admin',

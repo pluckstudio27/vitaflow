@@ -122,8 +122,13 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="editCategoria" class="form-label">Categoria</label>
-                                <input type="text" class="form-control" id="editCategoria" maxlength="100">
+                                <label for="editCategoriaId" class="form-label">Categoria</label>
+                                <select class="form-select" id="editCategoriaId">
+                                    <option value="">Selecione...</option>
+                                    {% for categoria in categorias %}
+                                    <option value="{{ categoria.id }}">{{ categoria.codigo }} - {{ categoria.nome }}</option>
+                                    {% endfor %}
+                                </select>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -145,6 +150,8 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Removido: seleção múltipla de categorias -->
                     
                     <div class="mb-3">
                         <div class="form-check">
@@ -334,9 +341,11 @@ function editarProduto(id) {
             document.getElementById('editNome').value = produto.nome || '';
             document.getElementById('editCodigo').value = produto.codigo || '';
             document.getElementById('editDescricao').value = produto.descricao || '';
-            document.getElementById('editCategoria').value = produto.categoria || '';
+            document.getElementById('editCategoriaId').value = produto.categoria_id ? String(produto.categoria_id) : '';
             document.getElementById('editUnidadeMedida').value = produto.unidade_medida || '';
             document.getElementById('editAtivo').checked = produto.ativo;
+
+            // Removido: preenchimento de categorias adicionais
             
             // Abrir o modal
             const modal = new bootstrap.Modal(document.getElementById('editarProdutoModal'));
@@ -399,7 +408,7 @@ function salvarEdicaoProduto() {
     const nome = document.getElementById('editNome').value.trim();
     const codigo = document.getElementById('editCodigo').value.trim();
     const descricao = document.getElementById('editDescricao').value.trim();
-    const categoria = document.getElementById('editCategoria').value.trim();
+    const categoriaId = document.getElementById('editCategoriaId').value;
     const unidadeMedida = document.getElementById('editUnidadeMedida').value;
     const ativo = document.getElementById('editAtivo').checked;
     
@@ -421,10 +430,10 @@ function salvarEdicaoProduto() {
         nome: nome,
         codigo: codigo,
         descricao: descricao,
-        categoria: categoria,
         unidade_medida: unidadeMedida,
         ativo: ativo
     };
+    if (categoriaId) dadosProduto.categoria_id = categoriaId;
     
     // Enviar para API
     fetch(`/api/produtos/${id}`, {
@@ -532,6 +541,9 @@ function debounce(func, wait) {
 
 // Carregar dados iniciais
 document.addEventListener('DOMContentLoaded', () => {
+    // Por padrão, listar apenas produtos ativos
+    const statusSel = document.getElementById('statusFilter');
+    if (statusSel) statusSel.value = 'true';
     carregarProdutos(1);
 });
 </script>

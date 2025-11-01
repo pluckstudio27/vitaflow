@@ -83,6 +83,16 @@ class UIBlocksConfig:
                 active_endpoints=['main.index']
             ),
             MenuBlock(
+                id='operador_setor',
+                label='Gestão do Setor',
+                icon='fas fa-user-cog',
+                url='main.operador_setor',
+                access_levels=[
+                    AccessLevel.OPERADOR_SETOR
+                ],
+                active_endpoints=['main.operador_setor']
+            ),
+            MenuBlock(
                 id='produtos_gerenciar',
                 label='Gerenciar Produtos',
                 icon='fas fa-list',
@@ -120,38 +130,19 @@ class UIBlocksConfig:
                 ],
                 active_endpoints=['main.movimentacoes']
             ),
-            # Página do Operador de Setor para gestão diária
-            MenuBlock(
-                id='operador_setor',
-                label='Gestão do Setor',
-                icon='fas fa-warehouse',
-                url='main.operador_setor_pagina',
-                access_levels=[
-                    AccessLevel.OPERADOR_SETOR
-                ],
-                active_endpoints=['main.operador_setor_pagina']
-            ),
             MenuBlock(
                 id='demandas',
                 label='Demandas',
                 icon='fas fa-clipboard-list',
                 url='main.demandas',
                 access_levels=[
-                    AccessLevel.OPERADOR_SETOR
-                ],
-                active_endpoints=['main.demandas']
-            ),
-            MenuBlock(
-                id='demandas_gerencia',
-                label='Demandas • Gerência',
-                icon='fas fa-tasks',
-                url='main.demandas_gerencia',
-                access_levels=[
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
-                    AccessLevel.GERENTE_ALMOX
+                    AccessLevel.GERENTE_ALMOX,
+                    AccessLevel.RESP_SUB_ALMOX,
+                    AccessLevel.OPERADOR_SETOR
                 ],
-                active_endpoints=['main.demandas_gerencia']
+                active_endpoints=['main.demandas', 'main.demandas_gerencia']
             ),
             MenuBlock(
                 id='relatorios',
@@ -178,17 +169,24 @@ class UIBlocksConfig:
         """Inicializa a configuração dos widgets do dashboard"""
         return [
             DashboardWidget(
-                id='stats_general',
-                title='Estatísticas Gerais',
-                template='blocks/widgets/stats_general.html',
-                size='lg-3',
-                priority=1
+                id='consumo_medio',
+                title='Consumo Médio por Nível',
+                template='blocks/widgets/consumo_medio.html',
+                size='lg-12',
+                access_levels=[
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.GERENTE_ALMOX,
+                    AccessLevel.RESP_SUB_ALMOX,
+                    AccessLevel.OPERADOR_SETOR
+                ],
+                priority=3
             ),
             DashboardWidget(
                 id='estoque_baixo',
                 title='Estoque Baixo',
                 template='blocks/widgets/estoque_baixo.html',
-                size='lg-3',
+                size='lg-6',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
@@ -198,36 +196,17 @@ class UIBlocksConfig:
                 priority=2
             ),
             DashboardWidget(
-                id='movimentacoes_recentes',
-                title='Movimentações Recentes',
-                template='blocks/widgets/movimentacoes_recentes.html',
-                size='lg-6',
-                priority=3
-            ),
-            DashboardWidget(
-                id='usuarios_stats',
-                title='Estatísticas de Usuários',
-                template='blocks/widgets/usuarios_stats.html',
+                id='vencimentos',
+                title='Vencimentos de Lotes',
+                template='blocks/widgets/vencimentos.html',
                 size='lg-6',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
-                    AccessLevel.ADMIN_CENTRAL
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.GERENTE_ALMOX,
+                    AccessLevel.RESP_SUB_ALMOX
                 ],
-                priority=4
-            ),
-            DashboardWidget(
-                id='hierarquia_usuario',
-                title='Hierarquia do Usuário',
-                template='blocks/widgets/hierarquia_usuario.html',
-                size='lg-6',
-                priority=5
-            ),
-            DashboardWidget(
-                id='acoes_rapidas',
-                title='Ações Rápidas',
-                template='blocks/widgets/acoes_rapidas.html',
-                size='lg-6',
-                priority=6
+                priority=2
             )
         ]
     
@@ -358,12 +337,21 @@ class UIBlocksConfig:
                     if access_level in child.access_levels
                 ]
                 
+                # Ajustar URL dinamicamente para Demandas:
+                # Todos os níveis exceto Operador Setor devem abrir a página de Gerência
+                adjusted_url = block.url
+                if block.id == 'demandas':
+                    if access_level != AccessLevel.OPERADOR_SETOR:
+                        adjusted_url = 'main.demandas_gerencia'
+                    else:
+                        adjusted_url = 'main.demandas'
+
                 # Criar uma cópia do bloco com filhos filtrados
                 filtered_block = MenuBlock(
                     id=block.id,
                     label=block.label,
                     icon=block.icon,
-                    url=block.url,
+                    url=adjusted_url,
                     access_levels=block.access_levels,
                     children=filtered_children,
                     active_endpoints=block.active_endpoints

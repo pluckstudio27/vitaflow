@@ -25,54 +25,87 @@
 </div>
 
 <script>
-// Carrega produtos com estoque baixo
+// Refeito para refletir a lógica da página /estoque
 function loadEstoqueBaixo() {
-    fetch('/api/dashboard/estoque-baixo')
+    fetch('/api/estoque/hierarquia?per_page=200')
         .then(response => response.json())
         .then(data => {
             const content = document.getElementById('estoque-baixo-content');
-            
-            if (data.success && data.produtos && data.produtos.length > 0) {
-                let html = '<div class="list-group list-group-flush">';
-                
-                data.produtos.slice(0, 5).forEach(produto => {
-                    const percentage = produto.estoque_atual / produto.estoque_minimo * 100;
-                    let badgeClass = 'bg-danger';
-                    if (percentage > 50) badgeClass = 'bg-warning';
-                    
-                    html += `
-                        <div class="list-group-item px-0 py-2">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <h6 class="mb-1">${produto.nome}</h6>
-                                    <small class="text-muted">${produto.local || 'N/A'}</small>
-                                </div>
-                                <span class="badge ${badgeClass}">${produto.estoque_atual}</span>
-                            </div>
-                            <div class="progress mt-1" style="height: 4px;">
-                                <div class="progress-bar bg-warning" style="width: ${Math.min(percentage, 100)}%"></div>
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += '</div>';
-                
-                if (data.produtos.length > 5) {
-                    html += `<p class="text-center mt-2 mb-0 text-muted">
-                        <small>E mais ${data.produtos.length - 5} produtos...</small>
-                    </p>`;
+            const items = Array.isArray(data.items) ? data.items : [];
+
+            const lowItems = [];
+            const zeroItems = [];
+
+            items.forEach(it => {
+                const disp = parseFloat(it.quantidade_disponivel || 0);
+                const inicial = parseFloat(it.quantidade_inicial || 0);
+                const limiarBaixo = Math.max(inicial * 0.1, 5);
+                if (disp <= 0) {
+                    zeroItems.push(it);
+                } else if (disp <= limiarBaixo) {
+                    lowItems.push({ ...it, limiarBaixo });
                 }
-                
-                content.innerHTML = html;
-            } else {
+            });
+
+            if (lowItems.length === 0 && zeroItems.length === 0) {
                 content.innerHTML = `
                     <div class="text-center text-success">
                         <i class="fas fa-check-circle fa-2x mb-2"></i>
-                        <p class="mb-0">Nenhum produto com estoque baixo!</p>
+                        <p class="mb-0">Nenhum item com estoque baixo!</p>
                     </div>
                 `;
+                return;
             }
+
+            const normalizeTipo = t => String(t || '').toLowerCase().replace(/[-_]/g, '').replace(/^subalmoxarifado$/, 'sub‑almoxarifado');
+            const formatQtd = n => {
+                const v = Number(n || 0);
+                return v % 1 === 0 ? v.toString() : v.toFixed(2);
+            };
+
+            let html = `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <small class="text-muted">Baixos: <strong>${lowItems.length}</strong> · Zerados: <strong>${zeroItems.length}</strong></small>
+                </div>
+            `;
+
+            html += '<div class="list-group list-group-flush">';
+
+            // Listar primeiro os zerados (danger), depois baixos (warning), limitando a 6 entradas
+            zeroItems.slice(0, 3).forEach(it => {
+                html += `
+                    <div class="list-group-item px-0 py-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong class="text-danger">${it.produto_nome || 'Produto'}</strong>
+                                <div class="small text-muted">${normalizeTipo(it.local_tipo)} · ${it.local_nome || 'Local'}</div>
+                            </div>
+                            <span class="badge bg-danger">${formatQtd(it.quantidade_disponivel)}</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            lowItems.slice(0, 3).forEach(it => {
+                const pct = (it.limiarBaixo > 0) ? Math.min(100, Math.max(0, (parseFloat(it.quantidade_disponivel || 0) / it.limiarBaixo) * 100)) : 0;
+                html += `
+                    <div class="list-group-item px-0 py-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong class="text-warning">${it.produto_nome || 'Produto'}</strong>
+                                <div class="small text-muted">${normalizeTipo(it.local_tipo)} · ${it.local_nome || 'Local'}</div>
+                            </div>
+                            <span class="badge bg-warning text-dark">${formatQtd(it.quantidade_disponivel)}</span>
+                        </div>
+                        <div class="progress mt-1" style="height: 4px;">
+                            <div class="progress-bar bg-warning" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            content.innerHTML = html;
         })
         .catch(error => {
             console.error('Erro ao carregar estoque baixo:', error);

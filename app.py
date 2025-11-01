@@ -4,7 +4,7 @@ from config import Config
 from extensions import db, migrate, init_mongo
 from blueprints.main import main_bp
 from blueprints.auth import auth_bp
-from auth import init_login_manager
+from auth import init_login_manager, get_user_context
 
 
 def create_app(config_class=Config):
@@ -22,6 +22,11 @@ def create_app(config_class=Config):
     # Login manager
     init_login_manager(app)
 
+    # Contexto global para templates (usuário, widgets, flags de acesso)
+    @app.context_processor
+    def inject_user_context_global():
+        return get_user_context()
+
     # Registrar blueprints
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -32,4 +37,6 @@ def create_app(config_class=Config):
 app = create_app()
 
 if __name__ == '__main__':
-    app.run(debug=True, host='127.0.0.1', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', '5000'))
+    host = os.environ.get('HOST', '127.0.0.1')
+    app.run(debug=True, host=host, port=port)

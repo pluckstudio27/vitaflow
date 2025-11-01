@@ -159,6 +159,13 @@
     </div>
 </div>
 
+<style>
+/* Estilo para destacar quantidades por hierarquia */
+.hier-qty { font-weight: 700; font-size: 1.1rem; }
+.hier-line { line-height: 1.2; margin-bottom: 2px; }
+.disp-qty { font-weight: 700; font-size: 1.3rem; }
+</style>
+
 <script>
 let dadosEstoque = [];
 let dadosFiltrados = [];
@@ -297,9 +304,7 @@ function renderizarTabela() {
                 <thead>
                     <tr>
                         <th>Produto</th>
-                        <th>Local</th>
-                        <th>Tipo</th>
-                        <th>Quantidade Total</th>
+                        <th>Totais por Hierarquia</th>
                         <th>Disponível</th>
                         <th>Status</th>
                         <th>Última Atualização</th>
@@ -309,59 +314,95 @@ function renderizarTabela() {
                 <tbody>
     `;
     
-    dadosFiltrados.forEach(item => {
-        const quantidade = parseFloat(item.quantidade_disponivel || 0);
-        const total = parseFloat(item.quantidade || 0);
+    // Agregar totais por produto e hierarquia (com base nos dados carregados)
+    const totaisPorProduto = {};
+    (dadosEstoque || []).forEach(it => {
+        const pid = it.produto_id;
+        const tipo = String(it.local_tipo || '').toLowerCase();
+        const qtd = parseFloat(it.quantidade || 0);
+        if (!totaisPorProduto[pid]) {
+            totaisPorProduto[pid] = { alm: 0, sub: 0, set: 0, cen: 0 };
+        }
+        const agg = totaisPorProduto[pid];
+        if (tipo === 'almoxarifado') agg.alm += qtd;
+        else if (tipo === 'subalmoxarifado') agg.sub += qtd;
+        else if (tipo === 'setor') agg.set += qtd;
+        else if (tipo === 'central') agg.cen += qtd;
+    });
+
+    // Agregar linhas por produto a partir do dataset filtrado
+    const produtosMapa = {};
+    (dadosFiltrados || []).forEach(item => {
+        const pid = item.produto_id;
+        if (!pid) return;
+        const tipo = String(item.local_tipo || '').toLowerCase();
+        const qtd = parseFloat(item.quantidade || 0);
+        const disponivel = parseFloat(item.quantidade_disponivel || 0);
         const inicial = parseFloat(item.quantidade_inicial || 0);
-        
-        // Determinar status
+        const dt = item.data_atualizacao ? new Date(item.data_atualizacao) : null;
+
+        if (!produtosMapa[pid]) {
+            produtosMapa[pid] = {
+                produto_id: pid,
+                produto_nome: item.produto_nome,
+                produto_codigo: item.produto_codigo,
+                unidade_medida: item.unidade_medida || '',
+                totais: { alm: 0, sub: 0, set: 0, cen: 0 },
+                disponivel: 0,
+                inicial: 0,
+                ultima: null
+            };
+        }
+        const p = produtosMapa[pid];
+        if (tipo === 'almoxarifado') p.totais.alm += qtd;
+        else if (tipo === 'subalmoxarifado') p.totais.sub += qtd;
+        else if (tipo === 'setor') p.totais.set += qtd;
+        else if (tipo === 'central') p.totais.cen += qtd;
+        else p.totais.alm += qtd; // fallback
+        p.disponivel += disponivel;
+        p.inicial += inicial;
+        if (dt && (!p.ultima || dt > p.ultima)) p.ultima = dt;
+    });
+
+    Object.values(produtosMapa).forEach(p => {
         let statusBadge = '<span class="badge bg-success">Normal</span>';
-        if (quantidade <= 0) {
+        if (p.disponivel <= 0) {
             statusBadge = '<span class="badge bg-danger">Zerado</span>';
-        } else if (quantidade <= Math.max(inicial * 0.1, 5)) {
+        } else if (p.disponivel <= Math.max(p.inicial * 0.1, 5)) {
             statusBadge = '<span class="badge bg-warning">Baixo</span>';
         }
-        
-        // Ícone do tipo
-        const tipoIcons = {
-            'central': 'fas fa-building',
-            'almoxarifado': 'fas fa-warehouse',
-            'subalmoxarifado': 'fas fa-boxes',
-            'setor': 'fas fa-users'
-        };
-        
+
+        const u = p.unidade_medida || '';
+        const linhasHierarquia = [];
+        // Central (rede) no topo: cen + alm + sub (exclui setor)
+        const centralRede = (p.totais.cen || 0) + (p.totais.alm || 0) + (p.totais.sub || 0);
+        if (centralRede > 0) linhasHierarquia.push(`<div class="hier-line"><span class="badge bg-warning text-dark me-2">cen</span><span class="hier-qty">${formatQuantidade(centralRede, u)}</span></div>`);
+        if (p.totais.alm > 0) linhasHierarquia.push(`<div class="hier-line"><span class="badge bg-primary me-2">alm</span><span class="hier-qty">${formatQuantidade(p.totais.alm, u)}</span></div>`);
+        if (p.totais.sub > 0) linhasHierarquia.push(`<div class="hier-line"><span class="badge bg-info text-dark me-2">sub</span><span class="hier-qty">${formatQuantidade(p.totais.sub, u)}</span></div>`);
+        if (p.totais.set > 0) linhasHierarquia.push(`<div class="hier-line"><span class="badge bg-success me-2">set</span><span class="hier-qty">${formatQuantidade(p.totais.set, u)}</span></div>`);
+        if (!linhasHierarquia.length) linhasHierarquia.push('<div class="text-muted">-</div>');
+
         html += `
             <tr>
                 <td>
                     <div>
-                        <strong>${item.produto_nome}</strong><br>
-                        <small class="text-muted">Código: ${item.produto_codigo}</small>
+                        <strong>${p.produto_nome}</strong><br>
+                        <small class="text-muted">Código: ${p.produto_codigo}</small>
                     </div>
                 </td>
                 <td>
-                    <i class="${tipoIcons[item.local_tipo?.toLowerCase()] || 'fas fa-map-marker-alt'}"></i>
-                    ${item.local_nome}
+                    <div class="d-flex flex-column" style="line-height: 1.1;">
+                        ${linhasHierarquia.join('')}
+                    </div>
                 </td>
-                <td>
-                    <span class="badge bg-secondary">${item.local_tipo}</span>
-                </td>
-                <td><strong>${formatQuantidade(total, item.unidade_medida)}</strong></td>
-                <td class="text-success"><strong>${formatQuantidade(quantidade, item.unidade_medida)}</strong></td>
+                <td class="text-success"><span class="disp-qty"><strong>${formatQuantidade(p.disponivel, u)}</strong></span></td>
                 <td>${statusBadge}</td>
-                <td class="text-muted">
-                    ${item.data_atualizacao ? new Date(item.data_atualizacao).toLocaleString('pt-BR', {
-                        day: '2-digit',
-                        month: '2-digit', 
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    }) : '-'}
-                </td>
+                <td class="text-muted">${p.ultima ? p.ultima.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes('${item.produto_id}', '${item.local_id}')" title="Detalhes">
+                    <button class="btn btn-sm btn-outline-primary" onclick="verDetalhes('${p.produto_id}')" title="Detalhes">
                         <i class="fas fa-eye"></i>
                     </button>
-                    <a class="btn btn-sm btn-outline-success ms-1" href="/produtos/${item.produto_id}/recebimento" title="Receber">
+                    <a class="btn btn-sm btn-outline-success ms-1" href="/produtos/${p.produto_id}/recebimento" title="Receber">
                         <i class="fas fa-plus-circle"></i>
                     </a>
                 </td>
@@ -374,11 +415,11 @@ function renderizarTabela() {
 }
 
 // Ver detalhes
-function verDetalhes(produtoId, localId) {
+function verDetalhes(produtoId) {
     Promise.all([
         fetchJson(`/api/produtos/${produtoId}`, { headers: { 'Accept': 'application/json' } }),
-        fetchJson(`/api/produtos/${produtoId}/lotes?local_id=${localId}`, { headers: { 'Accept': 'application/json' } }),
-        fetchJson(`/api/produtos/${produtoId}/movimentacoes?local_id=${localId}&limit=10`, { headers: { 'Accept': 'application/json' } })
+        fetchJson(`/api/produtos/${produtoId}/lotes`, { headers: { 'Accept': 'application/json' } }),
+        fetchJson(`/api/produtos/${produtoId}/movimentacoes?limit=10`, { headers: { 'Accept': 'application/json' } })
     ])
     .then(([produto, lotes, movimentacoes]) => {
         let html = `
@@ -388,10 +429,7 @@ function verDetalhes(produtoId, localId) {
                     <p><strong>${produto.nome}</strong><br>
                     <small>Código: ${produto.codigo} | Unidade: ${produto.unidade_medida}</small></p>
                 </div>
-                <div class="col-md-6">
-                    <h6><i class="fas fa-map-marker-alt"></i> Local</h6>
-                    <p>${dadosFiltrados.find(item => item.produto_id == produtoId && item.local_id == localId)?.local_nome}</p>
-                </div>
+                
             </div>
         `;
         

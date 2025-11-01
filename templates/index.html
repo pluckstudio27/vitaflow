@@ -12,12 +12,8 @@
     </div>
 
     <!-- Dashboard Personalizado por Nível de Acesso -->
-    {% from 'blocks/dashboard_widgets.html' import render_dashboard_layout %}
+    {% from 'blocks/dashboard_widgets.html' import render_dashboard_layout with context %}
     {{ render_dashboard_layout() }}
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 {% endblock %}
 
