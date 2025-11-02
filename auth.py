@@ -72,7 +72,22 @@ class MongoUser:
     
     @property
     def nivel_acesso(self):
-        return self.data.get('nivel_acesso')
+        raw = (self.data.get('nivel_acesso') or '').strip()
+        # Normalizar sinônimos e variações comuns
+        normalized = raw.lower().replace(' ', '_').replace('-', '_')
+        synonyms = {
+            'gerente_almoxarifado': 'gerente_almox',
+            'gerente_do_almoxarifado': 'gerente_almox',
+            'gerente_almox': 'gerente_almox',
+            'responsavel_sub_almox': 'resp_sub_almox',
+            'responsavel_subalmox': 'resp_sub_almox',
+            'resp_subalmox': 'resp_sub_almox',
+            'resp_sub_almoxarifado': 'resp_sub_almox',
+            'operador_de_setor': 'operador_setor',
+            'operador_setor': 'operador_setor',
+            'admin': 'admin_central',
+        }
+        return synonyms.get(normalized, raw or None)
     
     # Hierarquia (IDs, opcional)
     @property
@@ -204,6 +219,17 @@ class MongoUser:
                         a = self._find_by_id('almoxarifados', aids[0])
                 except Exception:
                     a = None
+            # Fallback adicional: lista de sub_almoxarifados associados ao setor
+            # (derivar almoxarifado e então central a partir do primeiro sub)
+            if not a:
+                try:
+                    sids = (se or {}).get('sub_almoxarifado_ids') or []
+                    if isinstance(sids, list) and len(sids) > 0:
+                        s_multi = self._find_by_id('sub_almoxarifados', sids[0])
+                        if s_multi:
+                            a = self._find_by_id('almoxarifados', (s_multi or {}).get('almoxarifado_id'))
+                except Exception:
+                    a = None
             cid = (a or {}).get('central_id')
             c = self._find_by_id('centrais', cid)
             try:
@@ -248,12 +274,31 @@ class MongoUser:
         if level == 'admin_central':
             return True
         if level == 'gerente_almox':
+            # Permitir acesso a QUALQUER almoxarifado da MESMA CENTRAL do gerente
             a1 = self._find_by_id('almoxarifados', almoxarifado_id)
-            a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
+            c_target = (a1 or {}).get('central_id')
+            # Resolver central do usuário: pelo almox vinculado OU diretamente pelo central_id do usuário
+            c_user = None
+            if self.almoxarifado_id is not None:
+                a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
+                c_user = (a2 or {}).get('central_id')
+            if c_user is None and self.central_id is not None:
+                c_user = self.central_id
+            # Se ambas centrais forem conhecidas, comparar
+            if (c_target is not None) and (c_user is not None):
+                try:
+                    cdoc1 = self._find_by_id('centrais', c_target)
+                    cdoc2 = self._find_by_id('centrais', c_user)
+                    if cdoc1 and cdoc2:
+                        return str(cdoc1.get('_id')) == str(cdoc2.get('_id'))
+                except Exception:
+                    pass
+                return str(c_target) == str(c_user)
+            # Fallback: se não foi possível resolver centrais, permitir quando o almox é exatamente o vinculado
             try:
-                return (a1 is not None) and (a2 is not None) and str(a1.get('_id')) == str(a2.get('_id'))
+                return self.almoxarifado_id is not None and str((a1 or {}).get('_id')) == str(self.almoxarifado_id)
             except Exception:
-                return str(almoxarifado_id) == str(self.almoxarifado_id)
+                return False
         if level == 'resp_sub_almox' and self.sub_almoxarifado_id is not None:
             s = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
             a1 = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
@@ -264,7 +309,7 @@ class MongoUser:
                 return str((s or {}).get('almoxarifado_id')) == str(almoxarifado_id)
         # operador_setor não tem acesso direto a almoxarifado
         return False
-    
+
     def can_access_sub_almoxarifado(self, sub_almoxarifado_id):
         level = self.nivel_acesso
         if level == 'super_admin':
@@ -278,12 +323,29 @@ class MongoUser:
         if level == 'admin_central':
             return True
         if level == 'gerente_almox':
+            # Permitir acesso a QUALQUER sub-almox de almox pertencente à MESMA CENTRAL do gerente
             a1 = self._find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
-            a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
+            c_target = (a1 or {}).get('central_id')
+            c_user = None
+            if self.almoxarifado_id is not None:
+                a2 = self._find_by_id('almoxarifados', self.almoxarifado_id)
+                c_user = (a2 or {}).get('central_id')
+            if c_user is None and self.central_id is not None:
+                c_user = self.central_id
+            if (c_target is not None) and (c_user is not None):
+                try:
+                    cdoc1 = self._find_by_id('centrais', c_target)
+                    cdoc2 = self._find_by_id('centrais', c_user)
+                    if cdoc1 and cdoc2:
+                        return str(cdoc1.get('_id')) == str(cdoc2.get('_id'))
+                except Exception:
+                    pass
+                return str(c_target) == str(c_user)
+            # Fallback: permitir acesso quando sub pertence exatamente ao almox vinculado ao usuário
             try:
-                return (a1 is not None) and (a2 is not None) and str(a1.get('_id')) == str(a2.get('_id'))
+                return self.almoxarifado_id is not None and str((s or {}).get('almoxarifado_id')) == str(self.almoxarifado_id)
             except Exception:
-                return str((s or {}).get('almoxarifado_id')) == str(self.almoxarifado_id)
+                return False
         if level == 'resp_sub_almox':
             s1 = self._find_by_id('sub_almoxarifados', sub_almoxarifado_id)
             s2 = self._find_by_id('sub_almoxarifados', self.sub_almoxarifado_id)
@@ -308,7 +370,12 @@ class MongoUser:
             return True
         if level == 'gerente_almox':
             cid_t = self._central_id_of_local('setor', setor_id)
-            cid_u = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
+            # Resolver central do usuário via almox vinculado ou diretamente via central_id
+            cid_u = None
+            if self.almoxarifado_id is not None:
+                cid_u = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
+            if cid_u is None and self.central_id is not None:
+                cid_u = self._central_id_of_local('central', self.central_id)
             return (cid_t is not None) and (cid_u is not None) and str(cid_t) == str(cid_u)
         if level == 'resp_sub_almox':
             # Permitir acesso a setores do MESMO sub_almox do usuário

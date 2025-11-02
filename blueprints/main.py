@@ -6142,6 +6142,119 @@ def api_demandas():
                 return jsonify({'items': [], 'page': 1, 'pages': 1, 'per_page': per_page, 'total': 0})
             query['setor_id'] = sid
 
+        # Escopo por central: para todos os níveis abaixo de super_admin,
+        # restringir demandas aos setores pertencentes à central do usuário.
+        # Admin da central também vê apenas sua própria central.
+        try:
+            nivel = getattr(current_user, 'nivel_acesso', None)
+        except Exception:
+            nivel = None
+
+        if nivel != 'super_admin' and not mine:
+            # Derivar central efetiva do usuário
+            expected_cid = None
+            try:
+                if getattr(current_user, 'central_id', None) is not None:
+                    expected_cid = current_user.central_id
+                elif nivel == 'gerente_almox' and getattr(current_user, 'almoxarifado_id', None) is not None:
+                    a = _find_by_id('almoxarifados', current_user.almoxarifado_id)
+                    expected_cid = (a or {}).get('central_id')
+                elif nivel == 'resp_sub_almox' and getattr(current_user, 'sub_almoxarifado_id', None) is not None:
+                    s = _find_by_id('sub_almoxarifados', current_user.sub_almoxarifado_id)
+                    a = _find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+                    expected_cid = (a or {}).get('central_id')
+                elif nivel == 'gerente_almox' and getattr(current_user, 'almoxarifado_ids', None):
+                    # Caso com múltiplos almoxarifados associados
+                    # (administradores de múltiplas unidades)
+                    # Não suportamos múltiplas centrais aqui; cairá no safe-guard abaixo
+                    pass
+                elif getattr(current_user, 'setor_id', None) is not None:
+                    se = _find_by_id('setores', current_user.setor_id)
+                    s = _find_by_id('sub_almoxarifados', (se or {}).get('sub_almoxarifado_id'))
+                    a = _find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+                    expected_cid = (a or {}).get('central_id')
+            except Exception:
+                expected_cid = None
+
+            try:
+                if expected_cid is None:
+                    # Sem central derivável: negar resultados para evitar vazar escopo
+                    query['setor_id'] = {'$in': ['__none__']}
+                else:
+                    # Normalizar candidatos de central
+                    central_candidates = []
+                    try:
+                        cdoc = _find_by_id('centrais', expected_cid)
+                    except Exception:
+                        cdoc = None
+                    if cdoc:
+                        cid_seq = cdoc.get('id')
+                        cid_oid = cdoc.get('_id')
+                        if cid_seq is not None:
+                            central_candidates.append(cid_seq)
+                        if cid_oid is not None:
+                            central_candidates.append(cid_oid)
+                            central_candidates.append(str(cid_oid))
+                    central_candidates.extend([expected_cid, str(expected_cid)])
+                    central_candidates = [x for x in central_candidates if x is not None]
+
+                    # Carregar almoxarifados da central
+                    almox_coll = db['almoxarifados']
+                    almox_ids = []
+                    for a in almox_coll.find({'central_id': {'$in': list(set(central_candidates))}}, {'id': 1, '_id': 1}):
+                        if a.get('id') is not None:
+                            almox_ids.append(a['id'])
+                        if a.get('_id') is not None:
+                            almox_ids.append(a['_id'])
+                            almox_ids.append(str(a['_id']))
+                    # Carregar sub-almoxarifados vinculados
+                    sub_coll = db['sub_almoxarifados']
+                    sub_ids = []
+                    if almox_ids:
+                        for s in sub_coll.find({'almoxarifado_id': {'$in': list(set(almox_ids))}}, {'id': 1, '_id': 1}):
+                            if s.get('id') is not None:
+                                sub_ids.append(s['id'])
+                            if s.get('_id') is not None:
+                                sub_ids.append(s['_id'])
+                                sub_ids.append(str(s['_id']))
+                    # Carregar setores vinculados aos sub-almoxarifados/almoxarifados
+                    setores_coll = db['setores']
+                    setor_ids = []
+                    if sub_ids:
+                        for st in setores_coll.find({'sub_almoxarifado_id': {'$in': list(set(sub_ids))}}, {'id': 1, '_id': 1}):
+                            if st.get('id') is not None:
+                                setor_ids.append(st['id'])
+                            if st.get('_id') is not None:
+                                setor_ids.append(st['_id'])
+                                setor_ids.append(str(st['_id']))
+                    # Alguns setores podem referenciar almoxarifado diretamente
+                    if almox_ids:
+                        for st in setores_coll.find({'almoxarifado_id': {'$in': list(set(almox_ids))}}, {'id': 1, '_id': 1}):
+                            if st.get('id') is not None:
+                                setor_ids.append(st['id'])
+                            if st.get('_id') is not None:
+                                setor_ids.append(st['_id'])
+                                setor_ids.append(str(st['_id']))
+
+                    if setor_ids:
+                        # Mesclar com filtro existente respeitando $and/$or quando presentes
+                        scope = {'setor_id': {'$in': list(set(setor_ids))}}
+                        if '$and' in query:
+                            query['$and'].append(scope)
+                        elif '$or' in query:
+                            query = {'$and': [
+                                {'$or': query['$or']},
+                                scope
+                            ]}
+                        else:
+                            query.update(scope)
+                    else:
+                        # Sem setores resolvidos para a central: negar resultados explícitos
+                        query['setor_id'] = {'$in': ['__none__']}
+            except Exception:
+                # Fallback silencioso: negar resultados
+                query['setor_id'] = {'$in': ['__none__']}
+
         total = coll.count_documents(query)
         pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, pages))
@@ -6322,7 +6435,8 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
     estoques = db['estoques']
 
     # Janela do dia (00:00:00 até 23:59:59)
-    now = datetime.now()
+    # Usar timezone UTC para alinhar com "data_movimentacao" salva em UTC
+    now = datetime.now(timezone.utc)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
 
@@ -6356,6 +6470,31 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
 
     pid_cands = _id_candidates(produto_id)
     sid_cands = _id_candidates(setor_id)
+
+    # Expandir candidatos de setor com formas alternativas resolvidas do banco
+    try:
+        sdoc = _find_by_id('setores', setor_id)
+    except Exception:
+        sdoc = None
+    if sdoc:
+        extra_ids = []
+        try:
+            val = sdoc.get('id')
+            if val is not None:
+                extra_ids.extend([val, str(val)])
+        except Exception:
+            pass
+        try:
+            oid = sdoc.get('_id')
+            if oid is not None:
+                extra_ids.extend([oid, str(oid)])
+        except Exception:
+            pass
+        # deduplicar e mesclar
+        for x in extra_ids:
+            key = f"{type(x).__name__}:{str(x)}"
+            if key not in {f"{type(y).__name__}:{str(y)}" for y in sid_cands}:
+                sid_cands.append(x)
 
     # Estoque atual do setor para o produto
     # Ajustar busca de estoque para aceitar 'tipo' ou 'local_tipo' e 'local_id' ou 'setor_id'
@@ -6399,8 +6538,10 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
             '$match': {
                 'produto_id': {'$in': pid_cands},
                 'destino_tipo': 'setor',
-                'destino_id': {'$in': [str(x) if not isinstance(x, ObjectId) else str(x) for x in sid_cands]},
-                'tipo': 'saida',
+                # Aceitar múltiplos formatos de id (int, str, ObjectId)
+                'destino_id': {'$in': sid_cands},
+                # Contabilizar tanto distribuições quanto transferências para o setor
+                'tipo': {'$in': ['saida', 'transferencia']},
                 'data_movimentacao': {'$gte': start, '$lt': end}
             }
         },
@@ -6411,7 +6552,13 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
     recebidos_por_origem = {'almoxarifado': 0.0, 'sub_almoxarifado': 0.0}
     try:
         for row in movimentacoes.aggregate(recebimentos_pipeline):
-            origem = str(row.get('_id') or '').lower()
+            origem_raw = str(row.get('_id') or '').lower().strip()
+            # Normalizar sinônimos
+            origem = origem_raw
+            if origem_raw in ('subalmoxarifado', 'sub_almoxarifados', 'subalmoxarifados'):
+                origem = 'sub_almoxarifado'
+            elif origem_raw in ('almoxarifados',):
+                origem = 'almoxarifado'
             total = float(row.get('total') or 0)
             if origem in recebidos_por_origem:
                 recebidos_por_origem[origem] += total
@@ -6424,7 +6571,8 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
             '$match': {
                 'produto_id': {'$in': pid_cands},
                 'origem_tipo': 'setor',
-                'origem_id': {'$in': [str(x) if not isinstance(x, ObjectId) else str(x) for x in sid_cands]},
+                # Aceitar múltiplos formatos de id (int, str, ObjectId)
+                'origem_id': {'$in': sid_cands},
                 'tipo': 'consumo',
                 'data_movimentacao': {'$gte': start, '$lt': end}
             }
@@ -6445,7 +6593,12 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
         'estoque_disponivel': estoque_disponivel,
         'recebido_hoje_almoxarifado': recebidos_por_origem.get('almoxarifado', 0.0),
         'recebido_hoje_sub_almoxarifado': recebidos_por_origem.get('sub_almoxarifado', 0.0),
-        'usado_hoje_total': usado_hoje_total
+        'usado_hoje_total': usado_hoje_total,
+        # Compatibilidade com frontend existente: objeto por origem
+        'recebido_hoje_por_origem': {
+            'almoxarifado': recebidos_por_origem.get('almoxarifado', 0.0),
+            'sub_almoxarifado': recebidos_por_origem.get('sub_almoxarifado', 0.0)
+        }
     })
 
 

@@ -53,12 +53,32 @@
                 <i class="fas fa-calendar-day me-2"></i>
                 <strong>Resumo do dia:</strong>
               </div>
-              <div id="resumo-dia-setor" class="small">
-                <div class="row">
-                  <div class="col-6 col-md-3"><strong>Recebido (Almox):</strong> <span id="resumo-almox">0</span></div>
-                  <div class="col-6 col-md-3"><strong>Recebido (Sub):</strong> <span id="resumo-sub">0</span></div>
-                  <div class="col-6 col-md-3 mt-2 mt-md-0"><strong>Usado hoje:</strong> <span id="resumo-usado">0</span></div>
-                  <div class="col-6 col-md-3 mt-2 mt-md-0"><strong>Disponível:</strong> <span id="resumo-disponivel">0</span></div>
+              <div id="resumo-dia-setor" class="">
+                <div class="row g-3">
+                  <div class="col-6 col-lg-3">
+                    <div class="border rounded p-2 bg-white h-100">
+                      <div class="text-muted small">Recebido (Almox)</div>
+                      <div class="h5 mb-0"><span id="resumo-almox">0</span></div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-lg-3">
+                    <div class="border rounded p-2 bg-white h-100">
+                      <div class="text-muted small">Recebido (Sub)</div>
+                      <div class="h5 mb-0"><span id="resumo-sub">0</span></div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-lg-3">
+                    <div class="border rounded p-2 bg-white h-100">
+                      <div class="text-muted small">Usado hoje</div>
+                      <div class="h5 mb-0"><span id="resumo-usado">0</span></div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-lg-3">
+                    <div class="border rounded p-2 bg-white h-100">
+                      <div class="text-muted small">Disponível</div>
+                      <div class="h5 mb-0"><span id="resumo-disponivel">0</span></div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <form id="form-consumo-dia" class="mt-2">
@@ -233,13 +253,36 @@ async function loadSetorStock() {
       const dispEl = document.getElementById('resumo-disponivel');
       if (dispEl) dispEl.textContent = '0';
   } else {
-      el.innerHTML = `<div class="row">
-        <div class="col-12 col-md-4"><strong>Quantidade:</strong> ${fmtQtd.format(Number(setorItem.quantidade || 0))}</div>
-        <div class="col-12 col-md-4"><strong>Disponível:</strong> ${fmtQtd.format(Number(setorItem.quantidade_disponivel || 0))}</div>
-        <div class="col-12 col-md-4"><strong>Atualizado em:</strong> ${setorItem.data_atualizacao ? new Date(setorItem.data_atualizacao).toLocaleString() : '-'}</div>
+      const unidade = (selectedProduct && selectedProduct.unidade_medida) ? String(selectedProduct.unidade_medida) : '';
+      const total = Number(setorItem.quantidade || 0);
+      const disponivel = Number((setorItem.quantidade_disponivel !== undefined && setorItem.quantidade_disponivel !== null) ? setorItem.quantidade_disponivel : setorItem.quantidade || 0);
+      const reservado = Math.max(0, total - disponivel);
+      const atualizado = setorItem.data_atualizacao ? new Date(setorItem.data_atualizacao).toLocaleString('pt-BR') : '-';
+      el.innerHTML = `<div class="row g-3">
+        <div class="col-12 col-md-4">
+          <div class="border rounded p-2 bg-white h-100">
+            <div class="text-muted small">Quantidade total</div>
+            <div class="h5 mb-0">${fmtQtd.format(total)}${unidade ? ' ' + unidade : ''}</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-4">
+          <div class="border rounded p-2 bg-white h-100">
+            <div class="text-muted small">Disponível</div>
+            <div class="h5 mb-0">${fmtQtd.format(disponivel)}${unidade ? ' ' + unidade : ''}</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-4">
+          <div class="border rounded p-2 bg-white h-100">
+            <div class="text-muted small">Reservado</div>
+            <div class="h5 mb-0">${fmtQtd.format(reservado)}${unidade ? ' ' + unidade : ''}</div>
+          </div>
+        </div>
+        <div class="col-12">
+          <small class="text-muted">Atualizado em: ${atualizado}</small>
+        </div>
       </div>`;
       const dispEl = document.getElementById('resumo-disponivel');
-      if (dispEl) dispEl.textContent = fmtQtd.format(Number(setorItem.quantidade_disponivel || setorItem.quantidade || 0));
+      if (dispEl) dispEl.textContent = fmtQtd.format(disponivel);
   }
   // Atualizar lotes após estoque
   await loadSetorLotes();
@@ -321,7 +364,7 @@ async function loadSetorLotes() {
     }
     if (!items.length) { el.textContent = 'Sem lotes cadastrados para este produto neste setor ou origem superior.'; return; }
     let html = '<div class="table-responsive"><table class="table table-sm mb-0">';
-    html += '<thead><tr><th>Lote</th><th>Data de Vencimento</th><th>Status</th></tr></thead><tbody>';
+    html += '<thead><tr><th>Lote</th><th>Quantidade</th><th>Data de Vencimento</th><th>Status</th></tr></thead><tbody>';
     const hoje = new Date();
     items.forEach(l => {
       const qtdNum = Number(l.quantidade_atual || 0);
@@ -351,8 +394,11 @@ async function loadSetorLotes() {
         .replace('central', 'Central')
         .replace('setor', 'Setor')
         .replace('produto', 'Produto');
-      html += `<tr>
+      // Realçar vencidos e próximos do vencimento
+      const rowClass = (status === 'Vencido') ? 'table-danger' : (status.startsWith('Vence em') ? 'table-warning' : '');
+      html += `<tr class="${rowClass}">
         <td>${l.numero_lote || '-'}</td>
+        <td>${qtd}</td>
         <td>${vencStr}</td>
         <td>${status}</td>
       </tr>`;
