@@ -4833,6 +4833,90 @@ def api_movimentacoes():
                 {'created_at': date_range}
             ]
 
+    # Filtro de escopo por central: restringir produtos para níveis abaixo de admin
+    try:
+        nivel = getattr(current_user, 'nivel_acesso', None)
+        restricted = nivel in ('gerente_almox', 'resp_sub_almox', 'operador_setor')
+    except Exception:
+        restricted = False
+
+    if restricted:
+        expected_cid = None
+        try:
+            # Derivar central efetiva do usuário
+            if getattr(current_user, 'central_id', None) is not None:
+                expected_cid = current_user.central_id
+            elif nivel == 'gerente_almox' and getattr(current_user, 'almoxarifado_id', None) is not None:
+                a = _find_by_id('almoxarifados', current_user.almoxarifado_id)
+                expected_cid = (a or {}).get('central_id')
+            elif nivel == 'resp_sub_almox' and getattr(current_user, 'sub_almoxarifado_id', None) is not None:
+                s = _find_by_id('sub_almoxarifados', current_user.sub_almoxarifado_id)
+                a = _find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+                expected_cid = (a or {}).get('central_id')
+            elif nivel == 'operador_setor' and getattr(current_user, 'setor_id', None) is not None:
+                se = _find_by_id('setores', current_user.setor_id)
+                s = _find_by_id('sub_almoxarifados', (se or {}).get('sub_almoxarifado_id'))
+                a = _find_by_id('almoxarifados', (s or {}).get('almoxarifado_id'))
+                expected_cid = (a or {}).get('central_id')
+        except Exception:
+            expected_cid = None
+
+        try:
+            scope_filter = None
+            if expected_cid is None:
+                # Sem central derivável: negar resultados
+                scope_filter = {'produto_id': {'$in': ['__none__']}}
+            else:
+                # Normalizar candidatos de central e buscar produtos da central
+                central_candidates = []
+                try:
+                    cdoc = _find_by_id('centrais', expected_cid)
+                except Exception:
+                    cdoc = None
+                if cdoc:
+                    cid_seq = cdoc.get('id')
+                    cid_oid = cdoc.get('_id')
+                    if cid_seq is not None:
+                        central_candidates.append(cid_seq)
+                    if cid_oid is not None:
+                        central_candidates.append(cid_oid)
+                        central_candidates.append(str(cid_oid))
+                central_candidates.extend([expected_cid, str(expected_cid)])
+                central_candidates = [x for x in central_candidates if x is not None]
+
+                produtos_coll = extensions.mongo_db['produtos']
+                prod_ids = []
+                try:
+                    for p in produtos_coll.find({'central_id': {'$in': list(set(central_candidates))}}, {'id': 1, '_id': 1}):
+                        if p.get('id') is not None:
+                            prod_ids.append(p['id'])
+                        if p.get('_id') is not None:
+                            prod_ids.append(p['_id'])
+                            prod_ids.append(str(p['_id']))
+                except Exception:
+                    prod_ids = []
+                if prod_ids:
+                    scope_filter = {'produto_id': {'$in': list(set(prod_ids))}}
+                else:
+                    # Sem produtos resolvidos para a central: não aplicar pré-filtro.
+                    # O safe-guard no loop garantirá o escopo.
+                    scope_filter = None
+
+            # Mesclar filtro de escopo com consulta atual
+            if scope_filter is not None:
+                if '$and' in query:
+                    query['$and'].append(scope_filter)
+                elif '$or' in query:
+                    query = {'$and': [
+                        {'$or': query['$or']},
+                        scope_filter
+                    ]}
+                else:
+                    query.update(scope_filter)
+        except Exception:
+            # Fallback silencioso (escopo será aplicado dentro do loop)
+            pass
+
     total = coll.count_documents(query or {})
     page = max(1, page)
     per_page = max(1, min(per_page, 100))
@@ -4885,6 +4969,13 @@ def api_movimentacoes():
 
     items = []
     for m in cursor:
+        # Escopo extra de segurança: níveis restritos só veem produtos da própria central
+        if restricted:
+            try:
+                if not current_user.can_access_produto(m.get('produto_id')):
+                    continue
+            except Exception:
+                continue
         # Normalizar tipo
         tipo_mov = (m.get('tipo') or m.get('tipo_movimentacao') or '').lower()
         # Produto
