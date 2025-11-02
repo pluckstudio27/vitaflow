@@ -493,6 +493,21 @@ function openUserModal(userId = null) {
     }
 
     updateHierarchyFields();
+    // Carregar listas dinâmicas via API caso o template tenha vindo vazio
+    (async function preloadHierarchyOptions() {
+        try {
+            await ensureHierarchyOptionsLoaded();
+            // Garantir que o select de Categorias Específicas seja populado dinamicamente
+            try { await ensureCategoryOptionsLoaded(); } catch (_) {}
+            // Após carregar, aplicar filtros e inicializar tabelas múltiplas
+            try { onUserCentralChange(); } catch (_) {}
+            try { onUserAlmoxChange(); } catch (_) {}
+            try { initOperadorAlmoxTable(); refreshOperadorAlmoxTable(); onOperadorAlmoxMultiChange(); } catch (_) {}
+            try { initOperadorSubTable(); refreshOperadorSubTable(); } catch (_) {}
+        } catch (e) {
+            console.warn('Falha ao carregar hierarquia dinamicamente:', e);
+        }
+    })();
     // Listeners de selects dependentes
     const centralSelect = document.getElementById('user-central');
     const almoxSelect = document.getElementById('user-almoxarifado');
@@ -566,6 +581,114 @@ function openUserModal(userId = null) {
     // Abrir o modal
     const modalInstance = new bootstrap.Modal(modal);
     modalInstance.show();
+}
+
+// Fallback dinâmico: popula selects de Central, Almoxarifado, Sub‑Almoxarifado e Setor via API
+async function ensureHierarchyOptionsLoaded() {
+    const centralSelect = document.getElementById('user-central');
+    const almoxSelect = document.getElementById('user-almoxarifado');
+    const subSelect = document.getElementById('user-sub-almoxarifado');
+    const setorSelect = document.getElementById('user-setor');
+
+    // Helper para verificar se há mais de uma opção real (além de "Selecione...")
+    const hasRealOptions = (selectEl) => {
+        if (!selectEl) return false;
+        const opts = Array.from(selectEl.querySelectorAll('option'));
+        return opts.some((opt, idx) => idx > 0 && (opt.value || '').trim() !== '');
+    };
+
+    // Carregar Centrais
+    if (centralSelect && !hasRealOptions(centralSelect)) {
+        try {
+            const resp = await fetchJson('/api/centrais?per_page=1000');
+            const items = (resp && resp.items) ? resp.items : [];
+            const prev = centralSelect.value;
+            centralSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(c => `
+                <option value="${String(c.id)}">${c.nome || c.id}</option>
+            `).join('');
+            if (prev) centralSelect.value = prev;
+        } catch (e) {
+            console.warn('Não foi possível carregar centrais via API:', e);
+        }
+    }
+
+    // Carregar Almoxarifados
+    if (almoxSelect && !hasRealOptions(almoxSelect)) {
+        try {
+            const resp = await fetchJson('/api/almoxarifados?per_page=1000');
+            const items = (resp && resp.items) ? resp.items : [];
+            const prev = almoxSelect.value;
+            almoxSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(a => `
+                <option value="${String(a.id)}" data-central="${String(a.central_id ?? '')}">${a.nome || a.id}</option>
+            `).join('');
+            if (prev) almoxSelect.value = prev;
+        } catch (e) {
+            console.warn('Não foi possível carregar almoxarifados via API:', e);
+        }
+    }
+
+    // Carregar Sub‑Almoxarifados
+    if (subSelect && !hasRealOptions(subSelect)) {
+        try {
+            const resp = await fetchJson('/api/sub-almoxarifados?per_page=1000');
+            const items = (resp && resp.items) ? resp.items : [];
+            const prev = subSelect.value;
+            subSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(s => `
+                <option value="${String(s.id)}" data-almoxarifado="${String(s.almoxarifado_id ?? '')}">${s.nome || s.id}</option>
+            `).join('');
+            if (prev) subSelect.value = prev;
+        } catch (e) {
+            console.warn('Não foi possível carregar sub‑almoxarifados via API:', e);
+        }
+    }
+
+    // Carregar Setores
+    if (setorSelect && !hasRealOptions(setorSelect)) {
+        try {
+            const resp = await fetchJson('/api/setores?per_page=1000');
+            const items = (resp && resp.items) ? resp.items : [];
+            const prev = setorSelect.value;
+            setorSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(s => {
+                const subIds = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(String).join(',') : '';
+                const almoxIds = Array.isArray(s.almoxarifado_ids) ? s.almoxarifado_ids.map(String).join(',') : '';
+                const centralIds = Array.isArray(s.central_ids) ? s.central_ids.map(String).join(',') : '';
+                return `
+                    <option value="${String(s.id)}"
+                            data-sub-almoxarifado="${String(s.sub_almoxarifado_id ?? '')}"
+                            data-almoxarifado="${String(s.almoxarifado_id ?? '')}"
+                            data-central="${String(s.central_id ?? '')}"
+                            data-sub-almoxarifado-ids="${subIds}"
+                            data-almoxarifado-ids="${almoxIds}"
+                            data-central-ids="${centralIds}">${s.nome || s.id}</option>`;
+            }).join('');
+            if (prev) setorSelect.value = prev;
+        } catch (e) {
+            console.warn('Não foi possível carregar setores via API:', e);
+        }
+    }
+}
+
+// Fallback dinâmico: popula o select de Categorias Específicas via API quando vazio
+async function ensureCategoryOptionsLoaded() {
+    const select = document.getElementById('categoria-adicionar');
+    if (!select) return; // Seção visível apenas para super admin
+    const opts = Array.from(select.querySelectorAll('option'));
+    const hasReal = opts.some((opt, idx) => idx > 0 && (opt.value || '').trim() !== '');
+    if (hasReal) return;
+    try {
+        const resp = await fetchJson('/api/categorias?per_page=1000');
+        const items = (resp && resp.items) ? resp.items : [];
+        const prev = select.value;
+        select.innerHTML = '<option value="">Selecione uma categoria para adicionar...</option>' + items.map(c => {
+            const id = String(c.id || c._id || '');
+            const nome = c.nome || id;
+            const codigo = c.codigo ? String(c.codigo) + ' - ' : '';
+            return `<option value="${id}">${codigo}${nome}</option>`;
+        }).join('');
+        if (prev) select.value = prev;
+    } catch (e) {
+        console.warn('Não foi possível carregar categorias via API:', e);
+    }
 }
 
 function updateHierarchyFields() {
@@ -1660,7 +1783,7 @@ function adicionarCategoriaEspecifica() {
     const userId = document.getElementById('user-id').value;
     
     if (!categoriaId) {
-        alert('Selecione uma categoria para adicionar');
+        if (window.showNotification) window.showNotification('warning', 'Selecione uma categoria para adicionar.');
         return;
     }
     
@@ -1675,18 +1798,20 @@ function adicionarCategoriaEspecifica() {
         })
         .then(data => {
             if (data.error) {
-                alert(data.error);
+                if (window.showNotification) window.showNotification('danger', `Falha ao adicionar categoria: ${data.error}`);
             } else {
                 adicionarCategoriaLista(data.categoria);
                 select.value = '';
                 // Remover opção do select temporariamente
                 const option = select.querySelector(`option[value="${categoriaId}"]`);
                 if (option) option.style.display = 'none';
+                if (window.showNotification) window.showNotification('success', 'Categoria adicionada ao usuário.');
             }
         })
         .catch(error => {
             console.error('Erro ao adicionar categoria:', error);
-            alert('Erro ao adicionar categoria específica');
+            const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(error, 'user_categoria_add') : (error && error.message ? error.message : String(error)));
+            if (window.showNotification) window.showNotification('danger', `Falha ao adicionar categoria: ${friendly}`);
         });
     } else {
         // Se é novo usuário, armazenar temporariamente

@@ -252,25 +252,21 @@ async function carregarDemandasResolvidas() {
 async function atualizarStatus(id, status, quantidade_autorizada, opts = {}) {
     const silent = !!opts.silent;
     try {
-        const res = await fetch(`/api/demandas/${encodeURIComponent(id)}`, {
+        const res = await fetchJson(`/api/demandas/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(quantidade_autorizada != null ? { status, quantidade_autorizada } : { status })
         });
-        let data = {};
-        try { data = await res.json(); } catch (_) { data = {}; }
-        if (!res.ok) {
-            const msg = data.error || (res.status === 403 ? 'Acesso negado - escopo do usuário não corresponde à demanda' : 'Falha ao atualizar status');
-            if (!silent) alert(msg);
-            return { ok: false, message: msg };
-        }
         carregarDemandasGerencia();
         carregarDemandasResolvidas();
+        if (!silent && window.showNotification) window.showNotification('success', 'Demanda atualizada.');
         return { ok: true };
     } catch (e) {
-        const msg = 'Erro: ' + (e && e.message ? e.message : String(e));
-        if (!silent) alert(msg);
-        return { ok: false, message: msg };
+        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'demandas_update') : (e && e.message ? e.message : String(e)));
+        if (!silent) {
+            if (window.showNotification) window.showNotification('danger', `Falha ao atualizar demanda: ${friendly}`);
+        }
+        return { ok: false, message: friendly };
     }
 }
 

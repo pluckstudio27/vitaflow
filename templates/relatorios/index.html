@@ -1,45 +1,86 @@
 {% extends "base.html" %}
 
-{% block title %}PluckLog - Relatórios{% endblock %}
+{% block title %}PluckLog - Compras Inteligentes{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">
-                        <i class="fas fa-chart-bar mr-2"></i>
-                        Relatórios do Sistema
-                    </h3>
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-body d-flex align-items-center justify-content-between">
+                    <div>
+                        <h3 class="m-0">
+                            <i class="fas fa-shopping-cart mr-2"></i>
+                            Compras • Sugestões Inteligentes
+                        </h3>
+                        <div class="text-muted small mt-1">Priorize itens críticos por estoque, vencimento e cobertura.</div>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-secondary btn-sm" id="btnCopy"><i class="fas fa-clipboard"></i> Copiar resumo</button>
+                        <button class="btn btn-outline-secondary btn-sm" id="btnCsv"><i class="fas fa-file-csv"></i> Exportar CSV</button>
+                        <button class="btn btn-primary btn-sm" id="btnAtualizar"><i class="fas fa-sync-alt"></i> Atualizar</button>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="card bg-primary">
-                                <div class="card-body">
-                                    <h5 class="card-title text-white">Relatório de Estoque</h5>
-                                    <p class="card-text text-white">Visualize o status atual do estoque</p>
-                                    <a href="#" class="btn btn-light">Gerar Relatório</a>
+            </div>
+
+            <div class="row">
+                <div class="col-lg-4">
+                    <div class="card border-0 shadow-sm mb-3">
+                        <div class="card-header bg-white">
+                            <strong>Parâmetros</strong>
+                            <span class="badge badge-light ml-2" id="aiProviderBadge" style="display:none"></span>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <div class="form-group col-12">
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="useAi">
+                                        <label class="custom-control-label" for="useAi">Usar Inteligência Artificial</label>
+                                    </div>
+                                </div>
+                                <div class="form-group col-md-6">
+                                    <label class="small text-muted">Limiar de estoque baixo</label>
+                                    <input type="number" class="form-control" id="lowStockThreshold" value="5" min="0" step="1" />
+                                </div>
+                                <div class="form-group col-md-6">
+                                    <label class="small text-muted">Vencendo em (dias)</label>
+                                    <input type="number" class="form-control" id="expiringDays" value="30" min="1" step="1" />
+                                </div>
+                                <div class="form-group col-md-12">
+                                    <label class="small text-muted">Cobertura (dias)</label>
+                                    <input type="number" class="form-control" id="daysToCover" value="30" min="1" step="1" />
                                 </div>
                             </div>
+                            <div id="alertArea"></div>
                         </div>
-                        <div class="col-md-4">
-                            <div class="card bg-success">
-                                <div class="card-body">
-                                    <h5 class="card-title text-white">Relatório de Movimentações</h5>
-                                    <p class="card-text text-white">Acompanhe as movimentações de produtos</p>
-                                    <a href="#" class="btn btn-light">Gerar Relatório</a>
-                                </div>
-                            </div>
+                    </div>
+
+                    <div class="card border-0 shadow-sm" id="aiFeedbackCard" style="display:none">
+                        <div class="card-header bg-white"><strong>Resumo da IA</strong></div>
+                        <div class="card-body">
+                            <div id="aiFeedback" class="text-muted" style="white-space:pre-wrap"></div>
                         </div>
-                        <div class="col-md-4">
-                            <div class="card bg-info">
-                                <div class="card-body">
-                                    <h5 class="card-title text-white">Relatório de Usuários</h5>
-                                    <p class="card-text text-white">Informações sobre usuários do sistema</p>
-                                    <a href="#" class="btn btn-light">Gerar Relatório</a>
-                                </div>
+                    </div>
+                </div>
+                <div class="col-lg-8">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="sugestoesTable">
+                                    <thead class="thead-light">
+                                        <tr>
+                                            <th>Produto</th>
+                                            <th>Estoque</th>
+                                            <th>Vencimento</th>
+                                            <th>Consumo/dia</th>
+                                            <th>Sugestão</th>
+                                            <th>Motivos</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- preenchido via JS -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -48,4 +89,153 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const lowStockThresholdEl = document.getElementById('lowStockThreshold');
+    const expiringDaysEl = document.getElementById('expiringDays');
+    const daysToCoverEl = document.getElementById('daysToCover');
+    const useAiEl = document.getElementById('useAi');
+    const btnAtualizar = document.getElementById('btnAtualizar');
+    const tbody = document.querySelector('#sugestoesTable tbody');
+    const alertArea = document.getElementById('alertArea');
+    const aiFeedbackCard = document.getElementById('aiFeedbackCard');
+    const aiFeedbackEl = document.getElementById('aiFeedback');
+    const aiProviderBadge = document.getElementById('aiProviderBadge');
+    const btnCsv = document.getElementById('btnCsv');
+    const btnCopy = document.getElementById('btnCopy');
+
+    // Desligar IA por padrão para evitar chamadas externas antes da configuração
+    try { useAiEl.checked = false; } catch (_) {}
+
+    async function loadSuggestions() {
+        tbody.innerHTML = '<tr><td colspan="6"><div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Carregando sugestões...</div></td></tr>';
+        alertArea.innerHTML = '';
+        const params = new URLSearchParams({
+            low_stock_threshold: String(Number(lowStockThresholdEl.value || 5)),
+            expiring_in_days: String(Number(expiringDaysEl.value || 30)),
+            days_to_cover: String(Number(daysToCoverEl.value || 30)),
+            use_ai: useAiEl.checked ? 'true' : 'false'
+        });
+
+        try {
+            const res = await fetchJson(`/api/compras/sugestoes?${params.toString()}`, { method: 'GET' });
+            const items = (res.items || []);
+            const aiFeedback = (res.ai_feedback || '').trim();
+            const aiProvider = (res.params && res.params.ai_provider) ? String(res.params.ai_provider) : '';
+            if (aiProvider) {
+                aiProviderBadge.style.display = 'inline-block';
+                aiProviderBadge.className = 'badge badge-success';
+                aiProviderBadge.textContent = `IA: ${aiProvider}`;
+            } else {
+                aiProviderBadge.style.display = 'none';
+            }
+            if (aiFeedback) {
+                aiFeedbackCard.style.display = '';
+                aiFeedbackEl.textContent = aiFeedback;
+            } else {
+                aiFeedbackCard.style.display = 'none';
+                aiFeedbackEl.textContent = '';
+            }
+            if (!items.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhuma sugestão no momento com os critérios selecionados.</td></tr>';
+                return;
+            }
+            const fmtNumber = (n) => {
+                const v = Number(n || 0);
+                return v.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+            };
+            const fmtDate = (iso) => {
+                if (!iso) return '-';
+                try {
+                    const d = new Date(iso);
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    const mm = String(d.getMonth() + 1).padStart(2, '0');
+                    const yyyy = d.getFullYear();
+                    return `${dd}/${mm}/${yyyy}`;
+                } catch { return '-'; }
+            };
+            tbody.innerHTML = items.map(it => {
+                const motivos = (it.motivos || []).map(m => {
+                    if (m === 'sem_estoque') return '<span class="badge badge-danger mr-1">Sem estoque</span>';
+                    if (m === 'estoque_baixo') return '<span class="badge badge-warning mr-1">Estoque baixo</span>';
+                    if (m === 'cobertura_insuficiente') return '<span class="badge badge-info mr-1">Cobertura insuficiente</span>';
+                    if (m === 'ia_sugestao') return '<span class="badge badge-primary mr-1">IA</span>';
+                    if (m && m.startsWith('vencimento_em_')) return '<span class="badge badge-secondary mr-1">' + m.replace('vencimento_em_', 'Vencimento em ') + '</span>';
+                    return '<span class="badge badge-light mr-1">' + (m || '-') + '</span>';
+                }).join(' ');
+                const produtoLabel = `${it.produto_nome || '-'}<br/><small class="text-muted">${it.produto_codigo || '-'}</small>`;
+                // realçar linhas críticas
+                const motivoSet = new Set(it.motivos || []);
+                const critical = motivoSet.has('sem_estoque') || Array.from(motivoSet).some(x => String(x).startsWith('vencimento_em_'));
+                const rowClass = critical ? 'table-danger' : '';
+                return `
+                    <tr class="${rowClass}">
+                        <td>${produtoLabel}</td>
+                        <td>${fmtNumber(it.estoque_disponivel)}</td>
+                        <td>${fmtDate(it.proxima_validade)}${it.dias_para_vencer != null ? ` <small class="text-muted">(${it.dias_para_vencer}d)</small>` : ''}</td>
+                        <td>${fmtNumber(it.media_diaria)}</td>
+                        <td><strong>${fmtNumber(it.sugestao_compra)}</strong></td>
+                        <td>${motivos}</td>
+                    </tr>
+                `;
+            }).join('');
+            if (window.showNotification) window.showNotification('info', `Sugestões atualizadas (${items.length} itens).`);
+        } catch (e) {
+            tbody.innerHTML = '';
+            const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'sugestoes') : (e && e.message ? e.message : String(e)));
+            alertArea.innerHTML = `<div class="alert alert-danger">Falha ao carregar sugestões: ${friendly}</div>`;
+            if (window.showNotification) window.showNotification('danger', `Falha ao carregar sugestões: ${friendly}`);
+        }
+    }
+
+    btnAtualizar.addEventListener('click', loadSuggestions);
+    btnCsv.addEventListener('click', () => {
+        const rows = [];
+        const headers = ['produto_nome','produto_codigo','estoque_disponivel','proxima_validade','dias_para_vencer','media_diaria','sugestao_compra','motivos'];
+        // coletar itens atuais da tabela
+        const trs = tbody.querySelectorAll('tr');
+        if (!trs.length) return;
+        trs.forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length >= 6) {
+                const produtoNome = tds[0].innerText.split('\n')[0].trim();
+                const produtoCodigo = (tds[0].querySelector('small') || {innerText:'-'}).innerText.trim();
+                const estoque = tds[1].innerText.trim();
+                const venc = tds[2].innerText.trim();
+                const media = tds[3].innerText.trim();
+                const sugestao = tds[4].innerText.trim();
+                const motivos = tds[5].innerText.trim();
+                rows.push([produtoNome, produtoCodigo, estoque, venc, media, sugestao, motivos]);
+            }
+        });
+        const csv = [headers.join(';')].concat(rows.map(r => r.join(';'))).join('\n');
+        const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'lista_compras.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        if (window.showNotification) window.showNotification('success', 'CSV exportado com sucesso.');
+    });
+    btnCopy.addEventListener('click', async () => {
+        const text = aiFeedbackEl.textContent.trim();
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            alertArea.innerHTML = '<div class="alert alert-success">Resumo copiado para a área de transferência.</div>';
+            setTimeout(() => { alertArea.innerHTML=''; }, 2000);
+            if (window.showNotification) window.showNotification('success', 'Resumo copiado.');
+        } catch (e) {
+            alertArea.innerHTML = '<div class="alert alert-warning">Não foi possível copiar o resumo.</div>';
+            setTimeout(() => { alertArea.innerHTML=''; }, 2000);
+            if (window.showNotification) window.showNotification('warning', 'Não foi possível copiar o resumo.');
+        }
+    });
+    loadSuggestions();
+});
+</script>
 {% endblock %}

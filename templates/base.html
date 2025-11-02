@@ -114,6 +114,108 @@
             }
         };
     </script>
+    <script>
+        // Override: fetchJson com status/payload e tratamento de falhas de rede
+        (function() {
+            const originalFetchJson = window.fetchJson;
+            window.fetchJson = async function(url, options = {}) {
+                let resp;
+                try {
+                    resp = await fetch(url, Object.assign({ credentials: 'same-origin' }, options));
+                } catch (networkErr) {
+                    const err = new Error('Falha de rede ou CORS ao acessar o servidor.');
+                    err.status = 0;
+                    err.payload = { error: 'network_error', detail: String(networkErr) };
+                    throw err;
+                }
+
+                // Redirecionar em 401
+                if (resp.status === 401) {
+                    try {
+                        const ct401 = resp.headers.get('content-type') || '';
+                        if (ct401.includes('application/json')) {
+                            const data401 = await resp.json();
+                            if (data401 && data401.redirect) {
+                                window.location.href = data401.redirect;
+                                const err401 = new Error('Não autenticado (401)');
+                                err401.status = 401;
+                                err401.payload = { error: 'unauthorized' };
+                                throw err401;
+                            }
+                        }
+                    } catch (_) { /* ignore */ }
+                    window.location.href = '/auth/login';
+                    const err401 = new Error('Não autenticado (401)');
+                    err401.status = 401;
+                    err401.payload = { error: 'unauthorized' };
+                    throw err401;
+                }
+
+                const ct = resp.headers.get('content-type') || '';
+
+                if (!resp.ok) {
+                    if (ct.includes('application/json')) {
+                        const errData = await resp.json().catch(() => null);
+                        const msg = errData && (errData.error || errData.message);
+                        const err = new Error(msg || `Erro HTTP ${resp.status}`);
+                        err.status = resp.status;
+                        err.payload = errData;
+                        throw err;
+                    } else {
+                        const text = await resp.text();
+                        if (text.trim().startsWith('<')) {
+                            const err = new SyntaxError(`Resposta HTML inesperada (status ${resp.status}): ${text.substring(0, 120)}...`);
+                            err.status = resp.status;
+                            err.payload = { raw: text };
+                            throw err;
+                        }
+                        const err = new Error(`Erro HTTP ${resp.status}: ${text.substring(0, 120)}...`);
+                        err.status = resp.status;
+                        err.payload = { raw: text };
+                        throw err;
+                    }
+                }
+
+                if (ct.includes('application/json')) {
+                    try {
+                        return await resp.json();
+                    } catch (_) {
+                        const text = await resp.clone().text();
+                        if (text.trim().startsWith('<')) {
+                            const err = new SyntaxError(`Conteúdo HTML recebido em vez de JSON: ${text.substring(0, 120)}...`);
+                            err.status = resp.status;
+                            err.payload = { raw: text };
+                            throw err;
+                        }
+                        try {
+                            return JSON.parse(text);
+                        } catch (e2) {
+                            const err = new SyntaxError(`Conteúdo não-JSON recebido: ${text.substring(0, 120)}...`);
+                            err.status = resp.status;
+                            err.payload = { raw: text };
+                            throw err;
+                        }
+                    }
+                } else {
+                    const text = await resp.text();
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        if (text.trim().startsWith('<')) {
+                            const err = new SyntaxError(`Conteúdo HTML recebido em vez de JSON: ${text.substring(0, 120)}...`);
+                            err.status = resp.status;
+                            err.payload = { raw: text };
+                            throw err;
+                        }
+                        const err = new SyntaxError(`Conteúdo não-JSON recebido: ${text.substring(0, 120)}...`);
+                        err.status = resp.status;
+                        err.payload = { raw: text };
+                        throw err;
+                    }
+                }
+            }
+        })();
+    </script>
     <style>
         /* Reset básico para evitar espaços desnecessários */
         html, body {
@@ -529,9 +631,32 @@
             display: block;
         }
     </style>
+    <style>
+        /* Notificações (toast/banners) */
+        .notify-container {
+            position: fixed;
+            top: 75px;
+            right: 20px;
+            width: 360px;
+            max-width: calc(100vw - 40px);
+            z-index: 1050;
+            pointer-events: none;
+        }
+        .notify-item {
+            pointer-events: auto;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+        .notify-item .btn-close {
+            float: right;
+        }
+    </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    <!-- Container de Notificações -->
+    <div id="notifications" class="notify-container"></div>
     <!-- Header/Topbar -->
     <header class="topbar">
         <div class="topbar-left">
@@ -939,6 +1064,74 @@
         });
     </script>
     
+    <script>
+        // Notificações amigáveis e mapeamento de erros
+        window.showNotification = function(type, message, opts = {}) {
+            try {
+                const container = document.getElementById('notifications');
+                if (!container) return;
+                const ttl = Math.max(2000, Number(opts.timeout || 6000));
+                const category = (type || 'info').toLowerCase();
+                const el = document.createElement('div');
+                el.className = `alert alert-${category === 'error' ? 'danger' : category} notify-item`;
+                el.role = 'alert';
+                el.innerHTML = `
+                    <button type="button" class="btn-close" aria-label="Fechar"></button>
+                    ${message}
+                `;
+                const btn = el.querySelector('.btn-close');
+                btn.addEventListener('click', () => {
+                    try { container.removeChild(el); } catch(_) {}
+                });
+                container.appendChild(el);
+                setTimeout(() => { try { container.removeChild(el); } catch(_) {} }, ttl);
+            } catch (_) { /* ignore */ }
+        };
+
+        window.friendlyErrorMessage = function(err, context) {
+            try {
+                const status = Number(err && err.status || 0);
+                const msg = String((err && err.message) || '').trim();
+                const payload = err && err.payload || {};
+                const base = {
+                    0: 'Não foi possível comunicar com o servidor. Verifique sua conexão e tente novamente.',
+                    401: 'Sessão expirada ou não autenticado. Faça login para continuar.',
+                    403: (payload && String(payload.error || '').toLowerCase().includes('csrf'))
+                         ? 'Falha de segurança: token CSRF inválido ou ausente. Atualize a página e tente novamente.'
+                         : 'Você não tem permissão para executar esta ação. Se necessário, solicite ao administrador o acesso.',
+                    404: 'Recurso não encontrado. Verifique se a funcionalidade está habilitada e tente novamente.',
+                    409: 'Conflito de dados detectado. Recarregue as informações e tente novamente.',
+                    422: 'Dados inválidos. Corrija os campos informados e tente novamente.',
+                    503: 'Serviço temporariamente indisponível. Tente novamente mais tarde.',
+                    500: 'Ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.'
+                };
+                let text = base[status] || (msg || 'Ocorreu um erro. Tente novamente.');
+
+                // Explicações específicas para falhas de permissão em transferência/saída
+                if (status === 403 && (context === 'transferencia' || context === 'distribuicao')) {
+                    const m = (msg || '').toLowerCase();
+                    const isCentralMismatch = m.includes('central') || m.includes('centrais');
+                    const isScope = m.includes('escopo') || m.includes('perm') || m.includes('can_move_between');
+                    const centralHint = 'Produto, origem e destino devem pertencer à MESMA central do usuário.';
+                    const pairsHint = 'Pares permitidos para Resp. Sub‑Almox: Almoxarifado → Sub‑Almox (mesma central) e Sub‑Almox ↔ Setor (mesma central). Outros pares exigem nível superior (Gerente/Admin/Super).';
+                    const howToFix = 'Ajuste a seleção para um par permitido e garanta que o produto esteja na sua central. Em caso de necessidade entre centrais, solicite apoio de um administrador.';
+                    if (isCentralMismatch) {
+                        text = `${text} Motivo provável: ${centralHint} ${howToFix}`;
+                    } else if (isScope) {
+                        text = `${text} Motivo provável: ${pairsHint} ${howToFix}`;
+                    } else {
+                        text = `${text} Dica: ${centralHint} ${pairsHint} ${howToFix}`;
+                    }
+                }
+                if (context === 'sugestoes' && (status === 500 || status === 503)) {
+                    text += ' Caso o uso de IA esteja ativado, o serviço de IA pode estar indisponível; as sugestões padrão continuam disponíveis quando possível.';
+                }
+                return text;
+            } catch (_) {
+                return 'Ocorreu um erro. Tente novamente.';
+            }
+        };
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

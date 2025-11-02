@@ -442,15 +442,8 @@ class MongoUser:
             return False
         p_cid = (p or {}).get('central_id')
         if level == 'admin_central':
-            # Normalizar central do produto e do usuário para evitar mismatch entre 'id' sequencial e ObjectId
-            try:
-                p_central = self._find_by_id('centrais', p_cid)
-                u_central = self._find_by_id('centrais', self.central_id)
-                if p_central and u_central:
-                    return str(p_central.get('_id')) == str(u_central.get('_id'))
-            except Exception:
-                pass
-            return str(p_cid) == str(self.central_id)
+            # Admin da central tem visão global por requisito atualizado
+            return True
         if level in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
             # Produtos vinculados à central do usuário
             # Para níveis inferiores, checamos apenas a central

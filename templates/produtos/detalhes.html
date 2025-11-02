@@ -345,8 +345,8 @@ function renderizarProduto(produto) {
                             : (produto.categoria || 'Não informada')}
                     </div>
                     <div class="col-6">
-                        <strong>Criado em:</strong><br>
-                        ${criadoEm}
+                        <strong>Observação Extra:</strong><br>
+                        <div class="text-muted" style="white-space: pre-wrap;">${produto.observacao_extra || '-'}</div>
                     </div>
                 </div>
             </div>

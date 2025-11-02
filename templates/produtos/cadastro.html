@@ -65,6 +65,13 @@
                                               placeholder="Descrição detalhada do produto..."></textarea>
                                 </div>
 
+                                <div class="mb-3">
+                                    <label for="observacao_extra" class="form-label">Observação Extra</label>
+                                    <textarea class="form-control" id="observacao_extra" name="observacao_extra" rows="2"
+                                              placeholder="Ex.: Tombamento prefeitura, nº de patrimônio, etiqueta, etc."></textarea>
+                                    <div class="form-text">Campo opcional para informações adicionais do produto.</div>
+                                </div>
+
                                 <div class="row">
                                     <div class="col-md-12">
                                         <div class="mb-3">
@@ -284,6 +291,7 @@ document.getElementById('produtoForm').addEventListener('submit', function(e) {
         codigo: formData.get('codigo').trim(),
         nome: formData.get('nome').trim(),
         descricao: formData.get('descricao').trim(),
+        observacao_extra: (formData.get('observacao_extra') || '').trim() || null,
         categoria_id: categoriaSelecionada,
         unidade_medida: formData.get('unidade_medida'),
         ativo: formData.has('ativo')

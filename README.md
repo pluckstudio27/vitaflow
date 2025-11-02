@@ -116,6 +116,28 @@ almox-sms/
 - **Banco de Dados**: SQLite (dev), PostgreSQL (prod)
 - **Arquitetura**: Blueprints, API REST
 
+## Notas de CSRF e MongoDB
+
+- CSRF em APIs JSON:
+  - Requisições `POST`, `PUT`, `PATCH` e `DELETE` para endpoints de API que recebem `Content-Type: application/json` exigem o cabeçalho `X-CSRF-Token` quando o usuário está autenticado.
+  - Para obter o token no backend de testes, realize um `GET /` para provisionar o token na sessão e, em seguida, leia `session['csrf_token']`.
+  - No frontend, o token é exposto em `window.CSRF_TOKEN` e anexado automaticamente em chamadas `fetch` de métodos que alteram estado.
+  - Exemplo (teste):
+    ```python
+    client.post('/auth/login', json={'username': 'admin', 'password': 'admin'})
+    client.get('/')  # provisiona CSRF na sessão
+    with client.session_transaction() as sess:
+        csrf = sess.get('csrf_token')
+    headers = {'Accept': 'application/json','Content-Type': 'application/json','X-CSRF-Token': csrf}
+    r = client.post('/api/centrais', json={'nome': 'Central'}, headers=headers)
+    ```
+
+- Alinhamento de IDs (MongoDB):
+  - O sistema aceita IDs em múltiplos formatos (sequencial `id`, `ObjectId` e `str`) e normaliza para persistir e consultar.
+  - Endpoints e consultas consideram campos como `id`, `_id`, e também variantes stringificadas (`str(ObjectId)`), garantindo compatibilidade.
+  - Em coleções como `estoques`, `movimentacoes` e `lotes`, o campo `produto_id` pode estar como inteiro, `ObjectId` ou string; as APIs fazem resolução de candidatos de ID e deduplicação por tipo/valor.
+  - Em integrações e testes, é seguro enviar qualquer uma das formas de ID suportadas; o backend cuidará da normalização.
+
 ## Contribuição
 
 1. Faça um fork do projeto

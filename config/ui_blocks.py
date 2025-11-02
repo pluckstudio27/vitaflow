@@ -145,14 +145,13 @@ class UIBlocksConfig:
                 active_endpoints=['main.demandas', 'main.demandas_gerencia']
             ),
             MenuBlock(
-                id='relatorios',
-                label='Relatórios',
-                icon='fas fa-chart-bar',
+                id='compras',
+                label='Compras',
+                icon='fas fa-shopping-cart',
                 url='main.relatorios',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
-                    AccessLevel.ADMIN_CENTRAL,
-                    AccessLevel.GERENTE_ALMOX
+                    AccessLevel.ADMIN_CENTRAL
                 ],
                 active_endpoints=['main.relatorios']
             ),

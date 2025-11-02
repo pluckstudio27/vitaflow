@@ -124,41 +124,10 @@ def init_mongo(app):
             except Exception as e:
                 app.logger.error(f'[Mongo Seed] Falha ao semear/atualizar usuário admin: {e}')
         except (ServerSelectionTimeoutError, AutoReconnect, Exception) as e:
+            # Não usar mongomock: sempre exigir MongoDB real
             app.logger.error(f"[Mongo Init] Conexão MongoDB indisponível: {type(e).__name__}: {e}")
-            # Fallback: tentar iniciar banco em memória com mongomock para desenvolvimento/teste
-            try:
-                import mongomock
-                app.logger.warning("[Mongo Init] Usando mongomock (banco em memória) como fallback de desenvolvimento.")
-                mongo_client = mongomock.MongoClient()
-                mongo_db = mongo_client[dbname]
-                # Garantir coleções, índices e usuário admin padrão
-                ensure_collections_and_indexes(mongo_db, logger=app.logger)
-                try:
-                    usuarios_col = mongo_db['usuarios']
-                    usuarios_col.create_index([('username', ASCENDING)], unique=True, name='idx_unique_username')
-                    admin_fields = {
-                        'email': 'admin@local',
-                        'nome': 'Administrador',
-                        'password_hash': generate_password_hash('admin'),
-                        'ativo': True,
-                        'nivel_acesso': 'super_admin',
-                        'data_criacao': datetime.utcnow(),
-                        'ultimo_login': None,
-                        'central_id': None,
-                        'almoxarifado_id': None,
-                        'sub_almoxarifado_id': None,
-                        'setor_id': None,
-                    }
-                    usuarios_col.update_one(
-                        {'username': 'admin'},
-                        {'$set': {'username': 'admin', **admin_fields}},
-                        upsert=True
-                    )
-                    app.logger.info('[Mongo Seed] (mongomock) Usuário admin disponível com senha padrão "admin".')
-                except Exception as se:
-                    app.logger.error(f'[Mongo Seed] (mongomock) Falha ao preparar usuário admin: {se}')
-            except Exception as e2:
-                app.logger.error(f"[Mongo Init] Fallback mongomock indisponível: {type(e2).__name__}: {e2}")
-                mongo_client = None
-                mongo_db = None
+            mongo_client = None
+            mongo_db = None
+            # Propagar falha para impedir inicialização sem banco real
+            raise RuntimeError(f"MongoDB indisponível: {type(e).__name__}: {e}")
     return mongo_client, mongo_db

@@ -16,6 +16,10 @@ from datetime import timedelta
 from bson import ObjectId
 import csv
 import io
+import os
+import json as _json
+from urllib.request import Request as _UrlRequest, urlopen as _urlopen
+from urllib.error import URLError as _URLError, HTTPError as _HTTPError
 
 main_bp = Blueprint('main', __name__)
 
@@ -320,6 +324,10 @@ def demandas_gerencia():
 def configuracoes_usuarios():
     """Página de gerenciamento de usuários (MongoDB)"""
     try:
+        # Definir variáveis de IA utilizadas em checagens condicionais abaixo
+        ai_provider = os.environ.get('AI_PROVIDER', '').strip().lower()
+        gem_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('AI_SUGGESTION_API_KEY')
+
         db = extensions.mongo_db
         if db is None:
             # Se Mongo não estiver inicializado, manter placeholders
@@ -461,7 +469,7 @@ def configuracoes_usuarios():
                         normalized_parent = str(_adoc.get('_id')) if _adoc and _adoc.get('_id') else str(seq)
                     except Exception:
                         normalized_parent = str(seq)
-            else:
+            if not (ai_provider == 'gemini' and gem_key):
                 try:
                     # Pode ser ObjectId ou string hex de 24 caracteres
                     from bson import ObjectId as _OID
@@ -723,7 +731,7 @@ def api_categorias_create():
             'updated_at': datetime.utcnow()
         }
         coll.insert_one(doc)
-        return jsonify({'message': 'Categoria criada com sucesso', 'id': doc['id']}), 201
+        return jsonify({'message': 'Categoria criada com sucesso', 'id': doc['id']}), 200
     except Exception as e:
         return jsonify({'error': f'Erro ao criar categoria: {e}'}), 500
 
@@ -953,8 +961,455 @@ def categorias():
 @main_bp.route('/relatorios')
 @require_admin_or_above
 def relatorios():
-    """Página de relatórios"""
+    """Redireciona para Compras (Lista de Compras)."""
+    from flask import redirect, url_for
+    return redirect(url_for('main.compras'))
+
+@main_bp.route('/compras')
+@require_admin_or_above
+def compras():
+    """Página de Compras - Lista de Compras (Sugestões)."""
     return render_template('relatorios/index.html')
+
+# ==================== SUGESTÕES DE COMPRAS ====================
+
+@main_bp.route('/api/compras/sugestoes')
+@require_admin_or_above
+def api_compras_sugestoes():
+    """Sugere compras de produtos com base em:
+    - Estoque disponível agregado por produto (estoques)
+    - Lotes com vencimento próximo (lotes)
+    - Consumo médio dos últimos N dias (movimentacoes: distribuicao/transferencia)
+    Query params:
+      - low_stock_threshold (int|float, default: 5)
+      - expiring_in_days (int, default: 30)
+      - days_to_cover (int, default: 30)
+      - use_ai (bool, default: false)
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+
+        # Parâmetros
+        try:
+            low_stock_threshold = float(request.args.get('low_stock_threshold', request.args.get('limiar', 5)))
+        except Exception:
+            low_stock_threshold = 5.0
+        try:
+            expiring_in_days = int(request.args.get('expiring_in_days', request.args.get('vencimento_dias', 30)))
+        except Exception:
+            expiring_in_days = 30
+        try:
+            days_to_cover = int(request.args.get('days_to_cover', request.args.get('dias_cobertura', 30)))
+        except Exception:
+            days_to_cover = 30
+        use_ai = str(request.args.get('use_ai', 'false')).lower() in ('1', 'true', 'yes', 'sim')
+
+        # Helpers
+        def _resolve_prod(prod_id):
+            try:
+                return _find_by_id('produtos', prod_id)
+            except Exception:
+                return None
+
+        def _local_from_estoque(s):
+            tipo = None
+            local_id = None
+            if s.get('setor_id') is not None:
+                tipo = 'setor'
+                local_id = s.get('setor_id')
+            elif s.get('sub_almoxarifado_id') is not None:
+                tipo = 'sub_almoxarifado'
+                local_id = s.get('sub_almoxarifado_id')
+            elif s.get('almoxarifado_id') is not None:
+                tipo = 'almoxarifado'
+                local_id = s.get('almoxarifado_id')
+            elif s.get('central_id') is not None:
+                tipo = 'central'
+                local_id = s.get('central_id')
+            else:
+                tipo = s.get('local_tipo') or 'almoxarifado'
+                local_id = s.get('local_id')
+            return (tipo, local_id)
+
+        # 1) Agregar estoque disponível por produto, respeitando escopo do usuário
+        stock_map = {}
+        try:
+            estoques = db['estoques']
+            for s in estoques.find({}):
+                pid = s.get('produto_id')
+                if pid is None:
+                    continue
+                tipo, lid = _local_from_estoque(s)
+                allowed = True
+                try:
+                    allowed = current_user.can_access_local(tipo, lid)
+                except Exception:
+                    allowed = False
+                if not allowed:
+                    continue
+                disp = float(s.get('quantidade_disponivel', s.get('quantidade', s.get('quantidade_atual', 0)) or 0) or 0)
+                cur = stock_map.get(str(pid))
+                if cur is None:
+                    stock_map[str(pid)] = {'produto_id': pid, 'disponivel_total': disp}
+                else:
+                    cur['disponivel_total'] = float(cur.get('disponivel_total', 0)) + disp
+        except Exception:
+            stock_map = {}
+
+        # 2) Vencimento próximo por produto: menor data de vencimento (> agora) com quantidade > 0
+        lotes_map = {}
+        now = datetime.utcnow()
+        try:
+            lotes = db['lotes']
+            for l in lotes.find({}):
+                pid = l.get('produto_id')
+                if pid is None:
+                    continue
+                q_atual = float(l.get('quantidade_atual', 0) or 0)
+                dv_raw = l.get('data_vencimento')
+                if not dv_raw:
+                    continue
+                dv_dt = None
+                if isinstance(dv_raw, datetime):
+                    dv_dt = dv_raw
+                elif isinstance(dv_raw, str):
+                    try:
+                        dv_dt = datetime.fromisoformat(dv_raw)
+                    except Exception:
+                        dv_dt = None
+                if dv_dt is None:
+                    continue
+                # ignorar lotes vencidos ou com zero
+                if dv_dt <= now:
+                    continue
+                if q_atual <= 0:
+                    continue
+                # escolher o mais próximo
+                rec = lotes_map.get(str(pid))
+                if rec is None:
+                    lotes_map[str(pid)] = {'produto_id': pid, 'prox_vencimento': dv_dt}
+                else:
+                    cur_dt = rec.get('prox_vencimento')
+                    if cur_dt is None or (dv_dt < cur_dt):
+                        rec['prox_vencimento'] = dv_dt
+        except Exception:
+            lotes_map = {}
+
+        # 3) Consumo médio diário a partir de movimentações dos últimos N dias
+        consumo_map = {}
+        start_dt = now - timedelta(days=max(1, days_to_cover))
+        try:
+            movs = db['movimentacoes']
+            query = {
+                '$and': [
+                    {'data_movimentacao': {'$gte': start_dt}},
+                    {'$or': [
+                        {'tipo': {'$in': ['distribuicao', 'transferencia']}},
+                        {'tipo_movimentacao': {'$in': ['distribuicao', 'transferencia']}}
+                    ]}
+                ]
+            }
+            for m in movs.find(query):
+                pid = m.get('produto_id')
+                if pid is None:
+                    continue
+                # Filtrar por escopo: pelo menos um lado acessível
+                o_tipo = m.get('origem_tipo') or m.get('local_tipo')
+                o_id = m.get('origem_id') or m.get('local_id')
+                d_tipo = m.get('destino_tipo')
+                d_id = m.get('destino_id')
+                allowed = False
+                try:
+                    allowed = (
+                        (o_tipo and current_user.can_access_local(o_tipo, o_id)) or
+                        (d_tipo and current_user.can_access_local(d_tipo, d_id))
+                    )
+                except Exception:
+                    allowed = False
+                if not allowed:
+                    continue
+                q = float(m.get('quantidade') or m.get('quantidade_movimentada') or 0)
+                if q <= 0:
+                    continue
+                rec = consumo_map.get(str(pid))
+                if rec is None:
+                    consumo_map[str(pid)] = {'produto_id': pid, 'total_periodo': q}
+                else:
+                    rec['total_periodo'] = float(rec.get('total_periodo', 0)) + q
+        except Exception:
+            consumo_map = {}
+
+        # 4) Montar sugestões por produto
+        union_pids = set(list(stock_map.keys()) + list(lotes_map.keys()) + list(consumo_map.keys()))
+        items = []
+        for pid_key in union_pids:
+            pid_val = None
+            try:
+                # tentar recuperar o valor original (int/ObjectId) salvo
+                srec = stock_map.get(pid_key)
+                lrec = lotes_map.get(pid_key)
+                crec = consumo_map.get(pid_key)
+                pid_val = (srec or lrec or crec or {}).get('produto_id')
+            except Exception:
+                pid_val = pid_key
+
+            pdoc = _resolve_prod(pid_val)
+            produto_nome = (pdoc or {}).get('nome') or '-'
+            produto_codigo = (pdoc or {}).get('codigo') or '-'
+            produto_id_out = (pdoc or {}).get('id')
+            if produto_id_out is None and pdoc is not None:
+                produto_id_out = str(pdoc.get('_id'))
+            if produto_id_out is None:
+                produto_id_out = pid_val
+
+            disp_total = float((stock_map.get(pid_key) or {}).get('disponivel_total', 0))
+            prox_venc_dt = (lotes_map.get(pid_key) or {}).get('prox_vencimento')
+            dias_para_vencer = None
+            prox_venc_iso = None
+            if isinstance(prox_venc_dt, datetime):
+                if prox_venc_dt.tzinfo is None:
+                    # tratar como UTC
+                    prox_venc_dt = prox_venc_dt.replace(tzinfo=timezone.utc)
+                delta = prox_venc_dt - now.replace(tzinfo=timezone.utc)
+                dias_para_vencer = int(delta.days)
+                prox_venc_iso = prox_venc_dt.isoformat()
+
+            total_periodo = float((consumo_map.get(pid_key) or {}).get('total_periodo', 0))
+            media_diaria = round(total_periodo / float(max(1, days_to_cover)), 4)
+            cobertura_necessaria = media_diaria * float(max(1, days_to_cover))
+            sugestao_compra = max(0.0, round(cobertura_necessaria - disp_total, 2))
+
+            motivos = []
+            if disp_total <= 0:
+                motivos.append('sem_estoque')
+            elif disp_total <= low_stock_threshold:
+                motivos.append('estoque_baixo')
+            if dias_para_vencer is not None and dias_para_vencer <= expiring_in_days:
+                motivos.append(f'vencimento_em_{dias_para_vencer}_dias')
+            if sugestao_compra > 0:
+                motivos.append('cobertura_insuficiente')
+
+            # incluir apenas se há algum motivo acionado
+            if len(motivos) == 0:
+                continue
+
+            items.append({
+                'produto_id': produto_id_out,
+                'produto_nome': produto_nome,
+                'produto_codigo': produto_codigo,
+                'estoque_disponivel': disp_total,
+                'proxima_validade': prox_venc_iso,
+                'dias_para_vencer': dias_para_vencer,
+                'media_diaria': media_diaria,
+                'sugestao_compra': sugestao_compra,
+                'motivos': motivos
+            })
+
+        # 5) Opcional: integrar com IA para ajustar sugestões e gerar feedback
+        ai_feedback = None
+        ai_provider = os.environ.get('AI_PROVIDER', '').strip().lower()
+        if use_ai:
+            gem_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('AI_SUGGESTION_API_KEY')
+            model_endpoint = os.environ.get('GEMINI_MODEL_ENDPOINT') or 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+
+            if ai_provider == 'gemini' and gem_key:
+                    # Montar contexto em JSON (compacto) para o prompt
+                    payload_context = {
+                        'params': {
+                            'days_to_cover': days_to_cover,
+                            'low_stock_threshold': low_stock_threshold,
+                            'expiring_in_days': expiring_in_days
+                        },
+                        'stocks': [{'produto_id': str(v.get('produto_id')), 'disponivel_total': float(v.get('disponivel_total', 0))} for v in stock_map.values()],
+                        'lotes': [{'produto_id': str(v.get('produto_id')), 'prox_vencimento': (v.get('prox_vencimento').isoformat() if isinstance(v.get('prox_vencimento'), datetime) else None)} for v in lotes_map.values()],
+                        'consumo': [{'produto_id': str(v.get('produto_id')), 'total_periodo': float(v.get('total_periodo', 0)), 'dias_periodo': days_to_cover} for v in consumo_map.values()]
+                    }
+                    prompt = (
+                        "Você é um especialista em análise de dados de logística. "
+                        "Com base no JSON a seguir, gere um objeto JSON com duas chaves: \n"
+                        "- 'sugestoes': lista de objetos {produto_id, quantidade, motivo}; quantidade deve ser um número real >= 0.\n"
+                        "- 'feedback': texto curto em pt-BR com insights e prioridades (estoque baixo, vencimentos, cobertura).\n"
+                        "Retorne APENAS JSON válido, sem markdown nem texto fora do JSON.\n\n"
+                        f"Dados:\n{_json.dumps(payload_context, ensure_ascii=False)}"
+                    )
+                    req_body = {
+                        'contents': [
+                            {
+                                'parts': [
+                                    {'text': prompt}
+                                ]
+                            }
+                        ]
+                    }
+                    url = f"{model_endpoint}?key={gem_key}"
+                    req = _UrlRequest(url, data=_json.dumps(req_body).encode('utf-8'))
+                    req.add_header('Content-Type', 'application/json')
+                    # Tornar robusto: capturar falhas de rede/HTTP e seguir sem IA
+                    try:
+                        with _urlopen(req, timeout=8) as resp:
+                            resp_txt = resp.read().decode('utf-8')
+                        # Extrair texto de resposta do Gemini
+                        try:
+                            resp_obj = _json.loads(resp_txt)
+                            candidates = (resp_obj.get('candidates') or [])
+                            text_out = None
+                            if candidates:
+                                parts = ((candidates[0] or {}).get('content') or {}).get('parts') or []
+                                if parts and isinstance(parts[0], dict):
+                                    text_out = parts[0].get('text') or parts[0].get('inline_data')
+                            if not text_out:
+                                text_out = resp_txt
+                            ai_json = None
+                            try:
+                                ai_json = _json.loads(text_out)
+                            except Exception:
+                                # tentar extrair o primeiro bloco JSON
+                                import re
+                                m = re.search(r"\{[\s\S]*\}", text_out)
+                                if m:
+                                    try:
+                                        ai_json = _json.loads(m.group(0))
+                                    except Exception:
+                                        ai_json = None
+                            if ai_json:
+                                ai_sugs = ai_json.get('sugestoes') or ai_json.get('suggestions') or []
+                                ai_feedback = ai_json.get('feedback') or ai_json.get('summary')
+                                # Mapear por produto_id
+                                map_items = {str(it.get('produto_id')): it for it in items}
+                                for sug in ai_sugs:
+                                    pid_ai = sug.get('produto_id')
+                                    qty_ai = float(sug.get('quantidade') or sug.get('qty') or 0)
+                                    motivo_ai = sug.get('motivo') or sug.get('reason')
+                                    key_ai = str(pid_ai)
+                                    it = map_items.get(key_ai)
+                                    if it is None:
+                                        # incluir novo apenas se quantidade > 0
+                                        if qty_ai > 0:
+                                            pdoc2 = _resolve_prod(pid_ai)
+                                            nome2 = (pdoc2 or {}).get('nome') or '-'
+                                            cod2 = (pdoc2 or {}).get('codigo') or '-'
+                                            pid_out2 = (pdoc2 or {}).get('id')
+                                            if pid_out2 is None and pdoc2 is not None:
+                                                pid_out2 = str((pdoc2 or {}).get('_id'))
+                                            if pid_out2 is None:
+                                                pid_out2 = pid_ai
+                                            items.append({
+                                                'produto_id': pid_out2,
+                                                'produto_nome': nome2,
+                                                'produto_codigo': cod2,
+                                                'estoque_disponivel': float((stock_map.get(key_ai) or {}).get('disponivel_total', 0)),
+                                                'proxima_validade': ((lotes_map.get(key_ai) or {}).get('prox_vencimento') or None),
+                                                'dias_para_vencer': None,
+                                                'media_diaria': float((consumo_map.get(key_ai) or {}).get('total_periodo', 0)) / float(max(1, days_to_cover)),
+                                                'sugestao_compra': round(qty_ai, 2),
+                                                'motivos': ['ia_sugestao'] + ([motivo_ai] if motivo_ai else [])
+                                            })
+                                        continue
+                                    # ajustar sugestão com IA
+                                    if qty_ai > 0:
+                                        it['sugestao_compra'] = round(qty_ai, 2)
+                                        it['motivos'] = list(set((it.get('motivos') or []) + ['ia_sugestao']))
+                        except Exception:
+                            # Falha ao interpretar resposta da IA: ignorar e seguir
+                            pass
+                    except Exception:
+                        # Falha na chamada à IA (HTTP/timeout/etc): ignorar e seguir sem IA
+                        pass
+            if not (ai_provider == 'gemini' and gem_key):
+                    ai_url = os.environ.get('AI_SUGGESTION_API_URL')
+                    ai_key = os.environ.get('AI_SUGGESTION_API_KEY')
+                    if ai_url:
+                        payload = {
+                            'days_to_cover': days_to_cover,
+                            'low_stock_threshold': low_stock_threshold,
+                            'expiring_in_days': expiring_in_days,
+                            'stocks': [{'produto_id': (v.get('produto_id')), 'disponivel_total': v.get('disponivel_total')} for v in stock_map.values()],
+                            'lotes': [{'produto_id': (v.get('produto_id')), 'prox_vencimento': (v.get('prox_vencimento').isoformat() if isinstance(v.get('prox_vencimento'), datetime) else None)} for v in lotes_map.values()],
+                            'consumo': [{'produto_id': (v.get('produto_id')), 'total_periodo': v.get('total_periodo'), 'dias_periodo': days_to_cover} for v in consumo_map.values()]
+                        }
+                        data_bytes = _json.dumps(payload).encode('utf-8')
+                        req = _UrlRequest(ai_url, data=data_bytes)
+                        req.add_header('Content-Type', 'application/json')
+                        if ai_key:
+                            req.add_header('Authorization', f'Bearer {ai_key}')
+                        try:
+                            with _urlopen(req, timeout=5) as resp:
+                                resp_body = resp.read().decode('utf-8')
+                            ai_json = _json.loads(resp_body)
+                            # Espera-se estrutura: { sugestoes: [{ produto_id, quantidade, motivo? }] }
+                            ai_sugs = ai_json.get('sugestoes') or ai_json.get('suggestions') or []
+                            ai_feedback = ai_json.get('feedback') or ai_json.get('summary')
+                            # Mapear por produto_id
+                            map_items = {str(it.get('produto_id')): it for it in items}
+                            for sug in ai_sugs:
+                                pid_ai = sug.get('produto_id')
+                                qty_ai = float(sug.get('quantidade') or sug.get('qty') or 0)
+                                motivo_ai = sug.get('motivo') or sug.get('reason')
+                                key_ai = str(pid_ai)
+                                it = map_items.get(key_ai)
+                                if it is None:
+                                    # incluir novo apenas se quantidade > 0
+                                    if qty_ai > 0:
+                                        pdoc2 = _resolve_prod(pid_ai)
+                                        nome2 = (pdoc2 or {}).get('nome') or '-'
+                                        cod2 = (pdoc2 or {}).get('codigo') or '-'
+                                        pid_out2 = (pdoc2 or {}).get('id')
+                                        if pid_out2 is None and pdoc2 is not None:
+                                            pid_out2 = str((pdoc2 or {}).get('_id'))
+                                        if pid_out2 is None:
+                                            pid_out2 = pid_ai
+                                        items.append({
+                                            'produto_id': pid_out2,
+                                            'produto_nome': nome2,
+                                            'produto_codigo': cod2,
+                                            'estoque_disponivel': float((stock_map.get(key_ai) or {}).get('disponivel_total', 0)),
+                                            'proxima_validade': ((lotes_map.get(key_ai) or {}).get('prox_vencimento') or None),
+                                            'dias_para_vencer': None,
+                                            'media_diaria': float((consumo_map.get(key_ai) or {}).get('total_periodo', 0)) / float(max(1, days_to_cover)),
+                                            'sugestao_compra': round(qty_ai, 2),
+                                            'motivos': ['ia_sugestao'] + ([motivo_ai] if motivo_ai else [])
+                                        })
+                                    continue
+                                # ajustar sugestão com IA
+                                if qty_ai > 0:
+                                    it['sugestao_compra'] = round(qty_ai, 2)
+                                    it['motivos'] = list(set((it.get('motivos') or []) + ['ia_sugestao']))
+                        except Exception:
+                            # Falha ao chamar/interpretar API externa de IA: ignorar e seguir
+                            pass
+
+        # Ordenação por severidade: sem estoque, vencendo, estoque baixo, cobertura
+        def _severity_key(it):
+            motivo_set = set(it.get('motivos') or [])
+            sem = ('sem_estoque' in motivo_set)
+            vencendo = any(m.startswith('vencimento_em_') for m in motivo_set)
+            baixo = ('estoque_baixo' in motivo_set)
+            cobertura = ('cobertura_insuficiente' in motivo_set)
+            return (
+                0 if sem else 1,
+                0 if vencendo else 1,
+                0 if baixo else 1,
+                0 if cobertura else 1,
+                -float(it.get('media_diaria') or 0)
+            )
+
+        items.sort(key=_severity_key)
+
+        return jsonify({
+            'items': items,
+            'ai_feedback': ai_feedback,
+            'params': {
+                'low_stock_threshold': low_stock_threshold,
+                'expiring_in_days': expiring_in_days,
+                'days_to_cover': days_to_cover,
+                'use_ai': use_ai,
+                'ai_provider': ai_provider or None
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha ao gerar sugestões de compras: {e}'}), 500
 
 # ==================== API PLACEHOLDERS (JSON) ====================
 
@@ -1288,6 +1743,7 @@ def api_produtos_create():
         'codigo': codigo,
         'nome': nome,
         'descricao': (data.get('descricao') or '').strip() or None,
+        'observacao_extra': (data.get('observacao_extra') or '').strip() or None,
         'unidade_medida': (data.get('unidade_medida') or '').strip() or None,
         'ativo': bool(data.get('ativo', True)),
         'created_at': datetime.utcnow()
@@ -1567,7 +2023,7 @@ def api_centrais_create():
         'nome': created.get('nome'),
         'descricao': created.get('descricao'),
         'ativo': created.get('ativo', True)
-    }), 201
+    }), 200
 
 
 @main_bp.route('/api/centrais/<string:id>', methods=['PUT'])
@@ -1782,7 +2238,7 @@ def api_almoxarifados_create():
         'ativo': created.get('ativo', True),
         'central_id': normalized_cid_resp if normalized_cid_resp is not None else (raw_cid if isinstance(raw_cid, int) else None),
         'central_nome': central_doc_resp.get('nome') if central_doc_resp else None
-    }), 201
+    }), 200
 
 @main_bp.route('/api/almoxarifados/<string:id>', methods=['PUT'])
 @require_admin_or_above
@@ -2557,6 +3013,9 @@ def api_produtos():
     search = (request.args.get('search') or '').strip()
     categoria_id = request.args.get('categoria_id')
     ativo_param = request.args.get('ativo')
+    # Escopo por nível: restringir produtos fora da central do usuário
+    nivel = getattr(current_user, 'nivel_acesso', None)
+    enforce_scope = nivel in ('gerente_almox', 'resp_sub_almox', 'operador_setor')
 
     # Montar filtro
     filter_query = {}
@@ -2597,6 +3056,14 @@ def api_produtos():
     for doc in cursor:
         # Normalizar id para string quando não existir id sequencial
         pid = doc.get('id') if doc.get('id') is not None else str(doc.get('_id'))
+        # Aplicar escopo: níveis restritos só veem produtos da própria central
+        if enforce_scope:
+            try:
+                if not current_user.can_access_produto(pid):
+                    continue
+            except Exception:
+                # Em caso de erro na checagem, negar por segurança
+                continue
         cat_raw = doc.get('categoria_id')
         cat_doc = None
         if isinstance(cat_raw, int):
@@ -2634,6 +3101,13 @@ def api_produtos():
 @require_any_level
 def api_produto_detalhe(produto_id):
     """Detalhes reais do produto a partir do MongoDB (compatível com templates)."""
+    # Proteção de acesso por escopo: níveis restritos não podem acessar detalhes
+    try:
+        if getattr(current_user, 'nivel_acesso', None) in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+            if not current_user.can_access_produto(produto_id):
+                return jsonify({'error': 'Acesso negado: produto fora da sua central'}), 403
+    except Exception:
+        return jsonify({'error': 'Acesso negado'}), 403
     # Montar consulta por id sequencial ou ObjectId
     query = None
     if str(produto_id).isdigit():
@@ -2762,6 +3236,7 @@ def api_produto_detalhe(produto_id):
         'nome': doc.get('nome'),
         'codigo': doc.get('codigo'),
         'descricao': doc.get('descricao'),
+        'observacao_extra': doc.get('observacao_extra'),
         'unidade_medida': doc.get('unidade_medida'),
         'ativo': bool(doc.get('ativo', True)),
         # Campo simples esperado pelo modal de edição (texto)
@@ -2904,6 +3379,11 @@ def api_produto_delete(produto_id):
 def api_produto_estoque(produto_id):
     """Retorna estrutura mínima de estoque compatível com templates.
     Tenta computar a partir da coleção 'estoques' quando possível."""
+    # Escopo: níveis restritos só podem ver estoque do produto da própria central
+    nivel = getattr(current_user, 'nivel_acesso', None)
+    if nivel not in ('super_admin', 'admin_central'):
+        if not current_user.can_access_produto(produto_id):
+            return jsonify({'error': 'Produto fora do escopo da sua central'}), 403
     estoques = []
     total_qtd = 0.0
     total_disp = 0.0
@@ -2951,6 +3431,11 @@ def api_produto_estoque(produto_id):
 @require_any_level
 def api_produto_lotes(produto_id):
     """Placeholder compatível com templates: retorna lista de lotes."""
+    # Escopo: níveis restritos só podem ver lotes do produto da própria central
+    nivel = getattr(current_user, 'nivel_acesso', None)
+    if nivel not in ('super_admin', 'admin_central'):
+        if not current_user.can_access_produto(produto_id):
+            return jsonify({'error': 'Produto fora do escopo da sua central'}), 403
     items = []
     try:
         coll = extensions.mongo_db['lotes']
@@ -2978,6 +3463,11 @@ def api_produto_lotes(produto_id):
 @require_any_level
 def api_produto_movimentacoes(produto_id):
     """Lista movimentações de um produto com campos Local e Usuário e suporte a filtros."""
+    # Escopo: níveis restritos só podem ver movimentações do produto da própria central
+    nivel = getattr(current_user, 'nivel_acesso', None)
+    if nivel not in ('super_admin', 'admin_central'):
+        if not current_user.can_access_produto(produto_id):
+            return jsonify({'error': 'Produto fora do escopo da sua central'}), 403
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('limit', request.args.get('per_page', 20)))
     filtro_tipo = (request.args.get('tipo') or '').strip().lower()
@@ -3358,6 +3848,15 @@ def api_estoque_hierarquia():
                 elif status_filtro in ('disponivel', 'normal') and not (disponivel > limiar_baixo):
                     continue
 
+            # Aplicar escopo por produto: níveis restritos só veem produtos da própria central
+            try:
+                if getattr(current_user, 'nivel_acesso', None) in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+                    if not current_user.can_access_produto(produto_id_out):
+                        continue
+            except Exception:
+                # Em caso de erro na checagem, negar por segurança
+                continue
+
             items_all.append({
                 'produto_id': produto_id_out,
                 'produto_nome': produto_nome,
@@ -3558,6 +4057,14 @@ def api_estoque_hierarquia_export():
                     continue
                 elif status_filtro in ('disponivel', 'normal') and not (disponivel > limiar_baixo):
                     continue
+
+            # Escopo por produto para níveis restritos
+            try:
+                if getattr(current_user, 'nivel_acesso', None) in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+                    if not current_user.can_access_produto(produto_id_out):
+                        continue
+            except Exception:
+                continue
 
             items.append({
                 'produto_id': produto_id_out,
@@ -4128,6 +4635,82 @@ def api_dashboard_movimentacoes_recentes():
     except Exception as e:
         return jsonify({'success': False, 'movimentacoes': [], 'error': f'Erro ao carregar movimentações recentes: {e}'})
 
+# ==================== EXPLICAÇÕES DE NOTIFICAÇÕES (IA / FALLBACK) ====================
+
+@main_bp.route('/api/explicacoes/notificacao', methods=['POST'])
+@require_any_level
+def api_explica_notificacao():
+    """Gera uma explicação amigável para uma notificação.
+    Entrada: { evento: <str>, dados: <obj> }
+    Saída: { success: true, explanation: <str> }
+    Tenta usar Gemini se configurado (GEMINI_API_KEY/USE_GEMINI), com fallback local.
+    """
+    try:
+        from flask import request, jsonify
+        import os
+
+        payload = request.get_json(silent=True) or {}
+        evento = str(payload.get('evento') or '').strip().lower()
+        dados = payload.get('dados') or {}
+
+        def _fallback_text(evt: str, info: dict) -> str:
+            if evt == 'transferencia_bloqueada':
+                origem = info.get('origem', {})
+                destino = info.get('destino', {})
+                origem_str = f"{origem.get('tipo') or '-'}:{origem.get('id') or '-'}"
+                destino_str = f"{destino.get('tipo') or '-'}:{destino.get('id') or '-'}"
+                return (
+                    "Transferência não permitida pelo escopo atual. "
+                    "Em geral, movimentações entre centrais diferentes são bloqueadas para manter a governança. "
+                    f"Você tentou mover de {origem_str} para {destino_str}. "
+                    "Se você precisa executar esta ação, solicite autorização ou peça para um administrador realizar a operação."
+                )
+            # Mensagem padrão genérica
+            return (
+                "A ação não pôde ser concluída no seu escopo atual. "
+                "Verifique as permissões ou consulte um administrador para suporte."
+            )
+
+        explanation = _fallback_text(evento, dados)
+
+        # Tentar Gemini se habilitado
+        use_ai = str(os.environ.get('USE_GEMINI', os.environ.get('USE_AI', '0')) or '0').strip().lower() in ('1', 'true', 'yes')
+        api_key = os.environ.get('GEMINI_API_KEY')
+        model_name = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
+        if use_ai and api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(model_name)
+                # Montar prompt com política de comunicação
+                politica = (
+                    "Explique em tom direto, objetivo e empático. "
+                    "Inclua ação sugerida (ex.: solicite autorização ao administrador). "
+                    "Evite jargões técnicos e mantenha o texto curto (1 a 3 frases)."
+                )
+                contexto = (
+                    f"Evento: {evento}. Dados: {dados}. "
+                    "Explique por que a operação foi bloqueada considerando escopo/central e permissões."
+                )
+                prompt = (
+                    "Você é um assistente para um sistema de gestão de estoque. "
+                    f"{politica} "
+                    f"{contexto} "
+                    f"Sugestão base: {explanation} "
+                    "Retorne apenas o texto final para o usuário."
+                )
+                resp = model.generate_content(prompt)
+                text = (getattr(resp, 'text', None) or '').strip()
+                if text:
+                    explanation = text
+            except Exception:
+                # Fallback silencioso
+                pass
+
+        return jsonify({'success': True, 'explanation': explanation})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Falha ao gerar explicação: {e}'}), 500
+
 @main_bp.route('/api/movimentacoes')
 @require_any_level
 def api_movimentacoes():
@@ -4393,6 +4976,11 @@ def api_produto_almoxarifados(produto_id):
     """Lista almoxarifados relevantes para o produto, incluindo indicação de estoque atual.
     Consolida informações da coleção 'estoques' e da coleção 'almoxarifados'.
     """
+    # Escopo: níveis restritos só podem ver almoxarifados de produtos da própria central
+    nivel = getattr(current_user, 'nivel_acesso', None)
+    if nivel not in ('super_admin', 'admin_central'):
+        if not current_user.can_access_produto(produto_id):
+            return jsonify({'success': False, 'error': 'Produto fora do escopo da sua central'}), 403
     try:
         db = extensions.mongo_db
         almox_coll = db['almoxarifados']
@@ -5580,7 +6168,7 @@ def api_demandas():
         'updated_at': now
     }
     res = coll.insert_one(doc)
-    return jsonify({'id': str(res.inserted_id)}), 201
+    return jsonify({'id': str(res.inserted_id)}), 200
 
 @main_bp.route('/api/demandas/<string:id>', methods=['PUT'])
 @require_responsible_or_above
@@ -5629,6 +6217,15 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
     """Resumo diário para um produto em um setor.
     Retorna estoque disponível, recebido hoje por origem e consumo registrado hoje.
     """
+    # Checagem de escopo do produto: impedir acesso a produto de outra central
+    try:
+        nivel = getattr(current_user, 'nivel_acesso', None)
+        if nivel in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor'):
+            if not current_user.can_access_produto(produto_id):
+                return jsonify({'error': 'Produto fora da sua central'}), 403
+    except Exception:
+        return jsonify({'error': 'Acesso negado'}), 403
+
     db = extensions.mongo_db
     movimentacoes = db['movimentacoes']
     estoques = db['estoques']

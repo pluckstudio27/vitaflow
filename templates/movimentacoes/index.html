@@ -1449,14 +1449,14 @@ function executarTransferencia() {
     const centralOrigem = getCentralIdByLocal(tipoOrigem, origemId);
     const centralDestino = getCentralIdByLocal(tipoDestino, destinoId);
     if (centralOrigem && centralDestino && centralOrigem !== centralDestino) {
+        const reason = 'Transferência bloqueada: origem e destino pertencem a centrais diferentes.';
         if (msgEl) {
-            msgEl.textContent = 'Não é possível transferir entre locais de centrais diferentes.';
+            msgEl.textContent = reason;
             msgEl.classList.remove('d-none');
             msgEl.classList.remove('alert-danger');
             msgEl.classList.add('alert-warning');
-        } else {
-            alert('Não é possível transferir entre locais de centrais diferentes.');
         }
+        if (window.showNotification) window.showNotification('warning', reason);
         return;
     }
 
@@ -1485,7 +1485,7 @@ function executarTransferencia() {
     })
     .then(result => {
         if (msgEl) { msgEl.classList.add('d-none'); msgEl.textContent = ''; }
-        alert('Transferência executada com sucesso!');
+        if (window.showNotification) window.showNotification('success', 'Transferência concluída.');
         
         // Fechar modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('novaTransferenciaModal'));
@@ -1499,13 +1499,44 @@ function executarTransferencia() {
     })
     .catch(error => {
         console.error('Erro:', error);
+        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(error, 'transferencia') : (error && error.message ? error.message : String(error)));
         if (msgEl) {
-            msgEl.textContent = 'Erro ao executar transferência: ' + (error && error.message ? error.message : String(error));
+            const safe = (friendly || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+            msgEl.innerHTML = 'Falha ao executar transferência: ' + safe + ' ' +
+                '<a href="#" id="explicarTransferenciaLink" class="ms-2">Entenda o motivo</a>';
             msgEl.classList.remove('d-none');
             msgEl.classList.remove('alert-warning');
             msgEl.classList.add('alert-danger');
-        } else {
-            alert('Erro ao executar transferência: ' + error.message);
+        }
+        if (window.showNotification) window.showNotification('danger', `Falha na transferência: ${friendly}`);
+
+        // Link para explicação detalhada via endpoint/IA
+        const link = document.getElementById('explicarTransferenciaLink');
+        if (link) {
+            link.addEventListener('click', async (ev) => {
+                ev.preventDefault();
+                try {
+                    const payload = {
+                        evento: 'transferencia_bloqueada',
+                        dados: {
+                            produto_id: dadosTransferencia.produto_id,
+                            quantidade: dadosTransferencia.quantidade,
+                            origem: dadosTransferencia.origem,
+                            destino: dadosTransferencia.destino
+                        }
+                    };
+                    const res = await fetchJson('/api/explicacoes/notificacao', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const texto = (res && res.explanation) || 'Não foi possível obter uma explicação adicional no momento.';
+                    if (window.showNotification) window.showNotification('info', texto);
+                } catch (e) {
+                    const fallback = 'Transferência entre centrais diferentes não é permitida no seu escopo. Consulte um administrador para apoio.';
+                    if (window.showNotification) window.showNotification('info', fallback);
+                }
+            });
         }
     });
 }
@@ -1605,7 +1636,8 @@ function executarDistribuicao() {
     })
     .then(result => {
         if (msgElDist) { msgElDist.classList.add('d-none'); msgElDist.textContent = ''; }
-        alert(`Saída executada com sucesso! ${result.movimentacoes_criadas} movimentações criadas.`);
+        const qtd = Number(result && result.movimentacoes_criadas || 0);
+        if (window.showNotification) window.showNotification('success', `Saída executada (${qtd} movimentações).`);
         
         // Fechar modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('distribuicaoModal'));
@@ -1623,14 +1655,14 @@ function executarDistribuicao() {
     })
     .catch(error => {
         console.error('Erro:', error);
+        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(error, 'distribuicao') : (error && error.message ? error.message : String(error)));
         if (msgElDist) {
-            msgElDist.textContent = 'Erro ao executar saída: ' + (error && error.message ? error.message : String(error));
+            msgElDist.textContent = 'Falha ao executar saída: ' + friendly;
             msgElDist.classList.remove('d-none');
             msgElDist.classList.remove('alert-warning');
             msgElDist.classList.add('alert-danger');
-        } else {
-            alert('Erro ao executar saída: ' + error.message);
         }
+        if (window.showNotification) window.showNotification('danger', `Falha na saída: ${friendly}`);
     });
 }
 

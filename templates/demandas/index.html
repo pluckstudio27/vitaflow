@@ -8,6 +8,11 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h2><i class="fas fa-clipboard-list"></i> Demandas de Produtos</h2>
+                {% if is_resp_sub_almox or is_gerente_almox or is_admin_central or is_super_admin %}
+                <a href="{{ url_for('main.demandas_gerencia') }}" class="btn btn-outline-primary">
+                    <i class="fas fa-tasks"></i> Gerenciar Demandas
+                </a>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -156,12 +161,7 @@ async function carregarDemandas() {
     const el = document.getElementById('listaDemandas');
     el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
     try {
-        const res = await fetch('/api/demandas?mine=true&per_page=50');
-        const data = await res.json();
-        if (!res.ok) {
-            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(data.error || 'Erro ao listar')}</div>`;
-            return;
-        }
+        const data = await fetchJson('/api/demandas?mine=true&per_page=50');
         if (!data.items || !data.items.length) {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda encontrada.</div>';
             return;
@@ -199,7 +199,9 @@ async function carregarDemandas() {
             </div>
         `;
     } catch (e) {
-        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
+        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'demandas_lista') : (e && e.message ? e.message : String(e)));
+        el.innerHTML = `<div class="alert alert-danger">Falha ao listar demandas: ${htmlEscape(String(friendly))}</div>`;
+        if (window.showNotification) window.showNotification('danger', `Falha ao listar demandas: ${friendly}`);
     }
 }
 
