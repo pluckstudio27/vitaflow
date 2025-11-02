@@ -4,7 +4,6 @@ from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ServerSelectionTimeoutError, AutoReconnect
 from werkzeug.security import generate_password_hash
 from datetime import datetime
-import certifi
 import os
 
 # SQLAlchemy (mantido para compatibilidade em partes do código)
@@ -81,7 +80,13 @@ def init_mongo(app):
             if allow_invalid:
                 client_kwargs['tlsAllowInvalidCertificates'] = True
             else:
-                client_kwargs['tlsCAFile'] = certifi.where()
+                # Preferir bundle CA do certifi, mas não travar se ausente
+                try:
+                    import certifi
+                    client_kwargs['tlsCAFile'] = certifi.where()
+                except Exception:
+                    # Fallback: confiar no bundle do sistema sem definir tlsCAFile
+                    pass
 
             mongo_client = MongoClient(
                 mongo_uri,
