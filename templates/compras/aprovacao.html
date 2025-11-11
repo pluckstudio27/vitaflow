@@ -1,0 +1,216 @@
+{% extends 'base.html' %}
+{% block title %}Aprovação de Compras{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex align-items-center mb-3">
+    <i class="fa fa-clipboard-check me-2"></i>
+    <h2 class="mb-0">Aprovação de Compras</h2>
+  </div>
+  <p class="text-muted">Visualize solicitações pendentes e aprove ou rejeite conforme necessário.</p>
+
+  <div id="feedback" class="mb-3" style="display:none;"></div>
+
+  <div class="table-responsive">
+    <table class="table table-striped align-middle" id="solicitacoes-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Usuário</th>
+          <th>Status</th>
+          <th>Criado em</th>
+          <th>Itens</th>
+          <th>Detalhes</th>
+          <th class="text-end">Ações</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="empty-state" class="alert alert-info" style="display:none;">
+    Nenhuma solicitação de compra pendente no momento.
+  </div>
+</div>
+
+<script>
+  function showFeedback(type, message) {
+    const box = document.getElementById('feedback');
+    box.className = `alert alert-${type}`;
+    box.textContent = message;
+    box.style.display = 'block';
+    setTimeout(() => { box.style.display = 'none'; }, 4000);
+  }
+
+  function formatDate(isoOrObj) {
+    try {
+      const d = new Date(isoOrObj);
+      return d.toLocaleString('pt-BR');
+    } catch (_) {
+      return String(isoOrObj || '-');
+    }
+  }
+
+  async function loadSolicitacoes() {
+    const tbody = document.querySelector('#solicitacoes-table tbody');
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Carregando...</td></tr>';
+    try {
+      const data = await window.fetchJson('/api/compras/solicitacoes');
+      const items = Array.isArray(data) ? data : (data.items || []);
+      tbody.innerHTML = '';
+      if (!items.length) {
+        document.getElementById('empty-state').style.display = 'block';
+        return;
+      }
+      document.getElementById('empty-state').style.display = 'none';
+      for (const it of items) {
+        const tr = document.createElement('tr');
+        tr.dataset.id = it.id;
+        tr.innerHTML = `
+          <td><code>${it.id}</code></td>
+          <td>${it.usuario_id || '-'}</td>
+          <td><span class="badge bg-warning text-dark">${it.status || 'pendente'}</span></td>
+          <td>${formatDate(it.created_at)}</td>
+          <td>${it.items_count ?? (it.items?.length || 0)}</td>
+          <td>
+            <button class="btn btn-sm btn-outline-secondary" data-action="toggle">
+              <i class="fa fa-chevron-down"></i> Ver itens
+            </button>
+          </td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-success me-2" data-action="aprovar">
+              <i class="fa fa-check"></i> Aprovar
+            </button>
+            <button class="btn btn-sm btn-danger" data-action="rejeitar">
+              <i class="fa fa-times"></i> Rejeitar
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+
+        // linha de detalhes colapsável
+        const detailsTr = document.createElement('tr');
+        detailsTr.className = 'details-row';
+        detailsTr.dataset.parentId = it.id;
+        detailsTr.style.display = 'none';
+        detailsTr.innerHTML = `
+          <td colspan="7">
+            <div class="card card-body p-2">
+              <div class="d-flex align-items-center justify-content-between">
+                <strong>Itens da compra</strong>
+                <a class="btn btn-sm btn-link" target="_blank" href="/compras/${it.id}/csv"><i class="fa fa-file-csv"></i> CSV</a>
+              </div>
+              <div class="table-responsive mt-2">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th>Produto</th>
+                      <th>Código</th>
+                      <th class="text-end">Quantidade</th>
+                      <th>Observação</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(detailsTr);
+      }
+    } catch (err) {
+      showFeedback('danger', err.message || 'Erro ao carregar solicitações');
+      const tbody = document.querySelector('#solicitacoes-table tbody');
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Falha ao carregar.</td></tr>';
+    }
+  }
+
+  async function processacao(id, action) {
+    const url = action === 'aprovar' ? `/api/compras/${id}/aprovar` : `/api/compras/${id}/rejeitar`;
+    const payload = {};
+    if (action === 'rejeitar') {
+      const obs = window.prompt('Informe uma observação para a rejeição (opcional):', '');
+      if (obs !== null) payload.observacao = obs.trim();
+    }
+    try {
+      const resp = await window.fetchJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      showFeedback('success', action === 'aprovar' ? 'Compra aprovada com sucesso.' : 'Compra rejeitada com sucesso.');
+      // Remover linha da lista
+      const row = document.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
+      if (row) row.remove();
+      // Mostrar empty-state se ficou vazio
+      const tbody = document.querySelector('#solicitacoes-table tbody');
+      if (!tbody.querySelector('tr')) {
+        document.getElementById('empty-state').style.display = 'block';
+      }
+    } catch (err) {
+      showFeedback('danger', err.message || 'Falha ao processar solicitação');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadSolicitacoes();
+    document.querySelector('#solicitacoes-table').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button[data-action]');
+      if (!btn) return;
+      const tr = btn.closest('tr');
+      const id = tr?.dataset?.id;
+      const action = btn.dataset.action;
+      if (!id || !action) return;
+      if (action === 'aprovar') {
+        if (!confirm('Confirmar aprovação desta compra?')) return;
+      } else if (action === 'rejeitar') {
+        if (!confirm('Confirmar rejeição desta compra?')) return;
+      } else if (action === 'toggle') {
+        // alternar detalhes: carregar itens sob demanda
+        const detailsTr = document.querySelector(`tr.details-row[data-parent-id="${CSS.escape(id)}"]`);
+        if (!detailsTr) return;
+        const isOpen = detailsTr.style.display !== 'none';
+        if (isOpen) {
+          detailsTr.style.display = 'none';
+          btn.innerHTML = '<i class="fa fa-chevron-down"></i> Ver itens';
+          return;
+        }
+        // abrir: se ainda não carregou, buscar
+        const tbodyEl = detailsTr.querySelector('tbody');
+        if (!tbodyEl || !tbodyEl.dataset.loaded) {
+          tbodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Carregando itens...</td></tr>';
+          window.fetchJson(`/api/compras/${encodeURIComponent(id)}`)
+            .then(data => {
+              const items = data.items || [];
+              if (!items.length) {
+                tbodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Sem itens.</td></tr>';
+              } else {
+                const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                tbodyEl.innerHTML = items.map(it => `
+                  <tr>
+                    <td>${it.produto_nome || '-'}</td>
+                    <td>${it.produto_codigo || '-'}</td>
+                    <td class="text-end"><strong>${fmt(it.quantidade)}</strong></td>
+                    <td>${(it.observacao || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+                  </tr>
+                `).join('');
+              }
+              tbodyEl.dataset.loaded = '1';
+              detailsTr.style.display = '';
+              btn.innerHTML = '<i class="fa fa-chevron-up"></i> Ocultar itens';
+            })
+            .catch(err => {
+              tbodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Falha ao carregar itens.</td></tr>';
+              detailsTr.style.display = '';
+              btn.innerHTML = '<i class="fa fa-chevron-up"></i> Ocultar itens';
+            });
+        } else {
+          detailsTr.style.display = '';
+          btn.innerHTML = '<i class="fa fa-chevron-up"></i> Ocultar itens';
+        }
+        return;
+      }
+      processacao(id, action);
+    });
+  });
+</script>
+{% endblock %}

@@ -35,6 +35,7 @@
                                 <option value="gerente_almox">Gerente Almoxarifado</option>
                                 <option value="resp_sub_almox">Responsável Sub-Almox</option>
                                 <option value="operador_setor">Operador Setor</option>
+                                <option value="secretario">Secretário</option>
                             </select>
                         </div>
                         <div class="col-md-3">
@@ -115,6 +116,8 @@
                                             <span class="badge bg-success">Resp. Sub-Almox</span>
                                         {% elif usuario.nivel_acesso == 'operador_setor' %}
                                             <span class="badge bg-secondary">Operador Setor</span>
+                                        {% elif usuario.nivel_acesso == 'secretario' %}
+                                            <span class="badge bg-primary">Secretário</span>
                                         {% endif %}
                                     </td>
                                     <td>
@@ -233,6 +236,7 @@
                                 <option value="gerente_almox">Gerente Almoxarifado</option>
                                 <option value="resp_sub_almox">Responsável Sub-Almoxarifado</option>
                                 <option value="operador_setor">Operador Setor</option>
+                                <option value="secretario">Secretário</option>
                             </select>
                         </div>
                         
@@ -736,6 +740,9 @@ function updateHierarchyFields() {
             try { onUserCentralChange(); } catch (_) {}
             try { initOperadorAlmoxTable(); refreshOperadorAlmoxTable(); onOperadorAlmoxMultiChange(); } catch (_) {}
             try { initOperadorSubTable(); refreshOperadorSubTable(); } catch (_) {}
+            break;
+        case 'secretario':
+            // Secretário tem acesso global; não requer vínculo de hierarquia específico
             break;
     }
 }

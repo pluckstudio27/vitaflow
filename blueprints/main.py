@@ -700,6 +700,10 @@ def api_categorias_list():
 def api_categorias_create():
     """Cria nova categoria com validação de código único."""
     try:
+        # Bloquear criação de categorias para o papel 'secretario'
+        if current_user.nivel_acesso == 'secretario':
+            return jsonify({'error': 'Ação restrita para secretário: criação de categorias não permitida'}), 403
+
         data = request.get_json(silent=True) or {}
         nome = (data.get('nome') or '').strip()
         codigo = (data.get('codigo') or '').strip().upper()
@@ -891,6 +895,10 @@ def api_categorias_toggle_status(cat_id):
 def api_categorias_delete(cat_id):
     """Exclui categoria, bloqueando caso haja referências em produtos/usuários."""
     try:
+        # Bloquear exclusão de categorias para o papel 'secretario'
+        if current_user.nivel_acesso == 'secretario':
+            return jsonify({'error': 'Ação restrita para secretário: exclusão de categorias não permitida'}), 403
+
         coll = extensions.mongo_db['categorias']
         # Encontrar categoria
         if str(cat_id).isdigit():
@@ -959,22 +967,28 @@ def categorias():
     return configuracoes_categorias()
 
 @main_bp.route('/relatorios')
-@require_admin_or_above
+@require_any_level
 def relatorios():
     """Redireciona para Compras (Lista de Compras)."""
     from flask import redirect, url_for
     return redirect(url_for('main.compras'))
 
 @main_bp.route('/compras')
-@require_admin_or_above
+@require_any_level
 def compras():
     """Página de Compras - Lista de Compras (Sugestões)."""
     return render_template('relatorios/index.html')
 
+@main_bp.route('/compras/aprovacao')
+@require_level('secretario')
+def compras_aprovacao():
+    """Página de Aprovação de Compras para usuários com nível 'secretario'."""
+    return render_template('compras/aprovacao.html')
+
 # ==================== SUGESTÕES DE COMPRAS ====================
 
 @main_bp.route('/api/compras/sugestoes')
-@require_admin_or_above
+@require_any_level
 def api_compras_sugestoes():
     """Sugere compras de produtos com base em:
     - Estoque disponível agregado por produto (estoques)
@@ -1414,7 +1428,7 @@ def api_compras_sugestoes():
 # ==================== LISTA DE COMPRAS (USUÁRIO) ====================
 
 @main_bp.route('/api/compras/lista', methods=['GET'])
-@require_admin_or_above
+@require_any_level
 def api_compras_lista_get():
     """Retorna a lista de compras do usuário atual.
     Cada item inclui informações básicas do produto para exibição.
@@ -1466,7 +1480,7 @@ def api_compras_lista_get():
         return jsonify({'error': f'Falha ao carregar lista de compras: {e}'}), 500
 
 @main_bp.route('/api/compras/lista', methods=['POST'])
-@require_admin_or_above
+@require_any_level
 def api_compras_lista_add():
     """Adiciona (ou atualiza) um item na lista de compras do usuário.
     Espera JSON: { produto_id: string|number, quantidade: number, observacao?: string }
@@ -1515,7 +1529,7 @@ def api_compras_lista_add():
         return jsonify({'error': f'Falha ao adicionar item: {e}'}), 500
 
 @main_bp.route('/api/compras/lista/<string:item_id>', methods=['PUT'])
-@require_admin_or_above
+@require_any_level
 def api_compras_lista_update(item_id):
     """Atualiza quantidade/observação de um item da lista de compras."""
     try:
@@ -1549,7 +1563,7 @@ def api_compras_lista_update(item_id):
         return jsonify({'error': f'Falha ao atualizar item: {e}'}), 500
 
 @main_bp.route('/api/compras/lista/<string:item_id>', methods=['DELETE'])
-@require_admin_or_above
+@require_any_level
 def api_compras_lista_delete(item_id):
     """Remove um item da lista de compras do usuário."""
     try:
@@ -1568,7 +1582,7 @@ def api_compras_lista_delete(item_id):
         return jsonify({'error': f'Falha ao remover item: {e}'}), 500
 
 @main_bp.route('/api/compras/lista/clear', methods=['POST'])
-@require_admin_or_above
+@require_any_level
 def api_compras_lista_clear():
     """Limpa toda a lista de compras do usuário atual."""
     try:
@@ -1581,6 +1595,282 @@ def api_compras_lista_clear():
         return jsonify({'status': 'cleared', 'deleted': int(res.deleted_count or 0)})
     except Exception as e:
         return jsonify({'error': f'Falha ao limpar lista: {e}'}), 500
+
+# ==================== FINALIZAÇÃO E APROVAÇÃO DE COMPRAS ====================
+
+@main_bp.route('/api/compras/finalizar', methods=['POST'])
+@require_any_level
+def api_compras_finalizar():
+    """Finaliza a lista de compras do usuário atual e cria uma solicitação de compra.
+    Retorna: { status: 'created', compra_id }
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        usuario_id = str(current_user.get_id())
+        listas_coll = db['listas_compras']
+        compras_coll = db['compras']
+
+        # Carregar itens da lista do usuário
+        itens_cursor = listas_coll.find({'usuario_id': usuario_id}).sort('created_at', -1)
+        itens = list(itens_cursor)
+        if not itens:
+            return jsonify({'error': 'Lista de compras vazia'}), 400
+
+        # Resolver informações de produto para snapshot no pedido
+        prod_coll = db['produtos']
+        def _resolve_prod_snapshot(prod_key, prod_id_raw):
+            k = str(prod_key or prod_id_raw or '')
+            pdoc = None
+            if k.isdigit():
+                pdoc = prod_coll.find_one({'id': int(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+            elif isinstance(k, str) and len(k) == 24:
+                try:
+                    pdoc = prod_coll.find_one({'_id': ObjectId(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+                except Exception:
+                    pdoc = prod_coll.find_one({'_id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+            else:
+                pdoc = prod_coll.find_one({'id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+            if not pdoc:
+                return {
+                    'produto_key': k,
+                    'produto_id': k,
+                    'produto_nome': '-',
+                    'produto_codigo': '-'
+                }
+            pid_out = pdoc.get('id') if pdoc.get('id') is not None else str(pdoc.get('_id'))
+            return {
+                'produto_key': k,
+                'produto_id': pid_out,
+                'produto_nome': pdoc.get('nome') or '-',
+                'produto_codigo': pdoc.get('codigo') or '-'
+            }
+
+        now = datetime.utcnow()
+        items_out = []
+        for it in itens:
+            snap = _resolve_prod_snapshot(it.get('produto_key'), it.get('produto_id_raw'))
+            items_out.append({
+                **snap,
+                'quantidade': float(it.get('quantidade') or 0),
+                'observacao': it.get('observacao') or ''
+            })
+
+        doc = {
+            'usuario_id': usuario_id,
+            'status': 'pendente',
+            'items': items_out,
+            'created_at': now,
+            'updated_at': now
+        }
+        res = compras_coll.insert_one(doc)
+        compra_id = str(res.inserted_id)
+        return jsonify({'status': 'created', 'compra_id': compra_id})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao finalizar compra: {e}'}), 500
+
+@main_bp.route('/api/compras/solicitacoes', methods=['GET'])
+@require_level('secretario')
+def api_compras_solicitacoes():
+    """Lista solicitações de compras pendentes para o secretário aprovar."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['compras']
+        items = []
+        for c in coll.find({'status': 'pendente'}).sort('created_at', -1):
+            items.append({
+                'id': str(c.get('_id')),
+                'usuario_id': c.get('usuario_id'),
+                'status': c.get('status'),
+                'created_at': c.get('created_at'),
+                'items_count': len(c.get('items') or [])
+            })
+        return jsonify({'items': items})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao listar solicitações: {e}'}), 500
+
+@main_bp.route('/api/compras/minhas', methods=['GET'])
+@require_any_level
+def api_compras_minhas():
+    """Lista compras já finalizadas/enviadas pelo usuário atual com status.
+    Retorna itens mínimos e permite detalhar via GET /api/compras/<id>.
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['compras']
+        usuario_id = str(current_user.get_id())
+        items = []
+        for c in coll.find({'usuario_id': usuario_id}).sort('created_at', -1):
+            items.append({
+                'id': str(c.get('_id')),
+                'status': c.get('status') or 'pendente',
+                'created_at': c.get('created_at'),
+                'updated_at': c.get('updated_at'),
+                'items_count': len(c.get('items') or [])
+            })
+        return jsonify({'items': items})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao listar compras do usuário: {e}'}), 500
+
+@main_bp.route('/api/compras/<string:compra_id>', methods=['GET'])
+@require_any_level
+def api_compras_get(compra_id):
+    """Obtém detalhes da compra e status. Permite acesso ao dono ou secretário."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['compras']
+        try:
+            c = coll.find_one({'_id': ObjectId(compra_id)})
+        except Exception:
+            c = coll.find_one({'_id': compra_id})
+        if not c:
+            return jsonify({'error': 'Compra não encontrada'}), 404
+        is_owner = str(c.get('usuario_id')) == str(current_user.get_id())
+        is_secretario = getattr(current_user, 'nivel_acesso', None) == 'secretario'
+        if not (is_owner or is_secretario):
+            return jsonify({'error': 'Acesso negado'}), 403
+        return jsonify({
+            'id': str(c.get('_id')),
+            'usuario_id': c.get('usuario_id'),
+            'status': c.get('status'),
+            'items': c.get('items') or [],
+            'created_at': c.get('created_at'),
+            'updated_at': c.get('updated_at'),
+            'csv_url': f"/compras/{str(c.get('_id'))}/csv"
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha ao obter compra: {e}'}), 500
+
+@main_bp.route('/api/compras/<string:compra_id>/aprovar', methods=['POST'])
+@require_level('secretario')
+def api_compras_aprovar(compra_id):
+    """Aprova uma compra pendente."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['compras']
+        data = request.get_json(silent=True) or {}
+        observacao = (data.get('observacao') or '').strip()
+        now = datetime.utcnow()
+        try:
+            res = coll.update_one(
+                {'_id': ObjectId(compra_id), 'status': 'pendente'},
+                {'$set': {
+                    'status': 'aprovada',
+                    'updated_at': now,
+                    'aprovacao': {
+                        'aprovado_por': str(current_user.get_id()),
+                        'aprovado_em': now,
+                        'observacao': observacao
+                    }
+                }}
+            )
+        except Exception:
+            res = coll.update_one(
+                {'_id': compra_id, 'status': 'pendente'},
+                {'$set': {
+                    'status': 'aprovada',
+                    'updated_at': now,
+                    'aprovacao': {
+                        'aprovado_por': str(current_user.get_id()),
+                        'aprovado_em': now,
+                        'observacao': observacao
+                    }
+                }}
+            )
+        if not res or res.matched_count == 0:
+            return jsonify({'error': 'Compra não encontrada ou já processada'}), 404
+        return jsonify({'status': 'aprovada'})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao aprovar compra: {e}'}), 500
+
+@main_bp.route('/api/compras/<string:compra_id>/rejeitar', methods=['POST'])
+@require_level('secretario')
+def api_compras_rejeitar(compra_id):
+    """Rejeita uma compra pendente."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['compras']
+        data = request.get_json(silent=True) or {}
+        observacao = (data.get('observacao') or '').strip()
+        now = datetime.utcnow()
+        try:
+            res = coll.update_one(
+                {'_id': ObjectId(compra_id), 'status': 'pendente'},
+                {'$set': {
+                    'status': 'rejeitada',
+                    'updated_at': now,
+                    'aprovacao': {
+                        'aprovado_por': str(current_user.get_id()),
+                        'aprovado_em': now,
+                        'observacao': observacao
+                    }
+                }}
+            )
+        except Exception:
+            res = coll.update_one(
+                {'_id': compra_id, 'status': 'pendente'},
+                {'$set': {
+                    'status': 'rejeitada',
+                    'updated_at': now,
+                    'aprovacao': {
+                        'aprovado_por': str(current_user.get_id()),
+                        'aprovado_em': now,
+                        'observacao': observacao
+                    }
+                }}
+            )
+        if not res or res.matched_count == 0:
+            return jsonify({'error': 'Compra não encontrada ou já processada'}), 404
+        return jsonify({'status': 'rejeitada'})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao rejeitar compra: {e}'}), 500
+
+@main_bp.route('/compras/<string:compra_id>/csv', methods=['GET'])
+@require_any_level
+def compras_csv(compra_id):
+    """Exporta CSV da compra finalizada. Permite acesso ao dono ou secretário."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['compras']
+        try:
+            c = coll.find_one({'_id': ObjectId(compra_id)})
+        except Exception:
+            c = coll.find_one({'_id': compra_id})
+        if not c:
+            return jsonify({'error': 'Compra não encontrada'}), 404
+        is_owner = str(c.get('usuario_id')) == str(current_user.get_id())
+        is_secretario = getattr(current_user, 'nivel_acesso', None) == 'secretario'
+        if not (is_owner or is_secretario):
+            return jsonify({'error': 'Acesso negado'}), 403
+        # Montar CSV
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';')
+        writer.writerow(['produto_nome','produto_codigo','quantidade','observacao'])
+        for it in (c.get('items') or []):
+            writer.writerow([
+                it.get('produto_nome') or '-',
+                it.get('produto_codigo') or '-',
+                str(it.get('quantidade') or 0),
+                it.get('observacao') or ''
+            ])
+        resp = current_app.response_class(output.getvalue(), mimetype='text/csv; charset=utf-8')
+        resp.headers['Content-Disposition'] = f'attachment; filename="compra_{compra_id}.csv"'
+        return resp
+    except Exception as e:
+        return jsonify({'error': f'Falha ao gerar CSV: {e}'}), 500
 
 # ==================== BUSCA RÁPIDA DE PRODUTOS ====================
 

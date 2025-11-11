@@ -86,6 +86,9 @@ class MongoUser:
             'operador_de_setor': 'operador_setor',
             'operador_setor': 'operador_setor',
             'admin': 'admin_central',
+            'secretário': 'secretario',
+            'secretaria': 'secretario',
+            'secretario': 'secretario',
         }
         return synonyms.get(normalized, raw or None)
     
@@ -247,6 +250,9 @@ class MongoUser:
         # Admin central sem restrição: acesso a qualquer central
         if level == 'admin_central':
             return True
+        # Secretário: acesso global a qualquer central
+        if level == 'secretario':
+            return True
         if level == 'gerente_almox' and self.almoxarifado_id is not None:
             u_cid = self._central_id_of_local('almoxarifado', self.almoxarifado_id)
             t_cid = self._central_id_of_local('central', central_id)
@@ -264,6 +270,8 @@ class MongoUser:
     def can_access_almoxarifado(self, almoxarifado_id):
         level = self.nivel_acesso
         if level == 'super_admin':
+            return True
+        if level == 'secretario':
             return True
         if almoxarifado_id is None:
             return False
@@ -314,6 +322,8 @@ class MongoUser:
         level = self.nivel_acesso
         if level == 'super_admin':
             return True
+        if level == 'secretario':
+            return True
         if sub_almoxarifado_id is None:
             return False
         s = self._find_by_id('sub_almoxarifados', sub_almoxarifado_id)
@@ -359,6 +369,8 @@ class MongoUser:
     def can_access_setor(self, setor_id):
         level = self.nivel_acesso
         if level == 'super_admin':
+            return True
+        if level == 'secretario':
             return True
         if setor_id is None:
             return False
@@ -449,8 +461,8 @@ class MongoUser:
           - operador_setor: não pode movimentar
         """
         level = self.nivel_acesso
-        # Liberar completamente movimentações para super_admin e admin_central
-        if level in ('super_admin', 'admin_central'):
+        # Liberar completamente movimentações para super_admin, admin_central e secretario
+        if level in ('super_admin', 'admin_central', 'secretario'):
             return True
 
         o_tipo = (origem or {}).get('tipo')
@@ -503,6 +515,8 @@ class MongoUser:
     def can_access_produto(self, produto_id):
         level = self.nivel_acesso
         if level == 'super_admin':
+            return True
+        if level == 'secretario':
             return True
         p = self._find_by_id('produtos', produto_id)
         if not p:
@@ -680,19 +694,19 @@ def require_super_admin(f):
 
 def require_admin_or_above(f):
     """Decorador que requer acesso de administrador ou superior"""
-    return require_level('super_admin', 'admin_central')(f)
+    return require_level('super_admin', 'admin_central', 'secretario')(f)
 
 def require_manager_or_above(f):
     """Decorador que requer acesso de gerente ou superior"""
-    return require_level('super_admin', 'admin_central', 'gerente_almox')(f)
+    return require_level('super_admin', 'admin_central', 'gerente_almox', 'secretario')(f)
 
 def require_responsible_or_above(f):
     """Decorador que requer acesso de responsÃ¡vel ou superior"""
-    return require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox')(f)
+    return require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'secretario')(f)
 
 def require_any_level(f):
     """Decorador que requer qualquer nÃ­vel de acesso (apenas login)"""
-    return require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor')(f)
+    return require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor', 'secretario')(f)
 
 # Decoradores de autorizaÃ§Ã£o por escopo hierÃ¡rquico
 
@@ -999,6 +1013,7 @@ def get_user_context():
             'is_gerente_almox': level == 'gerente_almox',
             'is_resp_sub_almox': level == 'resp_sub_almox',
             'is_operador_setor': level == 'operador_setor',
+            'is_secretario': level == 'secretario',
         }
         scope_labels = {
             'super_admin': 'Super Admin (Todos os escopos)',
@@ -1006,6 +1021,7 @@ def get_user_context():
             'gerente_almox': 'Gerente de Almoxarifado',
             'resp_sub_almox': 'ResponsÃ¡vel de Sub-Almoxarifado',
             'operador_setor': 'Operador de Setor',
+            'secretario': 'Secretário',
         }
         return {
             'current_user': current_user,

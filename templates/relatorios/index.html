@@ -100,6 +100,7 @@
                                 <button class="btn btn-outline-secondary btn-sm" id="btnListaCopy"><i class="fas fa-clipboard"></i> Copiar resumo</button>
                                 <button class="btn btn-outline-danger btn-sm" id="btnListaClear"><i class="fas fa-trash"></i> Limpar lista</button>
                                 <button class="btn btn-primary btn-sm" id="btnListaAtualizar"><i class="fas fa-sync-alt"></i> Atualizar</button>
+                                <button class="btn btn-success btn-sm" id="btnListaFinalizar"><i class="fas fa-check"></i> Finalizar Compra</button>
                             </div>
                         </div>
                         <div class="card-body">
@@ -137,6 +138,7 @@
                                     </tbody>
                                 </table>
                             </div>
+                            <div id="listaAlertArea" class="mt-2"></div>
                         </div>
                     </div>
                 </div>
@@ -145,8 +147,43 @@
     </div>
 </div>
 
+<div class="row">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-header bg-white d-flex align-items-center justify-content-between">
+                <div>
+                    <strong>Minhas Compras</strong>
+                    <div class="text-muted small">Compras finalizadas/enviadas com status e itens.</div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary btn-sm" id="btnMinhasComprasAtualizar"><i class="fas fa-sync-alt"></i> Atualizar</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>ID</th>
+                                <th>Status</th>
+                                <th>Criada</th>
+                                <th>Atualizada</th>
+                                <th class="text-end">Itens</th>
+                                <th class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="minhasComprasBody">
+                            <!-- preenchido via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const lowStockThresholdEl = document.getElementById('lowStockThreshold');
     const expiringDaysEl = document.getElementById('expiringDays');
     const daysToCoverEl = document.getElementById('daysToCover');
@@ -164,10 +201,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnListaClear = document.getElementById('btnListaClear');
     const btnListaCsv = document.getElementById('btnListaCsv');
     const btnListaCopy = document.getElementById('btnListaCopy');
+    const btnListaFinalizar = document.getElementById('btnListaFinalizar');
     const listaTableBody = document.querySelector('#listaTable tbody');
     const listaSearchInput = document.getElementById('listaSearchInput');
     const listaSearchQty = document.getElementById('listaSearchQty');
     const listaResultados = document.getElementById('listaResultados');
+    const listaAlertArea = document.getElementById('listaAlertArea');
     let listaSelectedIndex = -1;
 
     // Desligar IA por padrão para evitar chamadas externas antes da configuração
@@ -457,6 +496,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Finalizar Compra
+    btnListaFinalizar.addEventListener('click', async () => {
+        listaAlertArea.innerHTML = '';
+        if (!confirm('Deseja finalizar e enviar esta compra para aprovação do secretário?')) return;
+        try {
+            const res = await fetchJson('/api/compras/finalizar', { method: 'POST' });
+            const id = res.compra_id;
+            const link = id ? `<a href="/compras/${id}/csv" target="_blank">Baixar CSV</a>` : '';
+            listaAlertArea.innerHTML = `<div class="alert alert-success">Compra enviada para aprovação. ${link}</div>`;
+            if (window.showNotification) window.showNotification('success', 'Compra enviada para aprovação.');
+            // Atualizar histórico de compras do usuário
+            try { await loadMinhasCompras(); } catch (_) {}
+        } catch (e) {
+            const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'finalizar_compra') : (e && e.message ? e.message : String(e)));
+            listaAlertArea.innerHTML = `<div class="alert alert-danger">Falha ao finalizar compra: ${friendly}</div>`;
+            if (window.showNotification) window.showNotification('danger', `Falha ao finalizar: ${friendly}`);
+        }
+    });
+
     // Busca dinâmica com debounce e autocomplete
     function debounce(fn, ms=300) {
         let t;
@@ -593,9 +651,115 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Carregar inicialmente
-    loadSuggestions();
-    loadList();
+    // ===== Minhas compras finalizadas/enviadas =====
+    const minhasComprasBody = document.getElementById('minhasComprasBody');
+    const btnMinhasComprasAtualizar = document.getElementById('btnMinhasComprasAtualizar');
+    async function loadMinhasCompras() {
+        if (!minhasComprasBody) return;
+        minhasComprasBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted"><i class="fas fa-spinner fa-spin"></i> Carregando...</td></tr>';
+        try {
+            const res = await fetchJson('/api/compras/minhas', { method: 'GET' });
+            const items = res.items || [];
+            if (!items.length) {
+                minhasComprasBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhuma compra enviada ainda.</td></tr>';
+                return;
+            }
+            const badge = (st) => {
+                const s = String(st || 'pendente').toLowerCase();
+                if (s === 'aprovada') return '<span class="badge bg-success">Aprovada</span>';
+                if (s === 'rejeitada') return '<span class="badge bg-danger">Rejeitada</span>';
+                return '<span class="badge bg-warning text-dark">Pendente</span>';
+            };
+            const fmtDate2 = (iso) => { try { return new Date(iso).toLocaleString('pt-BR'); } catch { return String(iso||'-'); } };
+            minhasComprasBody.innerHTML = items.map(it => `
+                <tr data-compra-id="${it.id}">
+                    <td><code>${it.id}</code></td>
+                    <td>${badge(it.status)}</td>
+                    <td>${fmtDate2(it.created_at)}</td>
+                    <td>${fmtDate2(it.updated_at)}</td>
+                    <td>${Number(it.items_count||0)}</td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-secondary me-2" target="_blank" href="/compras/${it.id}/csv"><i class="fa fa-file-csv"></i> CSV</a>
+                        <button class="btn btn-sm btn-outline-primary" data-action="toggle"><i class="fa fa-chevron-down"></i> Ver itens</button>
+                    </td>
+                </tr>
+                <tr class="minhas-details" data-parent-id="${it.id}" style="display:none">
+                    <td colspan="6">
+                        <div class="card card-body p-2">
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Produto</th>
+                                            <th>Código</th>
+                                            <th class="text-end">Quantidade</th>
+                                            <th>Observação</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (e) {
+            minhasComprasBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Falha ao carregar histórico.</td></tr>';
+        }
+    }
+    if (btnMinhasComprasAtualizar) btnMinhasComprasAtualizar.addEventListener('click', loadMinhasCompras);
+    document.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-action="toggle"]');
+        if (!btn) return;
+        const tr = btn.closest('tr');
+        const id = tr?.getAttribute('data-compra-id');
+        if (!id) return;
+        const detailsTr = document.querySelector(`tr.minhas-details[data-parent-id="${CSS.escape(id)}"]`);
+        if (!detailsTr) return;
+        const isOpen = detailsTr.style.display !== 'none';
+        if (isOpen) {
+            detailsTr.style.display = 'none';
+            btn.innerHTML = '<i class="fa fa-chevron-down"></i> Ver itens';
+            return;
+        }
+        const tbodyEl = detailsTr.querySelector('tbody');
+        if (!tbodyEl || !tbodyEl.dataset.loaded) {
+            tbodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Carregando itens...</td></tr>';
+            fetchJson(`/api/compras/${encodeURIComponent(id)}`)
+                .then(data => {
+                    const items = data.items || [];
+                    if (!items.length) {
+                        tbodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Sem itens.</td></tr>';
+                    } else {
+                        const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                        tbodyEl.innerHTML = items.map(it => `
+                            <tr>
+                                <td>${it.produto_nome || '-'}</td>
+                                <td>${it.produto_codigo || '-'}</td>
+                                <td class="text-end"><strong>${fmt(it.quantidade)}</strong></td>
+                                <td>${(it.observacao || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+                            </tr>
+                        `).join('');
+                    }
+                    tbodyEl.dataset.loaded = '1';
+                    detailsTr.style.display = '';
+                    btn.innerHTML = '<i class="fa fa-chevron-up"></i> Ocultar itens';
+                })
+                .catch(_ => {
+                    tbodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Falha ao carregar itens.</td></tr>';
+                    detailsTr.style.display = '';
+                    btn.innerHTML = '<i class="fa fa-chevron-up"></i> Ocultar itens';
+                });
+        } else {
+            detailsTr.style.display = '';
+            btn.innerHTML = '<i class="fa fa-chevron-up"></i> Ocultar itens';
+        }
+    });
+
+    // Inicializa na carga
+    try { await loadList(); } catch (_) {}
+    try { await loadSuggestions(); } catch (_) {}
+    try { await loadMinhasCompras(); } catch (_) {}
 });
 </script>
 {% endblock %}

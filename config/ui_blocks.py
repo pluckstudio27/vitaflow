@@ -14,6 +14,7 @@ class AccessLevel(Enum):
     GERENTE_ALMOX = 'gerente_almox'
     RESP_SUB_ALMOX = 'resp_sub_almox'
     OPERADOR_SETOR = 'operador_setor'
+    SECRETARIO = 'secretario'
 
 @dataclass
 class MenuBlock:
@@ -100,7 +101,8 @@ class UIBlocksConfig:
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
-                    AccessLevel.GERENTE_ALMOX
+                    AccessLevel.GERENTE_ALMOX,
+                    AccessLevel.SECRETARIO
                 ],
                 active_endpoints=['main.produtos']
             ),
@@ -113,7 +115,8 @@ class UIBlocksConfig:
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
                     AccessLevel.GERENTE_ALMOX,
-                    AccessLevel.RESP_SUB_ALMOX
+                    AccessLevel.RESP_SUB_ALMOX,
+                    AccessLevel.SECRETARIO
                 ],
                 active_endpoints=['main.estoque']
             ),
@@ -126,7 +129,8 @@ class UIBlocksConfig:
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
                     AccessLevel.GERENTE_ALMOX,
-                    AccessLevel.RESP_SUB_ALMOX
+                    AccessLevel.RESP_SUB_ALMOX,
+                    AccessLevel.SECRETARIO
                 ],
                 active_endpoints=['main.movimentacoes']
             ),
@@ -140,7 +144,8 @@ class UIBlocksConfig:
                     AccessLevel.ADMIN_CENTRAL,
                     AccessLevel.GERENTE_ALMOX,
                     AccessLevel.RESP_SUB_ALMOX,
-                    AccessLevel.OPERADOR_SETOR
+                    AccessLevel.OPERADOR_SETOR,
+                    AccessLevel.SECRETARIO
                 ],
                 active_endpoints=['main.demandas', 'main.demandas_gerencia']
             ),
@@ -151,9 +156,10 @@ class UIBlocksConfig:
                 url='main.relatorios',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
-                    AccessLevel.ADMIN_CENTRAL
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.SECRETARIO
                 ],
-                active_endpoints=['main.relatorios']
+                active_endpoints=['main.relatorios', 'main.compras_aprovacao']
             ),
             MenuBlock(
                 id='configuracoes',
@@ -355,6 +361,13 @@ class UIBlocksConfig:
                         adjusted_url = 'main.demandas_gerencia'
                     else:
                         adjusted_url = 'main.demandas'
+                # Ajuste dinâmico para Compras:
+                # Secretário deve abrir a página de Aprovação de Compras
+                if block.id == 'compras':
+                    if access_level == AccessLevel.SECRETARIO:
+                        adjusted_url = 'main.compras_aprovacao'
+                    else:
+                        adjusted_url = 'main.relatorios'
 
                 # Criar uma cópia do bloco com filhos filtrados
                 filtered_block = MenuBlock(
