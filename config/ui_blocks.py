@@ -182,6 +182,17 @@ class UIBlocksConfig:
                 priority=3
             ),
             DashboardWidget(
+                id='consumo_por_central',
+                title='Consumo por Central',
+                template='blocks/widgets/consumo_por_central.html',
+                size='lg-12',
+                access_levels=[
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.ADMIN_CENTRAL
+                ],
+                priority=4
+            ),
+            DashboardWidget(
                 id='estoque_baixo',
                 title='Estoque Baixo',
                 template='blocks/widgets/estoque_baixo.html',

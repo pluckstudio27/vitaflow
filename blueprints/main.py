@@ -1411,6 +1411,323 @@ def api_compras_sugestoes():
     except Exception as e:
         return jsonify({'error': f'Falha ao gerar sugestões de compras: {e}'}), 500
 
+# ==================== LISTA DE COMPRAS (USUÁRIO) ====================
+
+@main_bp.route('/api/compras/lista', methods=['GET'])
+@require_admin_or_above
+def api_compras_lista_get():
+    """Retorna a lista de compras do usuário atual.
+    Cada item inclui informações básicas do produto para exibição.
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        usuario_id = str(current_user.get_id())
+        coll = db['listas_compras']
+        itens = []
+
+        # Função auxiliar para resolver produto por chave (id sequencial ou ObjectId)
+        def _resolve_prod_by_key(key):
+            pcoll = db['produtos']
+            if key is None:
+                return None
+            k = str(key)
+            if k.isdigit():
+                return pcoll.find_one({'id': int(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+            elif isinstance(k, str) and len(k) == 24:
+                try:
+                    return pcoll.find_one({'_id': ObjectId(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+                except Exception:
+                    return pcoll.find_one({'_id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+            else:
+                # fallback: tentar por id sequencial como string
+                return pcoll.find_one({'id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1})
+
+        for doc in coll.find({'usuario_id': usuario_id}).sort('created_at', -1):
+            produto_key = doc.get('produto_key') or doc.get('produto_id_raw')
+            pdoc = _resolve_prod_by_key(produto_key)
+            # Normalizar produto_id para o formato usado no resto da aplicação
+            pid_out = None
+            if pdoc:
+                pid_out = pdoc.get('id') if pdoc.get('id') is not None else str(pdoc.get('_id'))
+            else:
+                pid_out = produto_key
+            itens.append({
+                'id': str(doc.get('_id')),
+                'produto_id': pid_out,
+                'produto_nome': (pdoc or {}).get('nome') or '-',
+                'produto_codigo': (pdoc or {}).get('codigo') or '-',
+                'quantidade': float(doc.get('quantidade') or 0),
+                'observacao': doc.get('observacao') or ''
+            })
+        return jsonify({'items': itens})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao carregar lista de compras: {e}'}), 500
+
+@main_bp.route('/api/compras/lista', methods=['POST'])
+@require_admin_or_above
+def api_compras_lista_add():
+    """Adiciona (ou atualiza) um item na lista de compras do usuário.
+    Espera JSON: { produto_id: string|number, quantidade: number, observacao?: string }
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        data = request.get_json(silent=True) or {}
+        produto_id = data.get('produto_id')
+        quantidade = data.get('quantidade')
+        observacao = (data.get('observacao') or '').strip()
+        if produto_id is None:
+            return jsonify({'error': 'produto_id é obrigatório'}), 400
+        try:
+            quantidade = float(quantidade)
+        except Exception:
+            quantidade = 0.0
+        if quantidade < 0:
+            return jsonify({'error': 'quantidade deve ser >= 0'}), 400
+        usuario_id = str(current_user.get_id())
+
+        coll = db['listas_compras']
+        produto_key = str(produto_id)
+        now = datetime.utcnow()
+        existing = coll.find_one({'usuario_id': usuario_id, 'produto_key': produto_key})
+        if existing:
+            coll.update_one(
+                {'_id': existing['_id']},
+                {'$set': {'quantidade': quantidade, 'observacao': observacao, 'updated_at': now}}
+            )
+            item_id = str(existing['_id'])
+        else:
+            res = coll.insert_one({
+                'usuario_id': usuario_id,
+                'produto_key': produto_key,
+                'produto_id_raw': produto_id,
+                'quantidade': quantidade,
+                'observacao': observacao,
+                'created_at': now,
+                'updated_at': now
+            })
+            item_id = str(res.inserted_id)
+        return jsonify({'status': 'ok', 'item_id': item_id})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao adicionar item: {e}'}), 500
+
+@main_bp.route('/api/compras/lista/<string:item_id>', methods=['PUT'])
+@require_admin_or_above
+def api_compras_lista_update(item_id):
+    """Atualiza quantidade/observação de um item da lista de compras."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        data = request.get_json(silent=True) or {}
+        update = {}
+        if 'quantidade' in data:
+            try:
+                q = float(data.get('quantidade'))
+                if q < 0:
+                    return jsonify({'error': 'quantidade deve ser >= 0'}), 400
+                update['quantidade'] = q
+            except Exception:
+                return jsonify({'error': 'quantidade inválida'}), 400
+        if 'observacao' in data:
+            update['observacao'] = (data.get('observacao') or '').strip()
+        if not update:
+            return jsonify({'error': 'Nada para atualizar'}), 400
+        update['updated_at'] = datetime.utcnow()
+        coll = db['listas_compras']
+        try:
+            res = coll.update_one({'_id': ObjectId(item_id), 'usuario_id': str(current_user.get_id())}, {'$set': update})
+        except Exception:
+            return jsonify({'error': 'item_id inválido'}), 400
+        if not res or res.matched_count == 0:
+            return jsonify({'error': 'Item não encontrado'}), 404
+        return jsonify({'status': 'updated'})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao atualizar item: {e}'}), 500
+
+@main_bp.route('/api/compras/lista/<string:item_id>', methods=['DELETE'])
+@require_admin_or_above
+def api_compras_lista_delete(item_id):
+    """Remove um item da lista de compras do usuário."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['listas_compras']
+        try:
+            res = coll.delete_one({'_id': ObjectId(item_id), 'usuario_id': str(current_user.get_id())})
+        except Exception:
+            return jsonify({'error': 'item_id inválido'}), 400
+        if not res or res.deleted_count == 0:
+            return jsonify({'error': 'Item não encontrado'}), 404
+        return jsonify({'status': 'deleted'})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao remover item: {e}'}), 500
+
+@main_bp.route('/api/compras/lista/clear', methods=['POST'])
+@require_admin_or_above
+def api_compras_lista_clear():
+    """Limpa toda a lista de compras do usuário atual."""
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['listas_compras']
+        usuario_id = str(current_user.get_id())
+        res = coll.delete_many({'usuario_id': usuario_id})
+        return jsonify({'status': 'cleared', 'deleted': int(res.deleted_count or 0)})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao limpar lista: {e}'}), 500
+
+# ==================== BUSCA RÁPIDA DE PRODUTOS ====================
+
+@main_bp.route('/api/produtos/busca-rapida')
+@require_any_level
+def api_produtos_busca_rapida():
+    """Busca dinâmica de produtos com ranking de relevância e estoque disponível.
+    Query params:
+      - q: termo de busca (obrigatório para resultados)
+      - limit: número máximo de itens (default: 10, máx: 25)
+      - ativos: 'true' para filtrar apenas produtos ativos (default: true)
+    Retorna: { items: [ { id, nome, codigo, ativo, categoria_nome?, disponivel_total, score } ] }
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        q = (request.args.get('q') or '').strip()
+        if not q:
+            return jsonify({'items': []})
+        try:
+            limit = int(request.args.get('limit', 10))
+        except Exception:
+            limit = 10
+        limit = max(1, min(limit, 25))
+        ativos_flag = str(request.args.get('ativos', 'true')).lower() in ('true', '1', 't', 'yes', 'y')
+
+        import unicodedata
+        def normalize(s):
+            try:
+                s = str(s)
+                s = unicodedata.normalize('NFD', s)
+                s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+                return s.lower()
+            except Exception:
+                return str(s).lower()
+
+        q_norm = normalize(q)
+        tokens = [t for t in q_norm.split() if t]
+        # Construir filtro amplo por regex para reduzir o conjunto
+        or_clauses = []
+        for t in (tokens or [q]):
+            try:
+                or_clauses.append({'nome': {'$regex': t, '$options': 'i'}})
+                or_clauses.append({'codigo': {'$regex': t, '$options': 'i'}})
+                or_clauses.append({'descricao': {'$regex': t, '$options': 'i'}})
+            except Exception:
+                pass
+        filter_query = {'$or': or_clauses} if or_clauses else {}
+        if ativos_flag:
+            filter_query['ativo'] = True
+
+        prod_coll = db['produtos']
+        # Pegar um conjunto ampliado para aplicar ranking do lado do servidor
+        cursor = prod_coll.find(filter_query, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'descricao': 1, 'ativo': 1, 'categoria_id': 1}).limit(120)
+
+        # Carregar categorias para exibir nome
+        categorias_coll = db['categorias']
+        categorias_by_seq = {c.get('id'): c for c in categorias_coll.find({}, {'id': 1, 'nome': 1}) if 'id' in c}
+        categorias_by_oid = {str(c.get('_id')): c for c in categorias_coll.find({}, {'_id': 1, 'nome': 1})}
+
+        def relevance(doc):
+            nome = normalize(doc.get('nome') or '')
+            codigo = normalize(doc.get('codigo') or '')
+            desc = normalize(doc.get('descricao') or '')
+            score = 0
+            # Boosts
+            if q_norm == codigo:
+                score += 120
+            if q_norm == nome:
+                score += 90
+            # Startswith boosts
+            if codigo.startswith(q_norm):
+                score += 60
+            if nome.startswith(q_norm):
+                score += 45
+            # Token-based
+            for t in (tokens or [q_norm]):
+                if t in codigo:
+                    score += 35
+                if t in nome:
+                    score += 25
+                if t in desc:
+                    score += 10
+            # Ativo tem leve prioridade
+            if bool(doc.get('ativo', True)):
+                score += 5
+            return score
+
+        items_raw = []
+        for doc in cursor:
+            pid = doc.get('id') if doc.get('id') is not None else str(doc.get('_id'))
+            # Categoria
+            cat_raw = doc.get('categoria_id')
+            cat_nome = None
+            if isinstance(cat_raw, int):
+                cat_nome = (categorias_by_seq.get(cat_raw) or {}).get('nome')
+            elif isinstance(cat_raw, str):
+                cat_nome = (categorias_by_oid.get(cat_raw) or {}).get('nome')
+            items_raw.append({
+                'id': pid,
+                'nome': doc.get('nome'),
+                'codigo': doc.get('codigo'),
+                'ativo': bool(doc.get('ativo', True)),
+                'categoria_nome': cat_nome,
+                '_score': relevance(doc),
+                '_pid_candidates': [pid] + ([int(pid)] if str(pid).isdigit() else [])
+            })
+
+        # Ordenar por relevância e limitar
+        items_raw.sort(key=lambda x: x['_score'], reverse=True)
+        items_raw = items_raw[:limit]
+
+        # Computar disponibilidade total por produto
+        est_coll = db['estoques']
+        out_items = []
+        for it in items_raw:
+            disponivel_total = 0.0
+            keys = []
+            # candidates: sequencial int, string id, ObjectId
+            for k in it['_pid_candidates']:
+                keys.append(k)
+                ks = str(k)
+                keys.append(ks)
+                try:
+                    keys.append(ObjectId(ks))
+                except Exception:
+                    pass
+            try:
+                for s in est_coll.find({'produto_id': {'$in': keys}}, {'quantidade_disponivel': 1, 'quantidade': 1}):
+                    disponivel_total += float(s.get('quantidade_disponivel', s.get('quantidade') or 0) or 0)
+            except Exception:
+                pass
+            out_items.append({
+                'id': it['id'],
+                'nome': it['nome'],
+                'codigo': it['codigo'],
+                'ativo': it['ativo'],
+                'categoria_nome': it.get('categoria_nome'),
+                'disponivel_total': round(float(disponivel_total), 3),
+                'score': it['_score']
+            })
+
+        return jsonify({'items': out_items, 'q': q, 'limit': limit})
+    except Exception as e:
+        return jsonify({'error': f'Falha na busca rápida: {e}'}), 500
+
 # ==================== API PLACEHOLDERS (JSON) ====================
 
 # --- USUÁRIOS (MongoDB) ---

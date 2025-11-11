@@ -467,6 +467,13 @@
             color: white;
             font-size: 16px;
         }
+        .avatar-initials {
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
         
         .user-name-topbar {
             color: white;
@@ -679,7 +686,17 @@
         <div class="user-avatar dropdown">
             <p class="user-name-topbar d-none d-md-block">{{ current_user.nome_completo or current_user.username or current_user.email }}</p>
             <button class="avatar-dropdown dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="fas fa-user"></i>
+                <span class="avatar-initials">
+                    {% set nome = current_user.nome_completo or current_user.username or current_user.email %}
+                    {% set parts = nome.split() %}
+                    {% if parts|length == 0 %}
+                        ?
+                    {% elif parts|length == 1 %}
+                        {{ parts[0][:2]|upper }}
+                    {% else %}
+                        {{ (parts[0][0] ~ parts[-1][0])|upper }}
+                    {% endif %}
+                </span>
             </button>
             <ul class="dropdown-menu user-dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
                 <li class="user-info">

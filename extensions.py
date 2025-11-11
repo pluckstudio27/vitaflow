@@ -28,6 +28,7 @@ def ensure_collections_and_indexes(db, logger=None):
             'movimentacoes',
             'locais',
             'logs_auditoria',  # adicionada para evitar erros no primeiro uso
+            'listas_compras',  # lista de compras por usuário
         ]
         existing = set(db.list_collection_names())
         for name in required:
@@ -40,6 +41,12 @@ def ensure_collections_and_indexes(db, logger=None):
         db['movimentacoes'].create_index([('data', ASCENDING)], name='idx_mov_data')
         db['logs_auditoria'].create_index([('timestamp', ASCENDING)], name='idx_audit_time')
         db['logs_auditoria'].create_index([('usuario_id', ASCENDING)], name='idx_audit_user')
+        # Índices para listas de compras
+        try:
+            db['listas_compras'].create_index([('usuario_id', ASCENDING)], name='idx_lista_usuario')
+            db['listas_compras'].create_index([('created_at', ASCENDING)], name='idx_lista_created')
+        except Exception:
+            pass
     except Exception as e:
         if logger is not None:
             logger.error(f'[Mongo Init] Falha ao criar coleções/índices: {e}')

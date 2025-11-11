@@ -75,6 +75,61 @@
                                             <th>Consumo/dia</th>
                                             <th>Sugestão</th>
                                             <th>Motivos</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- preenchido via JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12">
+                    <div class="card border-0 shadow-sm mt-3">
+                        <div class="card-header bg-white d-flex align-items-center justify-content-between">
+                            <div>
+                                <strong>Minha Lista de Compras</strong>
+                                <div class="text-muted small">Adicione manualmente ou a partir das sugestões.</div>
+                            </div>
+                            <div class="btn-group">
+                                <button class="btn btn-outline-secondary btn-sm" id="btnListaCsv"><i class="fas fa-file-csv"></i> Exportar CSV</button>
+                                <button class="btn btn-outline-secondary btn-sm" id="btnListaCopy"><i class="fas fa-clipboard"></i> Copiar resumo</button>
+                                <button class="btn btn-outline-danger btn-sm" id="btnListaClear"><i class="fas fa-trash"></i> Limpar lista</button>
+                                <button class="btn btn-primary btn-sm" id="btnListaAtualizar"><i class="fas fa-sync-alt"></i> Atualizar</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <style>
+                                /* Destaque de item selecionado na busca */
+                                .search-result-item.active {
+                                    border-color: #2563eb !important;
+                                    background-color: #f0f6ff !important;
+                                    box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
+                                }
+                            </style>
+                            <div class="form-row align-items-end">
+                                <div class="form-group col-md-6">
+                                    <label class="small text-muted">Buscar produto</label>
+                                    <input type="text" class="form-control" id="listaSearchInput" placeholder="Digite nome ou código..." />
+                                </div>
+                                <div class="form-group col-md-2">
+                                    <label class="small text-muted">Quantidade</label>
+                                    <input type="number" class="form-control" id="listaSearchQty" value="1" min="0" step="0.01" />
+                                </div>
+                            </div>
+                            <div id="listaResultados" class="mb-3" style="display:none"></div>
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="listaTable">
+                                    <thead class="thead-light">
+                                        <tr>
+                                            <th>Produto</th>
+                                            <th style="width:160px">Quantidade</th>
+                                            <th>Observação</th>
+                                            <th style="width:160px">Ações</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -104,6 +159,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const aiProviderBadge = document.getElementById('aiProviderBadge');
     const btnCsv = document.getElementById('btnCsv');
     const btnCopy = document.getElementById('btnCopy');
+    // Lista de compras (UI)
+    const btnListaAtualizar = document.getElementById('btnListaAtualizar');
+    const btnListaClear = document.getElementById('btnListaClear');
+    const btnListaCsv = document.getElementById('btnListaCsv');
+    const btnListaCopy = document.getElementById('btnListaCopy');
+    const listaTableBody = document.querySelector('#listaTable tbody');
+    const listaSearchInput = document.getElementById('listaSearchInput');
+    const listaSearchQty = document.getElementById('listaSearchQty');
+    const listaResultados = document.getElementById('listaResultados');
+    let listaSelectedIndex = -1;
 
     // Desligar IA por padrão para evitar chamadas externas antes da configuração
     try { useAiEl.checked = false; } catch (_) {}
@@ -177,9 +242,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td>${fmtNumber(it.media_diaria)}</td>
                         <td><strong>${fmtNumber(it.sugestao_compra)}</strong></td>
                         <td>${motivos}</td>
+                        <td><button class="btn btn-sm btn-outline-primary" data-add-prod="${it.produto_id}" data-add-qty="${it.sugestao_compra}"><i class="fas fa-plus"></i> Adicionar</button></td>
                     </tr>
                 `;
             }).join('');
+            // Bind adicionar aos botões
+            tbody.querySelectorAll('button[data-add-prod]').forEach(btn => {
+                btn.addEventListener('click', async (ev) => {
+                    const pid = ev.currentTarget.getAttribute('data-add-prod');
+                    const qty = parseFloat(ev.currentTarget.getAttribute('data-add-qty') || '0') || 0;
+                    try {
+                        await addToList(pid, qty);
+                        await loadList();
+                        if (window.showNotification) window.showNotification('success', 'Item adicionado à lista.');
+                    } catch (e) {
+                        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'add_lista') : (e && e.message ? e.message : String(e)));
+                        if (window.showNotification) window.showNotification('danger', `Falha ao adicionar: ${friendly}`);
+                    }
+                });
+            });
             if (window.showNotification) window.showNotification('info', `Sugestões atualizadas (${items.length} itens).`);
         } catch (e) {
             tbody.innerHTML = '';
@@ -235,7 +316,286 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.showNotification) window.showNotification('warning', 'Não foi possível copiar o resumo.');
         }
     });
+
+    // ===== Lista de compras (JS) =====
+    async function loadList() {
+        listaTableBody.innerHTML = '<tr><td colspan="4"><div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Carregando lista...</div></td></tr>';
+        try {
+            const res = await fetchJson('/api/compras/lista', { method: 'GET' });
+            const items = res.items || [];
+            if (!items.length) {
+                listaTableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Lista vazia.</td></tr>';
+                return;
+            }
+            const fmtNumber2 = (n) => {
+                const v = Number(n || 0);
+                return v.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+            };
+            listaTableBody.innerHTML = items.map(it => {
+                const produtoLabel = `${it.produto_nome || '-'}<br/><small class="text-muted">${it.produto_codigo || '-'}</small>`;
+                return `
+                    <tr data-item-id="${it.id}">
+                        <td>${produtoLabel}</td>
+                        <td>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" value="${Number(it.quantidade || 0)}" step="0.01" min="0" data-field="qty" />
+                                <div class="input-group-append">
+                                    <button class="btn btn-outline-secondary" data-action="save"><i class="fas fa-save"></i></button>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm" value="${(it.observacao || '').replace(/"/g, '&quot;')}" data-field="obs" />
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger" data-action="delete"><i class="fas fa-trash"></i> Remover</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            // bind ações
+            listaTableBody.querySelectorAll('button[data-action="save"]').forEach(btn => {
+                btn.addEventListener('click', async (ev) => {
+                    const tr = ev.currentTarget.closest('tr');
+                    const id = tr.getAttribute('data-item-id');
+                    const qty = parseFloat(tr.querySelector('input[data-field="qty"]').value || '0') || 0;
+                    const obs = String(tr.querySelector('input[data-field="obs"]').value || '').trim();
+                    try {
+                        await fetchJson(`/api/compras/lista/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quantidade: qty, observacao: obs }) });
+                        if (window.showNotification) window.showNotification('success', 'Item atualizado.');
+                        await loadList();
+                    } catch (e) {
+                        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'update_lista') : (e && e.message ? e.message : String(e)));
+                        if (window.showNotification) window.showNotification('danger', `Falha ao atualizar: ${friendly}`);
+                    }
+                });
+            });
+            listaTableBody.querySelectorAll('button[data-action="delete"]').forEach(btn => {
+                btn.addEventListener('click', async (ev) => {
+                    const tr = ev.currentTarget.closest('tr');
+                    const id = tr.getAttribute('data-item-id');
+                    if (!confirm('Remover este item da lista?')) return;
+                    try {
+                        await fetchJson(`/api/compras/lista/${id}`, { method: 'DELETE' });
+                        if (window.showNotification) window.showNotification('success', 'Item removido.');
+                        await loadList();
+                    } catch (e) {
+                        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'delete_lista') : (e && e.message ? e.message : String(e)));
+                        if (window.showNotification) window.showNotification('danger', `Falha ao remover: ${friendly}`);
+                    }
+                });
+            });
+        } catch (e) {
+            listaTableBody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Falha ao carregar lista.</td></tr>';
+        }
+    }
+
+    async function addToList(produtoId, quantidade) {
+        const body = { produto_id: produtoId, quantidade: Number(quantidade || 0) };
+        return fetchJson('/api/compras/lista', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    }
+
+    btnListaAtualizar.addEventListener('click', loadList);
+    btnListaClear.addEventListener('click', async () => {
+        if (!confirm('Tem certeza que deseja limpar toda a lista?')) return;
+        try {
+            await fetchJson('/api/compras/lista/clear', { method: 'POST' });
+            if (window.showNotification) window.showNotification('success', 'Lista limpa.');
+            await loadList();
+        } catch (e) {
+            const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'clear_lista') : (e && e.message ? e.message : String(e)));
+            if (window.showNotification) window.showNotification('danger', `Falha ao limpar: ${friendly}`);
+        }
+    });
+
+    btnListaCsv.addEventListener('click', () => {
+        const rows = [];
+        const headers = ['produto_nome','produto_codigo','quantidade','observacao'];
+        const trs = listaTableBody.querySelectorAll('tr');
+        if (!trs.length) return;
+        trs.forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length >= 4) {
+                const produtoNome = tds[0].innerText.split('\n')[0].trim();
+                const produtoCodigo = (tds[0].querySelector('small') || {innerText:'-'}).innerText.trim();
+                const quantidade = tds[1].querySelector('input[data-field="qty"]').value;
+                const observacao = tds[2].querySelector('input[data-field="obs"]').value;
+                rows.push([produtoNome, produtoCodigo, quantidade, observacao]);
+            }
+        });
+        const csv = [headers.join(';')].concat(rows.map(r => r.join(';'))).join('\n');
+        const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'minha_lista_compras.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        if (window.showNotification) window.showNotification('success', 'CSV da lista exportado.');
+    });
+
+    btnListaCopy.addEventListener('click', async () => {
+        // Monta um resumo textual da lista
+        const trs = listaTableBody.querySelectorAll('tr');
+        if (!trs.length) return;
+        const lines = [];
+        trs.forEach(tr => {
+            const nome = tr.querySelector('td').innerText.split('\n')[0].trim();
+            const codigo = (tr.querySelector('td small') || {innerText:'-'}).innerText.trim();
+            const quantidade = tr.querySelector('input[data-field="qty"]').value;
+            const observacao = tr.querySelector('input[data-field="obs"]').value;
+            lines.push(`${nome} (${codigo}) - Qtd: ${quantidade}${observacao ? ' • ' + observacao : ''}`);
+        });
+        const text = lines.join('\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            if (window.showNotification) window.showNotification('success', 'Lista copiada.');
+        } catch (e) {
+            if (window.showNotification) window.showNotification('warning', 'Não foi possível copiar a lista.');
+        }
+    });
+
+    // Busca dinâmica com debounce e autocomplete
+    function debounce(fn, ms=300) {
+        let t;
+        return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    }
+    function highlight(text, query) {
+        try {
+            if (!text) return '';
+            const esc = String(text).replace(/[&<>]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[s]));
+            const q = String(query || '').trim();
+            if (!q) return esc;
+            const parts = q.split(/\s+/).filter(Boolean);
+            let out = esc;
+            parts.forEach(p => {
+                const re = new RegExp(`(${p})`, 'ig');
+                out = out.replace(re, '<mark>$1</mark>');
+            });
+            return out;
+        } catch { return String(text || ''); }
+    }
+    const performSearch = debounce(async () => {
+        const q = (listaSearchInput.value || '').trim();
+        const qty = parseFloat(listaSearchQty.value || '1') || 1;
+        if (!q) {
+            listaResultados.style.display = 'none';
+            listaResultados.innerHTML = '';
+            listaSelectedIndex = -1;
+            return;
+        }
+        listaResultados.style.display = '';
+        listaResultados.innerHTML = '<div class="text-muted">Buscando...</div>';
+        try {
+            const res = await fetchJson(`/api/produtos/busca-rapida?q=${encodeURIComponent(q)}&limit=12`, { method: 'GET' });
+            const items = (res.items || []);
+            if (!items.length) {
+                listaResultados.innerHTML = '<div class="text-muted">Nenhum produto encontrado.</div>';
+                listaSelectedIndex = -1;
+                return;
+            }
+            listaResultados.innerHTML = items.map((p, idx) => {
+                const nomeHtml = highlight(p.nome || '-', q);
+                const codigoHtml = highlight(p.codigo || '-', q);
+                const disp = Number(p.disponivel_total || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                const cat = p.categoria_nome ? `<span class="badge badge-light ml-2">${p.categoria_nome}</span>` : '';
+                const ativoBadge = p.ativo ? '' : '<span class="badge badge-warning ml-2">inativo</span>';
+                return `
+                    <div class="d-flex align-items-center justify-content-between border rounded p-2 mb-2 search-result-item" data-result-index="${idx}">
+                        <div>
+                            <strong>${nomeHtml}</strong>${cat}${ativoBadge}
+                            <div class="small text-muted">${codigoHtml} • Disp.: ${disp}</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" data-add-busca-prod="${p.id}" data-add-busca-qty="${qty}"><i class="fas fa-plus"></i> Adicionar</button>
+                    </div>
+                `;
+            }).join('');
+            // Resetar seleção ao resultado novo
+            listaSelectedIndex = -1;
+            updateActiveResult();
+
+            // Ativar seleção por mouseover
+            listaResultados.querySelectorAll('.search-result-item').forEach(el => {
+                el.addEventListener('mouseenter', () => {
+                    const idx = parseInt(el.getAttribute('data-result-index') || '-1');
+                    if (!Number.isNaN(idx)) {
+                        listaSelectedIndex = idx;
+                        updateActiveResult();
+                    }
+                });
+            });
+            listaResultados.querySelectorAll('button[data-add-busca-prod]').forEach(btn => {
+                btn.addEventListener('click', async (ev) => {
+                    const pid = ev.currentTarget.getAttribute('data-add-busca-prod');
+                    const qn = parseFloat(ev.currentTarget.getAttribute('data-add-busca-qty') || '1') || 1;
+                    try {
+                        await addToList(pid, qn);
+                        await loadList();
+                        if (window.showNotification) window.showNotification('success', 'Item adicionado à lista.');
+                    } catch (e) {
+                        const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'add_lista_busca') : (e && e.message ? e.message : String(e)));
+                        if (window.showNotification) window.showNotification('danger', `Falha ao adicionar: ${friendly}`);
+                    }
+                });
+            });
+        } catch (e) {
+            listaResultados.innerHTML = '<div class="text-danger">Falha na busca.</div>';
+        }
+    }, 300);
+
+    function updateActiveResult() {
+        try {
+            const items = Array.from(listaResultados.querySelectorAll('.search-result-item'));
+            items.forEach(el => el.classList.remove('active'));
+            if (listaSelectedIndex >= 0 && listaSelectedIndex < items.length) {
+                items[listaSelectedIndex].classList.add('active');
+                // Scroll suave para manter item visível
+                items[listaSelectedIndex].scrollIntoView({ block: 'nearest' });
+            }
+        } catch (_) { /* no-op */ }
+    }
+
+    listaSearchInput.addEventListener('input', performSearch);
+    listaSearchInput.addEventListener('keydown', (ev) => {
+        const items = Array.from(listaResultados.querySelectorAll('.search-result-item'));
+        if (ev.key === 'ArrowDown') {
+            if (!items.length) return;
+            ev.preventDefault();
+            if (listaSelectedIndex < 0) {
+                listaSelectedIndex = 0;
+            } else {
+                listaSelectedIndex = Math.min(listaSelectedIndex + 1, items.length - 1);
+            }
+            updateActiveResult();
+        } else if (ev.key === 'ArrowUp') {
+            if (!items.length) return;
+            ev.preventDefault();
+            if (listaSelectedIndex <= 0) {
+                listaSelectedIndex = 0;
+            } else {
+                listaSelectedIndex = listaSelectedIndex - 1;
+            }
+            updateActiveResult();
+        } else if (ev.key === 'Enter') {
+            let targetBtn = null;
+            if (listaSelectedIndex >= 0 && listaSelectedIndex < items.length) {
+                targetBtn = items[listaSelectedIndex].querySelector('button[data-add-busca-prod]');
+            }
+            if (!targetBtn) {
+                targetBtn = listaResultados.querySelector('button[data-add-busca-prod]');
+            }
+            if (targetBtn) {
+                ev.preventDefault();
+                targetBtn.click();
+            }
+        }
+    });
+
+    // Carregar inicialmente
     loadSuggestions();
+    loadList();
 });
 </script>
 {% endblock %}
