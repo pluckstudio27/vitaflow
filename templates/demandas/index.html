@@ -96,9 +96,12 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-list"></i> Minhas Demandas</h5>
-                    <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandas()">
-                        <i class="fas fa-sync-alt"></i> Atualizar
-                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="text" id="minhasDemandasSearch" class="form-control form-control-sm" placeholder="Buscar demanda..." style="max-width: 240px;">
+                        <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandas()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="listaDemandas">
@@ -265,12 +268,24 @@ async function carregarDemandas() {
     el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
     try {
         const data = await fetchJson('/api/demandas?mine=true&per_page=50');
-        if (!data.items || !data.items.length) {
+        let items = Array.isArray(data.items) ? data.items : [];
+        const qEl = document.getElementById('minhasDemandasSearch');
+        const q = (qEl ? qEl.value : '').trim().toLowerCase();
+        if (q) {
+            items = items.filter(d => {
+                const a = String(d.display_id || d.id || '').toLowerCase();
+                const b = String(d.produto_nome || d.produto_id || '').toLowerCase();
+                const c = String(d.status || '').toLowerCase();
+                const e = String(d.created_at || '').toLowerCase();
+                return a.includes(q) || b.includes(q) || c.includes(q) || e.includes(q);
+            });
+        }
+        if (!items.length) {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda encontrada.</div>';
             return;
         }
         const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-        const rows = data.items.map(d => {
+        const rows = items.map(d => {
             const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
             const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
             return `
@@ -307,6 +322,12 @@ async function carregarDemandas() {
         if (window.showNotification) window.showNotification('danger', `Falha ao listar demandas: ${friendly}`);
     }
 }
+
+let _minhasDemandasSearchTimer = null;
+document.getElementById('minhasDemandasSearch').addEventListener('input', () => {
+    clearTimeout(_minhasDemandasSearchTimer);
+    _minhasDemandasSearchTimer = setTimeout(() => carregarDemandas(), 200);
+});
 
 async function atualizarEstoqueSetor() {
     const el = document.getElementById('estoqueSetor');

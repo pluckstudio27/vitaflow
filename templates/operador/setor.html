@@ -364,12 +364,11 @@ async function loadSetorLotes() {
     }
     if (!items.length) { el.textContent = 'Sem lotes cadastrados para este produto neste setor ou origem superior.'; return; }
     let html = '<div class="table-responsive"><table class="table table-sm mb-0">';
-    html += '<thead><tr><th>Lote</th><th>Quantidade</th><th>Data de Vencimento</th><th>Status</th></tr></thead><tbody>';
+    html += '<thead><tr><th>Lote</th><th>Data de Vencimento</th><th>Status</th></tr></thead><tbody>';
     const hoje = new Date();
     items.forEach(l => {
       const qtdNum = Number(l.quantidade_atual || 0);
       const unidade = (selectedProduct && selectedProduct.unidade_medida) ? String(selectedProduct.unidade_medida) : '';
-      const qtd = `${fmtQtd.format(qtdNum)}${unidade ? ' ' + unidade : ''}`;
       const df = parseDateFlexible(l.data_fabricacao);
       const dv = parseDateFlexible(l.data_vencimento);
       let status = '-';
@@ -398,7 +397,6 @@ async function loadSetorLotes() {
       const rowClass = (status === 'Vencido') ? 'table-danger' : (status.startsWith('Vence em') ? 'table-warning' : '');
       html += `<tr class="${rowClass}">
         <td>${l.numero_lote || '-'}</td>
-        <td>${qtd}</td>
         <td>${vencStr}</td>
         <td>${status}</td>
       </tr>`;

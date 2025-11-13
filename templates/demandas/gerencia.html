@@ -189,19 +189,21 @@ async function carregarDemandasResolvidas() {
     const el = document.getElementById('listaDemandasResolvidas');
     el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
     try {
-        const [resAtendido, resNegado] = await Promise.all([
+        const [resAtendido, resParcial, resNegado] = await Promise.all([
             fetch('/api/demandas?status=atendido&per_page=50'),
+            fetch('/api/demandas?status=parcialmente_atendido&per_page=50'),
             fetch('/api/demandas?status=negado&per_page=50')
         ]);
         const dataAt = await resAtendido.json().catch(() => ({ items: [] }));
+        const dataParc = await resParcial.json().catch(() => ({ items: [] }));
         const dataNeg = await resNegado.json().catch(() => ({ items: [] }));
-        const ok = resAtendido.ok || resNegado.ok;
+        const ok = resAtendido.ok || resParcial.ok || resNegado.ok;
         if (!ok) {
-            const errMsg = (dataAt.error || dataNeg.error || 'Erro ao listar resolvidas');
+            const errMsg = (dataAt.error || dataParc.error || dataNeg.error || 'Erro ao listar resolvidas');
             el.innerHTML = `<div class="alert alert-danger">${htmlEscape(errMsg)}</div>`;
             return;
         }
-        const items = [...(dataAt.items || []), ...(dataNeg.items || [])];
+        const items = [...(dataAt.items || []), ...(dataParc.items || []), ...(dataNeg.items || [])];
         if (!items.length) {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda resolvida.</div>';
             return;
@@ -212,7 +214,7 @@ async function carregarDemandasResolvidas() {
         items.sort((a, b) => (parseDate(b.updated_at || b.created_at) - parseDate(a.updated_at || a.created_at)));
         const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
         const rows = items.map(d => {
-            const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : 'secondary');
+            const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : (d.status === 'parcialmente_atendido' ? 'warning' : 'secondary'));
             const when = htmlEscape(d.updated_at || d.created_at || '');
             const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
             const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
@@ -253,10 +255,12 @@ async function carregarDemandasResolvidas() {
 async function atualizarStatus(id, status, quantidade_autorizada, opts = {}) {
     const silent = !!opts.silent;
     try {
+        const body = quantidade_autorizada != null ? { status, quantidade_autorizada } : { status };
+        if (Array.isArray(opts.atendimento)) body.atendimento = opts.atendimento;
         const res = await fetchJson(`/api/demandas/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(quantidade_autorizada != null ? { status, quantidade_autorizada } : { status })
+            body: JSON.stringify(body)
         });
         carregarDemandasGerencia();
         carregarDemandasResolvidas();
@@ -431,6 +435,80 @@ async function executarAtendimentoDemanda() {
         console.error('Erro ao atender demanda:', err);
         alert('Erro ao atender demanda: ' + (err && err.message ? err.message : String(err)));
     }
+}
+
+async function executarAtendimentoDemandaGrupo() {
+    if (!demandaAtual || !Array.isArray(demandaAtual.items)) {
+        alert('Demanda em grupo não carregada');
+        return;
+    }
+    const tipo = document.getElementById('tipoOrigemDemanda').value;
+    const localId = document.getElementById('localOrigemDemanda').value;
+    const observacoes = document.getElementById('observacoesDemanda').value || null;
+    if (!tipo || !localId) { alert('Preencha tipo e local de origem.'); return; }
+    const setorId = String(demandaAtual.setor_id);
+    const linhas = Array.from(document.querySelectorAll('#grupoItensBody tr'));
+    const selecionados = [];
+    for (const tr of linhas) {
+        const chk = tr.querySelector('input[type="checkbox"]');
+        if (chk && chk.checked) {
+            const pid = tr.getAttribute('data-pid');
+            const qtdInput = tr.querySelector('input[type="number"]');
+            const qtd = parseFloat(qtdInput && qtdInput.value || '0');
+            if (pid && qtd > 0) selecionados.push({ produto_id: pid, quantidade: qtd });
+        }
+    }
+    if (!selecionados.length) { alert('Selecione ao menos um item com quantidade > 0'); return; }
+    let enviados = [];
+    for (const it of selecionados) {
+        const payload = {
+            produto_id: String(it.produto_id),
+            quantidade: parseFloat(it.quantidade),
+            origem: { tipo: tipo, id: String(localId) },
+            destino: { tipo: 'setor', id: setorId },
+            motivo: `Atendimento parcial de demanda ${demandaAtual.id}`,
+            observacoes: observacoes
+        };
+        try {
+            const res = await fetch('/api/movimentacoes/transferencia', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (res.ok) {
+                enviados.push({ produto_id: it.produto_id, quantidade: it.quantidade });
+            }
+        } catch (_) {}
+    }
+    const status = (enviados.length === (demandaAtual.items || []).length) ? 'atendido' : (enviados.length > 0 ? 'parcialmente_atendido' : 'pendente');
+    await atualizarStatus(demandaAtual.id, status, enviados.reduce((s, x) => s + Number(x.quantidade || 0), 0), { atendimento: enviados });
+    const modal = bootstrap.Modal.getInstance(document.getElementById('atenderDemandaModal'));
+    if (modal) modal.hide();
+    demandaAtual = null;
+    carregarDemandasGerencia();
+    carregarDemandasResolvidas();
+    alert(status === 'atendido' ? 'Demanda atendida.' : 'Demanda parcialmente atendida.');
+}
+
+async function renderizarItensGrupo(items, setorId) {
+    const tbody = document.getElementById('grupoItensBody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div></td></tr>';
+    const rows = [];
+    for (const it of (items || [])) {
+        let disponivel = '0';
+        try {
+            const res = await fetch(`/api/produtos/${encodeURIComponent(it.produto_id)}/estoque`);
+            const data = await res.json();
+            disponivel = (data && data.resumo && data.resumo.total_disponivel) ? String(Number(data.resumo.total_disponivel || 0).toLocaleString('pt-BR')) : '0';
+        } catch (_) { disponivel = '0'; }
+        const qtdSolicStr = Number(it.quantidade || 0).toLocaleString('pt-BR');
+        rows.push(`<tr data-pid="${htmlEscape(String(it.produto_id))}">
+            <td><input type="checkbox" checked></td>
+            <td>${htmlEscape(it.produto_nome || String(it.produto_id))}</td>
+            <td class="text-end">${qtdSolicStr}</td>
+            <td class="text-end">${disponivel}</td>
+            <td class="text-end"><input type="number" class="form-control form-control-sm" step="0.001" min="0" value="${Number(it.quantidade || 0)}"></td>
+        </tr>`);
+    }
+    tbody.innerHTML = rows.join('');
 }
 
 window.addEventListener('DOMContentLoaded', () => {

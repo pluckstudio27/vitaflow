@@ -8073,7 +8073,7 @@ def api_demandas_update(id):
     data = request.get_json(silent=True) or {}
     status = (data.get('status') or '').strip().lower()
     quantidade_autorizada = data.get('quantidade_autorizada')
-    allowed = {'pendente', 'aprovado', 'negado', 'atendido'}
+    allowed = {'pendente', 'aprovado', 'negado', 'atendido', 'parcialmente_atendido'}
     if status and status not in allowed:
         return jsonify({'error': 'Status inválido'}), 400
 
@@ -8085,6 +8085,10 @@ def api_demandas_update(id):
             upd['quantidade_autorizada'] = float(quantidade_autorizada)
         except Exception:
             return jsonify({'error': 'quantidade_autorizada inválida'}), 400
+
+    atendimento = data.get('atendimento')
+    if isinstance(atendimento, list):
+        upd['atendimento'] = atendimento
 
     updated = coll.find_one_and_update({'_id': doc.get('_id')}, {'$set': upd}, return_document=ReturnDocument.AFTER)
     ts = updated.get('updated_at')
@@ -8233,9 +8237,9 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
             origem_raw = str(row.get('_id') or '').lower().strip()
             # Normalizar sinônimos
             origem = origem_raw
-            if origem_raw in ('subalmoxarifado', 'sub_almoxarifados', 'subalmoxarifados'):
+            if origem_raw in ('subalmoxarifado', 'sub_almoxarifados', 'subalmoxarifados', 'sub', 'sub_almox', 'subalmox'):
                 origem = 'sub_almoxarifado'
-            elif origem_raw in ('almoxarifados',):
+            elif origem_raw in ('almoxarifados', 'almox', 'almoxarifado'):
                 origem = 'almoxarifado'
             total = float(row.get('total') or 0)
             if origem in recebidos_por_origem:
