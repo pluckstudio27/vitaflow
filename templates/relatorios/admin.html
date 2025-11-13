@@ -1,0 +1,167 @@
+{% extends 'base.html' %}
+{% block title %}Relatórios Administrativos{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex align-items-center mb-3">
+    <i class="fas fa-chart-line me-2"></i>
+    <h2 class="mb-0">Relatórios Administrativos</h2>
+  </div>
+  <p class="text-muted">Consumo médio e valores gastos no período selecionado.</p>
+
+  <div class="row">
+    <div class="col-lg-4">
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white d-flex align-items-center justify-content-between">
+          <strong>Parâmetros</strong>
+          <span class="badge badge-light" id="aiProviderBadgeAdmin" style="display:none"></span>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group col-md-6">
+              <label class="small text-muted">Início</label>
+              <input type="date" class="form-control" id="adminDataInicio" />
+            </div>
+            <div class="form-group col-md-6">
+              <label class="small text-muted">Fim</label>
+              <input type="date" class="form-control" id="adminDataFim" />
+            </div>
+            <div class="form-group col-12">
+              <div class="custom-control custom-switch">
+                <input type="checkbox" class="custom-control-input" id="adminUseAi">
+                <label class="custom-control-label" for="adminUseAi">Usar Inteligência Artificial</label>
+              </div>
+            </div>
+          </div>
+          <div class="d-flex justify-content-end">
+            <button class="btn btn-primary btn-sm" id="btnAdminAtualizar"><i class="fas fa-sync-alt"></i> Atualizar</button>
+          </div>
+          <div id="adminAlertArea" class="mt-2"></div>
+        </div>
+      </div>
+
+      <div class="card border-0 shadow-sm" id="adminAiFeedbackCard" style="display:none">
+        <div class="card-header bg-white"><strong>Resumo da IA</strong></div>
+        <div class="card-body">
+          <div id="adminAiFeedback" class="text-muted" style="white-space:pre-wrap"></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-hover" id="adminReportTable">
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th style="width:160px">Consumo total</th>
+                  <th style="width:160px">Média diária</th>
+                  <th style="width:180px">Gastos (R$)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+              <tfoot>
+                <tr>
+                  <th class="text-end">Totais:</th>
+                  <th id="adminTotalConsumo">0</th>
+                  <th id="adminMediaGlobal">0</th>
+                  <th id="adminTotalGastos">0</th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ===== Relatórios Administrativos (página dedicada) =====
+  const adminDataInicioEl = document.getElementById('adminDataInicio');
+  const adminDataFimEl = document.getElementById('adminDataFim');
+  const adminUseAiEl = document.getElementById('adminUseAi');
+  const btnAdminAtualizar = document.getElementById('btnAdminAtualizar');
+  const adminTbody = document.querySelector('#adminReportTable tbody');
+  const adminTotalConsumoEl = document.getElementById('adminTotalConsumo');
+  const adminMediaGlobalEl = document.getElementById('adminMediaGlobal');
+  const adminTotalGastosEl = document.getElementById('adminTotalGastos');
+  const adminAiFeedbackCard = document.getElementById('adminAiFeedbackCard');
+  const adminAiFeedbackEl = document.getElementById('adminAiFeedback');
+  const adminAiProviderBadge = document.getElementById('aiProviderBadgeAdmin');
+  const adminAlertArea = document.getElementById('adminAlertArea');
+
+  try { adminUseAiEl.checked = false; } catch (_) {}
+  // datas padrão: últimos 30 dias
+  try {
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const start = new Date(end.getTime() - 29*24*3600*1000);
+    adminDataInicioEl.value = fmt(start);
+    adminDataFimEl.value = fmt(end);
+  } catch (_) {}
+
+  async function loadAdminReport() {
+    adminTbody.innerHTML = '<tr><td colspan="4"><div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Carregando relatório...</div></td></tr>';
+    adminAlertArea.innerHTML = '';
+    const params = new URLSearchParams({
+      data_inicio: adminDataInicioEl.value || '',
+      data_fim: adminDataFimEl.value || '',
+      use_ai: adminUseAiEl.checked ? 'true' : 'false'
+    });
+    try {
+      const res = await fetchJson(`/api/relatorios/admin/consumo-gastos?${params.toString()}`, { method: 'GET' });
+      const items = res.items || [];
+      const totais = res.totais || {};
+      const aiFeedback = (res.ai_feedback || '').trim();
+      const aiProvider = (res.params && res.params.ai_provider) ? String(res.params.ai_provider) : '';
+      if (aiProvider) {
+        adminAiProviderBadge.style.display = 'inline-block';
+        adminAiProviderBadge.className = 'badge badge-success';
+        adminAiProviderBadge.textContent = `IA: ${aiProvider}`;
+      } else {
+        adminAiProviderBadge.style.display = 'none';
+      }
+      if (aiFeedback) {
+        adminAiFeedbackCard.style.display = '';
+        adminAiFeedbackEl.textContent = aiFeedback;
+      } else {
+        adminAiFeedbackCard.style.display = 'none';
+        adminAiFeedbackEl.textContent = '';
+      }
+      const fmtNumber = (n, frac=2) => Number(n||0).toLocaleString('pt-BR', { maximumFractionDigits: frac });
+      if (!items.length) {
+        adminTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Nenhum dado para o período selecionado.</td></tr>';
+      } else {
+        adminTbody.innerHTML = items.map(it => {
+          const produtoLabel = `${it.produto_nome || '-'}<br/><small class="text-muted">${it.produto_codigo || '-'}</small>`;
+          return `
+            <tr>
+              <td>${produtoLabel}</td>
+              <td>${fmtNumber(it.total_consumo, 4)}</td>
+              <td>${fmtNumber(it.media_diaria, 4)}</td>
+              <td><strong>${fmtNumber(it.total_gastos, 2)}</strong></td>
+            </tr>
+          `;
+        }).join('');
+      }
+      adminTotalConsumoEl.textContent = fmtNumber(totais.consumo_geral, 4);
+      adminMediaGlobalEl.textContent = fmtNumber((Number(totais.consumo_geral||0) / Number(totais.dias_periodo||1)), 4);
+      adminTotalGastosEl.textContent = fmtNumber(totais.gastos_geral, 2);
+      if (window.showNotification) window.showNotification('info', `Relatório atualizado (${items.length} itens).`);
+    } catch (e) {
+      adminTbody.innerHTML = '';
+      const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'admin_relatorio') : (e && e.message ? e.message : String(e)));
+      adminAlertArea.innerHTML = `<div class="alert alert-danger">Falha ao carregar relatório: ${friendly}</div>`;
+      if (window.showNotification) window.showNotification('danger', `Falha ao carregar relatório: ${friendly}`);
+    }
+  }
+
+  if (btnAdminAtualizar) btnAdminAtualizar.addEventListener('click', loadAdminReport);
+  document.addEventListener('DOMContentLoaded', () => {
+    loadAdminReport();
+  });
+</script>
+{% endblock %}

@@ -149,6 +149,7 @@
 
 <div class="row">
     <div class="col-12">
+        
         <div class="card border-0 shadow-sm mt-3">
             <div class="card-header bg-white d-flex align-items-center justify-content-between">
                 <div>
@@ -654,6 +655,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ===== Minhas compras finalizadas/enviadas =====
     const minhasComprasBody = document.getElementById('minhasComprasBody');
     const btnMinhasComprasAtualizar = document.getElementById('btnMinhasComprasAtualizar');
+
+    
     async function loadMinhasCompras() {
         if (!minhasComprasBody) return;
         minhasComprasBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted"><i class="fas fa-spinner fa-spin"></i> Carregando...</td></tr>';
@@ -759,6 +762,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Inicializa na carga
     try { await loadList(); } catch (_) {}
     try { await loadSuggestions(); } catch (_) {}
+    try { await loadAdminReport(); } catch (_) {}
     try { await loadMinhasCompras(); } catch (_) {}
 });
 </script>

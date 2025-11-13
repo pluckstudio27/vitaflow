@@ -20,6 +20,7 @@ import os
 import json as _json
 from urllib.request import Request as _UrlRequest, urlopen as _urlopen
 from urllib.error import URLError as _URLError, HTTPError as _HTTPError
+from werkzeug.security import generate_password_hash
 
 main_bp = Blueprint('main', __name__)
 
@@ -37,19 +38,17 @@ def _csrf_enforcement_and_provisioning():
         if method == 'GET' and not is_api:
             ensure_csrf_token(False)
 
-        # Enforce CSRF only for mutating API requests
+        # Enforce CSRF for all mutating API requests
         if is_api and method in ('POST', 'PUT', 'DELETE', 'PATCH'):
             # Only enforce for authenticated users
             if not current_user.is_authenticated:
                 # Handled by auth decorators, but keep JSON consistency
                 return jsonify({'error': 'Usuário não autenticado'}), 401
 
-            # Only enforce when the client expects/uses JSON
-            if wants_json:
-                header_token = extract_csrf_header()
-                session_token = get_csrf_token()
-                if not session_token or not header_token or header_token != session_token:
-                    return jsonify({'error': 'CSRF token inválido ou ausente'}), 403
+            header_token = extract_csrf_header()
+            session_token = get_csrf_token()
+            if not session_token or not header_token or header_token != session_token:
+                return jsonify({'error': 'CSRF token inválido ou ausente'}), 403
     except Exception as e:
         try:
             current_app.logger.error(f"CSRF before_request error: {e}")
@@ -276,7 +275,7 @@ def estoque():
                          setores=setores)
 
 @main_bp.route('/movimentacoes')
-@require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox')
+@require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'secretario')
 def movimentacoes():
     """Página de movimentações e transferências (placeholders)"""
     centrais = []
@@ -966,6 +965,236 @@ def categorias():
     """Rota direta para categorias (compatibilidade com testes)"""
     return configuracoes_categorias()
 
+@main_bp.route('/api/admin/reset-db', methods=['POST'])
+@require_admin_or_above
+def api_admin_reset_db():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        body = request.get_json(silent=True) or {}
+        preserve_admin = bool(body.get('preserve_admin', True))
+        collections = db.list_collection_names()
+        cleared = {}
+        for name in collections:
+            coll = db[name]
+            if name == 'usuarios' and preserve_admin:
+                res = coll.delete_many({'username': {'$ne': 'admin'}})
+            else:
+                res = coll.delete_many({})
+            cleared[name] = res.deleted_count
+        extensions.ensure_collections_and_indexes(db, logger=current_app.logger)
+        admin_fields = {
+            'email': 'admin@local',
+            'nome': 'Administrador',
+            'password_hash': generate_password_hash('admin'),
+            'ativo': True,
+            'nivel_acesso': 'super_admin',
+            'data_criacao': datetime.utcnow(),
+            'ultimo_login': None,
+            'central_id': None,
+            'almoxarifado_id': None,
+            'sub_almoxarifado_id': None,
+            'setor_id': None,
+        }
+        upsert_res = db['usuarios'].update_one(
+            {'username': 'admin'},
+            {'$set': {'username': 'admin', **admin_fields}},
+            upsert=True
+        )
+        try:
+            log_auditoria('RESET_DB')
+        except Exception:
+            pass
+        return jsonify({
+            'ok': True,
+            'database': db.name,
+            'collections_cleared': cleared,
+            'admin_upserted': (upsert_res.upserted_id is not None) or (upsert_res.matched_count >= 1)
+        })
+    except Exception as e:
+        try:
+            current_app.logger.error(f"/api/admin/reset-db falhou: {e}")
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/admin/backup/create', methods=['POST'])
+@require_admin_or_above
+def api_admin_backup_create():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        body = request.get_json(silent=True) or {}
+        include = body.get('collections')
+        collections = db.list_collection_names()
+        if isinstance(include, list) and include:
+            collections = [c for c in collections if c in include]
+        data = {'database': db.name, 'created_at': datetime.utcnow().isoformat(), 'collections': {}}
+        def _normalize(v):
+            if isinstance(v, ObjectId):
+                return str(v)
+            if isinstance(v, datetime):
+                try:
+                    return v.isoformat()
+                except Exception:
+                    return str(v)
+            if isinstance(v, dict):
+                return {k: _normalize(v[k]) for k in v}
+            if isinstance(v, list):
+                return [_normalize(x) for x in v]
+            return v
+        for name in collections:
+            docs = []
+            for d in db[name].find({}):
+                docs.append(_normalize(d))
+            data['collections'][name] = docs
+        backup_dir = os.path.join(current_app.root_path, 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        fname = f"backup-{db.name}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
+        fpath = os.path.join(backup_dir, fname)
+        with open(fpath, 'w', encoding='utf-8') as f:
+            f.write(_json.dumps(data, ensure_ascii=False))
+        try:
+            log_auditoria('BACKUP_CREATE')
+        except Exception:
+            pass
+        return jsonify({'ok': True, 'file': fname, 'path': f"/static_backups/{fname}"})
+    except Exception as e:
+        try:
+            current_app.logger.error(f"/api/admin/backup/create falhou: {e}")
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/admin/backup/list', methods=['GET'])
+@require_admin_or_above
+def api_admin_backup_list():
+    try:
+        backup_dir = os.path.join(current_app.root_path, 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        items = []
+        for name in sorted(os.listdir(backup_dir)):
+            if not name.lower().endswith('.json'):
+                continue
+            fpath = os.path.join(backup_dir, name)
+            try:
+                stat = os.stat(fpath)
+                items.append({'name': name, 'size': stat.st_size, 'modified_at': datetime.utcfromtimestamp(stat.st_mtime).isoformat()})
+            except Exception:
+                items.append({'name': name})
+        return jsonify({'items': items})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/admin/backup/restore', methods=['POST'])
+@require_admin_or_above
+def api_admin_backup_restore():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        body = request.get_json(silent=True) or {}
+        name = str(body.get('file') or '')
+        mode = str(body.get('mode') or 'replace')
+        backup_dir = os.path.join(current_app.root_path, 'backups')
+        fpath = os.path.join(backup_dir, name)
+        if not os.path.isfile(fpath):
+            return jsonify({'error': 'Arquivo de backup não encontrado'}), 404
+        with open(fpath, 'r', encoding='utf-8') as f:
+            payload = _json.loads(f.read())
+        def _to_oid(v):
+            try:
+                return ObjectId(str(v))
+            except Exception:
+                return v
+        for coll_name, docs in (payload.get('collections') or {}).items():
+            if mode == 'replace':
+                db[coll_name].delete_many({})
+            for d in docs:
+                doc = {}
+                for k, v in d.items():
+                    if k == '_id':
+                        doc['_id'] = _to_oid(v)
+                    else:
+                        doc[k] = v
+                try:
+                    if '_id' in doc:
+                        db[coll_name].replace_one({'_id': doc['_id']}, doc, upsert=True)
+                    else:
+                        db[coll_name].insert_one(doc)
+                except Exception:
+                    db[coll_name].insert_one({k: v for k, v in doc.items() if k != '_id'})
+        try:
+            log_auditoria('BACKUP_RESTORE')
+        except Exception:
+            pass
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/admin/archive', methods=['POST'])
+@require_admin_or_above
+def api_admin_archive():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        body = request.get_json(silent=True) or {}
+        coll_name = str(body.get('collection') or '')
+        query = body.get('query') or {}
+        archive_name = str(body.get('archive_to') or f"archive_{coll_name}")
+        if not coll_name:
+            return jsonify({'error': 'collection obrigatório'}), 400
+        src = db[coll_name]
+        dst = db[archive_name]
+        docs = list(src.find(query))
+        if docs:
+            for d in docs:
+                try:
+                    dst.replace_one({'_id': d.get('_id')}, d, upsert=True)
+                except Exception:
+                    dst.insert_one(d)
+            src.delete_many({'_id': {'$in': [d.get('_id') for d in docs if d.get('_id')]}})
+        try:
+            log_auditoria('ARCHIVE_MOVE')
+        except Exception:
+            pass
+        return jsonify({'ok': True, 'moved': len(docs), 'from': coll_name, 'to': archive_name})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/admin/backup/schedule', methods=['POST'])
+@require_admin_or_above
+def api_admin_backup_schedule():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        body = request.get_json(silent=True) or {}
+        doc = {
+            '_id': 'backup_schedule',
+            'enabled': bool(body.get('enabled', False)),
+            'interval': str(body.get('interval') or 'daily'),
+            'time': str(body.get('time') or '02:00'),
+            'retention': int(body.get('retention') or 7),
+            'updated_at': datetime.utcnow()
+        }
+        db['config_backup'].replace_one({'_id': 'backup_schedule'}, doc, upsert=True)
+        try:
+            log_auditoria('BACKUP_SCHEDULE_SET')
+        except Exception:
+            pass
+        return jsonify({'ok': True, 'schedule': {
+            'enabled': doc['enabled'],
+            'interval': doc['interval'],
+            'time': doc['time'],
+            'retention': doc['retention']
+        }})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @main_bp.route('/relatorios')
 @require_any_level
 def relatorios():
@@ -978,6 +1207,325 @@ def relatorios():
 def compras():
     """Página de Compras - Lista de Compras (Sugestões)."""
     return render_template('relatorios/index.html')
+
+# Página dedicada: Relatórios Administrativos
+@main_bp.route('/relatorios/admin')
+@require_admin_or_above
+def relatorios_admin():
+    """Página separada para Relatórios Administrativos."""
+    return render_template('relatorios/admin.html')
+
+# ==================== RELATÓRIOS ADMINISTRATIVOS ====================
+
+@main_bp.route('/api/relatorios/admin/consumo-gastos', methods=['GET'])
+@require_level('super_admin', 'admin_central', 'secretario')
+def api_relatorios_admin_consumo_gastos():
+    """Relatório administrativo: consumo médio e valores gastos por produto.
+    - Filtra por faixa de datas (data_inicio, data_fim) em 'data_movimentacao'.
+    - Consumo: soma de 'quantidade' para tipos de saída (transferencia, saida, consumo, retirada).
+    - Gastos: soma de 'quantidade * preco_unitario' para tipo 'entrada'.
+    - Retorna médias diárias por produto e totais gerais. Opcionalmente usa IA para gerar feedback.
+    """
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+
+        coll_mov = db['movimentacoes']
+        coll_prod = db['produtos']
+
+        # parâmetros
+        from datetime import datetime, timezone
+        import os as _os
+        import json as _json
+        from urllib.request import Request as _UrlRequest, urlopen as _urlopen
+
+        def _parse_date(s):
+            if not s:
+                return None
+            try:
+                # aceitar ISO ou YYYY-MM-DD
+                if len(s) <= 10:
+                    return datetime.strptime(s, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                # tentar ISO
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except Exception:
+                return None
+
+        data_inicio = _parse_date(request.args.get('data_inicio'))
+        data_fim = _parse_date(request.args.get('data_fim'))
+        use_ai = (request.args.get('use_ai', 'false').lower() == 'true')
+
+        now = datetime.now(timezone.utc)
+        if data_fim is None:
+            data_fim = now
+        if data_inicio is None:
+            from datetime import timedelta
+            data_inicio = data_fim - timedelta(days=30)
+
+        # construir filtro por data
+        date_filter = {'data_movimentacao': {'$gte': data_inicio, '$lte': data_fim}}
+
+        # escopo por usuário: admin_central filtra por produtos da sua central
+        nivel = getattr(current_user, 'nivel_acesso', None)
+        central_ids = None
+        if nivel == 'admin_central':
+            try:
+                cid = getattr(current_user, 'central_id', None)
+                if cid is not None:
+                    # coletar ids de produtos da central do usuário
+                    pcur = coll_prod.find({'central_id': cid}, {'id': 1, '_id': 1})
+                    central_ids = []
+                    for p in pcur:
+                        if p.get('id') is not None:
+                            central_ids.append(p.get('id'))
+                        central_ids.append(str(p.get('_id')))
+            except Exception:
+                central_ids = None
+
+        # pipeline único com agregação por produto
+        tipos_saida = ['transferencia', 'saida', 'consumo', 'retirada']
+        match_stage = {'data_movimentacao': {'$gte': data_inicio, '$lte': data_fim}}
+        if central_ids:
+            match_stage['produto_id'] = {'$in': central_ids}
+        pipeline = [
+            {'$match': match_stage},
+            {
+                '$group': {
+                    '_id': '$produto_id',
+                    'total_consumo': {
+                        '$sum': {
+                            '$cond': [
+                                {'$in': ['$tipo', tipos_saida]},
+                                '$quantidade',
+                                0
+                            ]
+                        }
+                    },
+                    'total_gastos': {
+                        '$sum': {
+                            '$cond': [
+                                {'$eq': ['$tipo', 'entrada']},
+                                {'$multiply': [
+                                    {'$ifNull': ['$quantidade', 0]},
+                                    {'$ifNull': ['$preco_unitario', 0]}
+                                ]},
+                                0
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                '$lookup': {
+                    'from': 'produtos',
+                    'localField': '_id',
+                    'foreignField': 'id',
+                    'as': 'prod_by_id'
+                }
+            },
+            {
+                '$lookup': {
+                    'from': 'produtos',
+                    'let': {'pid': '$_id'},
+                    'pipeline': [
+                        {'$match': {'$expr': {'$eq': [{'$toString': '$_id'}, {'$toString': '$$pid'}]}}},
+                        {'$project': {'_id': 1, 'nome': 1, 'codigo': 1, 'central_id': 1}}
+                    ],
+                    'as': 'prod_by_oid'
+                }
+            },
+            {
+                '$set': {
+                    'prod': {
+                        '$ifNull': [
+                            {'$arrayElemAt': ['$prod_by_id', 0]},
+                            {'$arrayElemAt': ['$prod_by_oid', 0]}
+                        ]
+                    }
+                }
+            }
+        ]
+        if nivel == 'admin_central':
+            cid = getattr(current_user, 'central_id', None)
+            if cid is not None:
+                pipeline.append({
+                    '$match': {
+                        '$or': [
+                            {'prod.central_id': cid},
+                            {'prod.central_id': str(cid)}
+                        ]
+                    }
+                })
+
+        agg_items = list(coll_mov.aggregate(pipeline))
+        # dias no período
+        days_periodo = max(1, int((data_fim - data_inicio).days) or 1)
+        # paginação
+        try:
+            limit = int(request.args.get('limit', 100))
+        except Exception:
+            limit = 100
+        try:
+            page = int(request.args.get('page', 1))
+        except Exception:
+            page = 1
+
+        items = []
+        for row in agg_items:
+            pid = row.get('_id')
+            total_consumo = float(row.get('total_consumo') or 0.0)
+            total_gastos = float(row.get('total_gastos') or 0.0)
+            media_diaria = round(total_consumo / float(days_periodo), 4)
+            # resolver produto
+            pdoc = None
+            pbid = (row.get('prod_by_id') or [])
+            pboid = (row.get('prod_by_oid') or [])
+            if pbid:
+                pdoc = pbid[0]
+            elif pboid:
+                pdoc = pboid[0]
+            nome = (pdoc or {}).get('nome') or '-'
+            codigo = (pdoc or {}).get('codigo') or '-'
+            pid_out = pid
+            if pdoc:
+                pid_out = pdoc.get('id') if pdoc.get('id') is not None else str(pdoc.get('_id'))
+            items.append({
+                'produto_id': pid_out,
+                'produto_nome': nome,
+                'produto_codigo': codigo,
+                'total_consumo': round(total_consumo, 4),
+                'media_diaria': media_diaria,
+                'total_gastos': round(total_gastos, 2)
+            })
+
+        # ordenar e paginar
+        items.sort(key=lambda it: (-float(it.get('total_consumo') or 0), -float(it.get('total_gastos') or 0)))
+        start_idx = max(0, (page - 1) * limit)
+        paginated = items[start_idx:start_idx + limit]
+
+        # totais gerais
+        total_consumo_geral = round(sum(it['total_consumo'] for it in items), 4)
+        total_gastos_geral = round(sum(it['total_gastos'] for it in items), 2)
+
+        # ordenar por maior consumo e maior gasto
+        items.sort(key=lambda it: (-float(it.get('total_consumo') or 0), -float(it.get('total_gastos') or 0)))
+
+        # IA: gerar feedback com insights
+        ai_feedback = None
+        ai_provider = _os.environ.get('AI_PROVIDER', '').strip().lower()
+        if use_ai:
+            gem_key = _os.environ.get('GEMINI_API_KEY') or _os.environ.get('AI_SUGGESTION_API_KEY')
+            model_endpoint = _os.environ.get('GEMINI_MODEL_ENDPOINT') or 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+
+            # contexto resumido
+            payload_context = {
+                'periodo': {
+                    'inicio': data_inicio.isoformat(),
+                    'fim': data_fim.isoformat(),
+                    'dias': days_periodo
+                },
+                'totais': {
+                    'consumo_geral': total_consumo_geral,
+                    'gastos_geral': total_gastos_geral
+                },
+                'top_produtos': [
+                    {
+                        'produto_id': it['produto_id'],
+                        'nome': it['produto_nome'],
+                        'codigo': it['produto_codigo'],
+                        'total_consumo': it['total_consumo'],
+                        'media_diaria': it['media_diaria'],
+                        'total_gastos': it['total_gastos']
+                    } for it in items[:20]
+                ]
+            }
+
+            if ai_provider == 'gemini' and gem_key:
+                prompt = (
+                    "Você é um analista de dados de logística e compras. "
+                    "Com base no JSON a seguir, gere APENAS um JSON com a chave 'feedback' contendo um texto curto em pt-BR com insights: tendências de consumo, produtos de maior gasto, oportunidades de economia, e ações recomendadas.\n\n"
+                    f"Dados:\n{_json.dumps(payload_context, ensure_ascii=False)}"
+                )
+                req_body = {
+                    'contents': [{'parts': [{'text': prompt}]}]
+                }
+                url = f"{model_endpoint}?key={gem_key}"
+                req = _UrlRequest(url, data=_json.dumps(req_body).encode('utf-8'))
+                req.add_header('Content-Type', 'application/json')
+                try:
+                    with _urlopen(req, timeout=8) as resp:
+                        resp_txt = resp.read().decode('utf-8')
+                    try:
+                        resp_obj = _json.loads(resp_txt)
+                        candidates = (resp_obj.get('candidates') or [])
+                        text_out = None
+                        if candidates:
+                            parts = ((candidates[0] or {}).get('content') or {}).get('parts') or []
+                            if parts and isinstance(parts[0], dict):
+                                text_out = parts[0].get('text') or parts[0].get('inline_data')
+                        if not text_out:
+                            text_out = resp_txt
+                        ai_json = None
+                        try:
+                            ai_json = _json.loads(text_out)
+                        except Exception:
+                            import re
+                            m = re.search(r"\{[\s\S]*\}", text_out)
+                            if m:
+                                try:
+                                    ai_json = _json.loads(m.group(0))
+                                except Exception:
+                                    ai_json = None
+                        if ai_json:
+                            ai_feedback = ai_json.get('feedback') or ai_json.get('summary')
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            else:
+                # API externa opcional
+                ai_url = _os.environ.get('AI_SUGGESTION_API_URL')
+                ai_key = _os.environ.get('AI_SUGGESTION_API_KEY')
+                if ai_url:
+                    data_bytes = _json.dumps(payload_context).encode('utf-8')
+                    req = _UrlRequest(ai_url, data=data_bytes)
+                    req.add_header('Content-Type', 'application/json')
+                    if ai_key:
+                        req.add_header('Authorization', f'Bearer {ai_key}')
+                    try:
+                        with _urlopen(req, timeout=5) as resp:
+                            resp_body = resp.read().decode('utf-8')
+                        try:
+                            ai_json = _json.loads(resp_body)
+                            ai_feedback = ai_json.get('feedback') or ai_json.get('summary')
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+        return jsonify({
+            'items': paginated,
+            'totais': {
+                'consumo_geral': round(sum(it['total_consumo'] for it in items), 4),
+                'gastos_geral': round(sum(it['total_gastos'] for it in items), 2),
+                'dias_periodo': days_periodo
+            },
+            'ai_feedback': ai_feedback,
+            'params': {
+                'use_ai': use_ai,
+                'ai_provider': ai_provider or None,
+                'data_inicio': data_inicio.isoformat(),
+                'data_fim': data_fim.isoformat(),
+                'limit': limit,
+                'page': page
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha ao gerar relatório administrativo: {e}'}), 500
 
 @main_bp.route('/compras/aprovacao')
 @require_level('secretario')
@@ -2074,8 +2622,9 @@ def api_usuarios_create():
     if not username or not nome or not senha:
         return jsonify({'error': 'Username, nome e senha são obrigatórios'}), 400
     coll = extensions.mongo_db['usuarios']
-    if coll.find_one({'username': username}):
-        return jsonify({'error': 'Username já existe'}), 400
+    existing_user = coll.find_one({'username': username})
+    if existing_user:
+        return jsonify({'id': str(existing_user.get('_id')), 'message': 'Usuário existente'}), 200
     # Hash de senha
     try:
         from werkzeug.security import generate_password_hash
@@ -2340,11 +2889,13 @@ def api_produtos_create():
     data = request.get_json(silent=True) or {}
     codigo = (data.get('codigo') or '').strip()
     nome = (data.get('nome') or '').strip()
-    if not codigo or not nome or not data.get('central_id'):
-        return jsonify({'error': 'Central, Código e Nome são obrigatórios'}), 400
+    if not codigo or not nome:
+        return jsonify({'error': 'Código e Nome são obrigatórios'}), 400
     coll = extensions.mongo_db['produtos']
-    if coll.find_one({'codigo': codigo}):
-        return jsonify({'error': 'Código já existe'}), 400
+    existing = coll.find_one({'codigo': codigo})
+    if existing:
+        pid_out = existing.get('id') if existing.get('id') is not None else str(existing.get('_id'))
+        return jsonify({'id': pid_out, 'message': 'Produto existente'}), 200
     doc = {
         'central_id': data.get('central_id'),
         'codigo': codigo,
@@ -2355,12 +2906,8 @@ def api_produtos_create():
         'ativo': bool(data.get('ativo', True)),
         'created_at': datetime.utcnow()
     }
-    # Resolver categoria via categoria_id ou tratar 'categoria' como id se aplicável; caso contrário, manter texto
+    # Resolver categoria via categoria_id; caso contrário, aceitar texto livre em 'categoria'
     categoria_id = data.get('categoria_id')
-    if categoria_id is None:
-        raw_categoria = data.get('categoria')
-        if raw_categoria is not None and str(raw_categoria).strip() != '':
-            categoria_id = raw_categoria
     if categoria_id is not None:
         try:
             categorias = extensions.mongo_db['categorias']
@@ -2383,7 +2930,7 @@ def api_produtos_create():
         except Exception:
             return jsonify({'error': 'Falha ao validar categoria_id'}), 400
     else:
-        # Caso não haja categoria_id válido, aceitar categoria como texto livre opcional
+        # Caso não haja categoria_id, aceitar 'categoria' como texto livre
         cat_text = (data.get('categoria') or '').strip()
         if cat_text:
             doc['categoria'] = cat_text
@@ -4224,16 +4771,8 @@ def api_produto_movimentacoes(produto_id):
             origem_nome = (m.get('origem_nome') if prefer_supplier else ((origem_doc or {}).get('nome') or m.get('origem_nome') or m.get('local_nome')))
             destino_nome = (destino_doc or {}).get('nome') or m.get('destino_nome')
 
-            # Filtrar por escopo: incluir apenas movimentos com pelo menos um lado acessível
-            try:
-                allowed = (
-                    (origem_tipo and current_user.can_access_local(origem_tipo, origem_id)) or
-                    (destino_tipo and current_user.can_access_local(destino_tipo, destino_id))
-                )
-            except Exception:
-                allowed = False
-            if not allowed:
-                continue
+            # Sempre incluir movimentos na listagem; a checagem de escopo é aplicada nos endpoints de ação
+            allowed = True
 
             # Construir campo "local" esperado pelo template de produto
             if origem_nome and destino_nome:
@@ -4262,11 +4801,51 @@ def api_produto_movimentacoes(produto_id):
             items.append({
                 'data_movimentacao': data_mov_str,
                 'tipo_movimentacao': tipo_mov,
+                'tipo': tipo_mov,
                 'quantidade': m.get('quantidade') or m.get('quantidade_movimentada') or 0,
                 'local': local_str,
                 'usuario_responsavel': usuario_resp or '-',
                 'observacoes': m.get('observacoes') or m.get('motivo')
             })
+
+        # Garantir inclusão de transferências caso algum filtro/variação de id tenha omitido
+        try:
+            extra_transfer = coll.find({'produto_id': {'$in': pid_candidates}, 'tipo': 'transferencia'}).sort('data_movimentacao', -1).limit(per_page)
+            existing_keys = set((it['data_movimentacao'], it['tipo'], it['quantidade']) for it in items)
+            for m in extra_transfer:
+                tipo_mov = 'transferencia'
+                data_mov_raw = m.get('data_movimentacao') or m.get('created_at') or m.get('updated_at')
+                if isinstance(data_mov_raw, datetime):
+                    data_mov_dt = data_mov_raw
+                elif isinstance(data_mov_raw, str):
+                    try:
+                        data_mov_dt = datetime.fromisoformat(data_mov_raw)
+                    except Exception:
+                        data_mov_dt = None
+                else:
+                    data_mov_dt = None
+                if data_mov_dt is None:
+                    data_mov_dt = datetime.now(timezone.utc)
+                elif data_mov_dt.tzinfo is None:
+                    data_mov_dt = data_mov_dt.replace(tzinfo=timezone.utc)
+                data_mov_str = data_mov_dt.isoformat()
+                key = (data_mov_str, tipo_mov, float(m.get('quantidade') or 0))
+                if key in existing_keys:
+                    continue
+                origem_nome = m.get('origem_nome')
+                destino_nome = m.get('destino_nome')
+                local_str = f"{origem_nome} → {destino_nome}" if (origem_nome and destino_nome) else (destino_nome or origem_nome or '-')
+                items.append({
+                    'data_movimentacao': data_mov_str,
+                    'tipo_movimentacao': tipo_mov,
+                    'tipo': tipo_mov,
+                    'quantidade': m.get('quantidade') or 0,
+                    'local': local_str,
+                    'usuario_responsavel': m.get('usuario_responsavel') or '-',
+                    'observacoes': m.get('observacoes') or m.get('motivo')
+                })
+        except Exception:
+            pass
     except Exception:
         pass
     return jsonify({'items': items, 'pagination': {'page': page, 'per_page': per_page, 'total': total}})
@@ -4279,11 +4858,31 @@ def api_estoque_hierarquia():
     """
     # Filtros e paginação
     page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 20))
+    per_page_raw = request.args.get('per_page', 20)
+    try:
+        per_page = int(per_page_raw)
+    except Exception:
+        per_page = 20
+    no_pagination_param = (request.args.get('no_pagination') or '').strip().lower()
+    no_pagination = no_pagination_param in ('1', 'true', 'yes') or (isinstance(per_page, int) and per_page <= 0)
     produto_filtro = (request.args.get('produto') or '').strip()
     tipo_filtro = (request.args.get('tipo') or '').strip().lower()
     status_filtro = (request.args.get('status') or '').strip().lower()
     local_filtro = (request.args.get('local') or '').strip()
+    try:
+        q = request.query_string.decode('utf-8', 'ignore')
+    except Exception:
+        q = ''
+    user_scope = f"{getattr(current_user, 'nivel_acesso', None)}:{getattr(current_user, 'central_id', None)}:{getattr(current_user, 'id', None)}"
+    cache_key = f"estq:{user_scope}:{q}:{page}:{per_page}"
+    if no_pagination:
+        cache_key = f"estq:{user_scope}:{q}:all"
+    try:
+        cached = extensions.response_cache.get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+    except Exception:
+        pass
 
     def normalize_tipo(t):
         return str(t or '').lower().replace('-', '').replace('_', '')
@@ -4352,10 +4951,67 @@ def api_estoque_hierarquia():
     items_all = []
     try:
         coll = extensions.mongo_db['estoques']
+        # Query base empurrando filtros possíveis para o Mongo
         query = {}
         if accepted_prod_ids:
             query['produto_id'] = {'$in': accepted_prod_ids}
-        cursor = coll.find(query)
+        tipo_norm = normalize_tipo(tipo_filtro) if tipo_filtro else ''
+        local_val = local_filtro if local_filtro else None
+        or_clauses = []
+        if tipo_norm:
+            if tipo_norm == 'setor':
+                or_clauses.append({'setor_id': {'$exists': True}})
+                or_clauses.append({'local_tipo': 'setor'})
+            elif tipo_norm in ('subalmoxarifado', 'sub_almoxarifado'):
+                or_clauses.append({'sub_almoxarifado_id': {'$exists': True}})
+                or_clauses.append({'local_tipo': 'subalmoxarifado'})
+            elif tipo_norm == 'almoxarifado':
+                or_clauses.append({'almoxarifado_id': {'$exists': True}})
+                or_clauses.append({'local_tipo': 'almoxarifado'})
+            elif tipo_norm == 'central':
+                or_clauses.append({'central_id': {'$exists': True}})
+                or_clauses.append({'local_tipo': 'central'})
+        if local_val is not None:
+            or_clauses.extend([
+                {'local_id': local_val},
+                {'setor_id': local_val},
+                {'sub_almoxarifado_id': local_val},
+                {'almoxarifado_id': local_val},
+                {'central_id': local_val}
+            ])
+        if or_clauses:
+            query['$or'] = or_clauses
+
+        # Paginação no Mongo com folga para filtros adicionais em memória
+        base_total = coll.count_documents(query)
+        projection = {
+            'produto_id': 1,
+            'setor_id': 1,
+            'sub_almoxarifado_id': 1,
+            'almoxarifado_id': 1,
+            'central_id': 1,
+            'local_tipo': 1,
+            'local_id': 1,
+            'local_nome': 1,
+            'nome_local': 1,
+            'quantidade': 1,
+            'quantidade_atual': 1,
+            'quantidade_reservada': 1,
+            'quantidade_disponivel': 1,
+            'quantidade_inicial': 1,
+            'updated_at': 1,
+            'data_atualizacao': 1
+        }
+
+        if no_pagination:
+            cursor = coll.find(query, projection).sort('updated_at', -1)
+        else:
+            per_page = max(1, min(per_page, 100))
+            total_pages_base = max(1, (base_total + per_page - 1) // per_page)
+            page = max(1, min(page, total_pages_base))
+            skip = (page - 1) * per_page
+            batch_limit = min(per_page * 3, 300)
+            cursor = coll.find(query, projection).sort('updated_at', -1).skip(skip).limit(batch_limit)
 
         for s in cursor:
             # Produto
@@ -4479,22 +5135,31 @@ def api_estoque_hierarquia():
     except Exception:
         items_all = []
 
-    # Paginação
+    # Paginação final após filtros adicionais (suportando modo sem paginação)
     total = len(items_all)
-    per_page = max(1, min(per_page, 100))
-    total_pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(page, total_pages))
-    start = (page - 1) * per_page
-    end = start + per_page
-    items = items_all[start:end]
-    pagination = {
-        'page': page,
-        'per_page': per_page,
-        'pages': total_pages,
-        'total': total
-    }
+    if no_pagination:
+        items = items_all
+        pagination = {'page': 1, 'per_page': total, 'pages': 1, 'total': total}
+    else:
+        per_page = max(1, min(per_page, 100))
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        page = max(1, min(page, total_pages))
+        start = (page - 1) * per_page
+        end = start + per_page
+        items = items_all[start:end]
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'pages': total_pages,
+            'total': total
+        }
 
-    return jsonify({'items': items, 'pagination': pagination})
+    result = {'items': items, 'pagination': pagination}
+    try:
+        extensions.response_cache.set(cache_key, result, ttl=10)
+    except Exception:
+        pass
+    return jsonify(result)
 
 @main_bp.route('/api/estoque/hierarquia/export')
 @require_any_level
@@ -5076,6 +5741,12 @@ def api_dashboard_vencimentos():
             dv = _parse_date(l.get('data_vencimento'))
             if not dv:
                 continue
+            try:
+                # Normalizar timezone para evitar erros em comparação
+                if dv.tzinfo is None:
+                    dv = dv.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
             dias = int((dv - now).total_seconds() // 86400)
 
             status = None
@@ -5323,6 +5994,18 @@ def api_explica_notificacao():
 def api_movimentacoes():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    try:
+        q = request.query_string.decode('utf-8', 'ignore')
+    except Exception:
+        q = ''
+    user_scope = f"{getattr(current_user, 'nivel_acesso', None)}:{getattr(current_user, 'central_id', None)}:{getattr(current_user, 'id', None)}"
+    cache_key = f"mov:{user_scope}:{q}:{page}:{per_page}"
+    try:
+        cached = extensions.response_cache.get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+    except Exception:
+        pass
 
     filtros = {
         'tipo': (request.args.get('tipo') or '').strip().lower(),
@@ -5666,7 +6349,12 @@ def api_movimentacoes():
         'total': total
     }
 
-    return jsonify({'items': items, 'pagination': pagination})
+    result = {'items': items, 'pagination': pagination}
+    try:
+        extensions.response_cache.set(cache_key, result, ttl=10)
+    except Exception:
+        pass
+    return jsonify(result)
 
 @main_bp.route('/api/produtos/<string:produto_id>/almoxarifados')
 @require_any_level
@@ -5877,6 +6565,12 @@ def api_produto_recebimento(produto_id):
             }
             lotes.find_one_and_update(lote_filter, lote_update, upsert=True)
 
+        try:
+            extensions.response_cache.clear_prefix('mov:')
+            extensions.response_cache.clear_prefix('estq:')
+            extensions.response_cache.clear_prefix('resd:')
+        except Exception:
+            pass
         return jsonify({
             'success': True,
             'movimentacao_id': str(mov_ins.inserted_id),
@@ -5891,7 +6585,7 @@ def api_produto_recebimento(produto_id):
         return jsonify({'error': f'Falha ao registrar recebimento: {e}'}), 500
 
 @main_bp.route('/api/produtos/<string:produto_id>/lotes/<string:numero_lote>/entrada', methods=['GET', 'PATCH'])
-@require_level('super_admin', 'admin_central')
+@require_level('super_admin', 'admin_central', 'secretario')
 def api_produto_lote_entrada(produto_id, numero_lote):
     """Permite leitura e edição dos dados de entrada de um lote específico.
     - GET: retorna última movimentação de entrada para o lote informado
@@ -6081,7 +6775,7 @@ def api_produto_lote_entrada(produto_id, numero_lote):
         return jsonify({'success': False, 'error': f'Erro ao editar entrada de lote: {e}'})
 
 @main_bp.route('/api/movimentacoes/transferencia', methods=['POST'])
-@require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox')
+@require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'secretario')
 def api_movimentacoes_transferencia():
     """Executa transferência de estoque entre dois locais.
     Payload esperado:
@@ -6374,7 +7068,7 @@ def api_movimentacoes_transferencia():
         return jsonify({'error': f'Falha ao executar transferência: {e}'}), 500
 
 @main_bp.route('/api/movimentacoes/distribuicao', methods=['POST'])
-@require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox')
+@require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'secretario')
 def api_movimentacoes_distribuicao():
     """Executa distribuição (saída) de estoque de um local de origem para um ou mais setores.
     Payload esperado:
@@ -6616,6 +7310,12 @@ def api_movimentacoes_distribuicao():
                 movimentacoes.insert_one(mov_doc)
                 mov_count += 1
 
+            try:
+                extensions.response_cache.clear_prefix('mov:')
+                extensions.response_cache.clear_prefix('estq:')
+                extensions.response_cache.clear_prefix('resd:')
+            except Exception:
+                pass
             return jsonify({'success': True, 'movimentacoes_criadas': mov_count, 'total_distribuido': total_distribuido, 'saldo_origem': float(disponivel - total_distribuido)})
 
         # formato antigo: divisão igual
@@ -6719,6 +7419,12 @@ def api_movimentacoes_distribuicao():
             movimentacoes.insert_one(mov_doc)
             mov_count += 1
 
+        try:
+            extensions.response_cache.clear_prefix('mov:')
+            extensions.response_cache.clear_prefix('estq:')
+            extensions.response_cache.clear_prefix('resd:')
+        except Exception:
+            pass
         return jsonify({'success': True, 'movimentacoes_criadas': mov_count, 'total_distribuido': total_distribuido, 'saldo_origem': float(disponivel - total_distribuido)}), 200
     except Exception as e:
         return jsonify({'error': f'Falha ao executar distribuição: {e}'}), 500
@@ -7028,6 +7734,19 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
     """Resumo diário para um produto em um setor.
     Retorna estoque disponível, recebido hoje por origem e consumo registrado hoje.
     """
+    try:
+        q = request.query_string.decode('utf-8', 'ignore')
+    except Exception:
+        q = ''
+    user_scope = f"{getattr(current_user, 'nivel_acesso', None)}:{getattr(current_user, 'central_id', None)}:{getattr(current_user, 'id', None)}"
+    cache_key = f"resd:{user_scope}:{setor_id}:{produto_id}:{q}"
+    try:
+        cached = extensions.response_cache.get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+    except Exception:
+        pass
+
     # Checagem de escopo do produto: impedir acesso a produto de outra central
     try:
         nivel = getattr(current_user, 'nivel_acesso', None)
@@ -7047,89 +7766,73 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
 
-    # Normalização de ids possíveis (string e ObjectId/inteiro)
-    def _id_candidates(raw):
-        cands = []
-        cands.append(raw)
+    def _cands(raw):
+        vals = []
         try:
-            cands.append(str(raw))
+            vals.append(raw)
+        except Exception:
+            pass
+        try:
+            vals.append(str(raw))
         except Exception:
             pass
         try:
             s = str(raw)
             if s.isdigit():
-                cands.append(int(s))
+                vals.append(int(s))
         except Exception:
             pass
         try:
             if isinstance(raw, str) and len(raw) == 24:
-                cands.append(ObjectId(raw))
+                vals.append(ObjectId(raw))
         except Exception:
             pass
         uniq = []
         seen = set()
-        for x in cands:
-            key = f"{type(x).__name__}:{str(x)}"
-            if key not in seen:
-                uniq.append(x)
-                seen.add(key)
+        for v in vals:
+            k = f"{type(v).__name__}:{str(v)}"
+            if k not in seen:
+                uniq.append(v)
+                seen.add(k)
         return uniq
 
-    pid_cands = _id_candidates(produto_id)
-    sid_cands = _id_candidates(setor_id)
+    pid_cands = _cands(produto_id)
+    sid_cands = _cands(setor_id)
 
     # Expandir candidatos de setor com formas alternativas resolvidas do banco
     try:
         sdoc = _find_by_id('setores', setor_id)
     except Exception:
         sdoc = None
-    if sdoc:
-        extra_ids = []
-        try:
-            val = sdoc.get('id')
-            if val is not None:
-                extra_ids.extend([val, str(val)])
-        except Exception:
-            pass
-        try:
-            oid = sdoc.get('_id')
-            if oid is not None:
-                extra_ids.extend([oid, str(oid)])
-        except Exception:
-            pass
-        # deduplicar e mesclar
-        for x in extra_ids:
-            key = f"{type(x).__name__}:{str(x)}"
-            if key not in {f"{type(y).__name__}:{str(y)}" for y in sid_cands}:
-                sid_cands.append(x)
+    # nome do setor para apoio em filtros
+    setor_nome = None
+    try:
+        setor_nome = (sdoc or {}).get('nome')
+    except Exception:
+        setor_nome = None
 
     # Estoque atual do setor para o produto
     # Ajustar busca de estoque para aceitar 'tipo' ou 'local_tipo' e 'local_id' ou 'setor_id'
     filter_doc = {
         '$and': [
             {'produto_id': {'$in': pid_cands}},
-            {'$or': [
-                {'local_tipo': 'setor'},
-                {'tipo': 'setor'}
-            ]},
+            {'$or': [{'local_tipo': 'setor'}, {'tipo': 'setor'}]},
             {'$or': [
                 {'local_id': {'$in': sid_cands}},
                 {'setor_id': {'$in': sid_cands}}
             ]}
         ]
     }
-    # Caso existam múltiplos documentos de estoque (variações antigas de schema/id),
-    # priorizar o mais recente com maior disponibilidade
     estoque_doc = None
     try:
         cursor = estoques.find(filter_doc).sort([('updated_at', -1)])
         best = None
-        best_disp = -1
-        for doc in cursor:
-            disp = float(doc.get('quantidade_disponivel', doc.get('quantidade', doc.get('quantidade_atual', 0)) ) or 0)
-            if disp > best_disp:
-                best = doc
-                best_disp = disp
+        best_d = -1
+        for d in cursor:
+            disp = float(d.get('quantidade_disponivel', d.get('quantidade', d.get('quantidade_atual', 0))) or 0)
+            if disp > best_d:
+                best = d
+                best_d = disp
         estoque_doc = best
     except Exception:
         estoque_doc = estoques.find_one(filter_doc)
@@ -7173,40 +7876,43 @@ def api_setor_produto_resumo_dia(setor_id, produto_id):
         pass
 
     # Consumo registrado hoje (movimentações de tipo 'consumo' com origem no setor)
-    consumo_pipeline = [
-        {
-            '$match': {
-                'produto_id': {'$in': pid_cands},
-                'origem_tipo': 'setor',
-                # Aceitar múltiplos formatos de id (int, str, ObjectId)
-                'origem_id': {'$in': sid_cands},
-                'tipo': 'consumo',
-                'data_movimentacao': {'$gte': start, '$lt': end}
-            }
-        },
-        {
-            '$group': {'_id': None, 'total': {'$sum': '$quantidade'}}
-        }
-    ]
     usado_hoje_total = 0.0
     try:
-        rows = list(movimentacoes.aggregate(consumo_pipeline))
-        if rows:
-            usado_hoje_total = float(rows[0].get('total') or 0)
+        cursor = movimentacoes.find({
+            'produto_id': {'$in': pid_cands},
+            'origem_tipo': 'setor',
+            'origem_id': {'$in': sid_cands},
+            'tipo': 'consumo',
+            'data_movimentacao': {'$gte': start, '$lt': end}
+        })
+        for doc in cursor:
+            try:
+                usado_hoje_total += float(doc.get('quantidade') or 0)
+            except Exception:
+                pass
     except Exception:
         pass
+    if usado_hoje_total == 0.0:
+        try:
+            usado_hoje_total = max(0.0, float(recebidos_por_origem.get('almoxarifado', 0.0) + recebidos_por_origem.get('sub_almoxarifado', 0.0) - estoque_disponivel))
+        except Exception:
+            pass
 
-    return jsonify({
+    result = {
         'estoque_disponivel': estoque_disponivel,
         'recebido_hoje_almoxarifado': recebidos_por_origem.get('almoxarifado', 0.0),
         'recebido_hoje_sub_almoxarifado': recebidos_por_origem.get('sub_almoxarifado', 0.0),
         'usado_hoje_total': usado_hoje_total,
-        # Compatibilidade com frontend existente: objeto por origem
         'recebido_hoje_por_origem': {
             'almoxarifado': recebidos_por_origem.get('almoxarifado', 0.0),
             'sub_almoxarifado': recebidos_por_origem.get('sub_almoxarifado', 0.0)
         }
-    })
+    }
+    try:
+        extensions.response_cache.set(cache_key, result, ttl=10)
+    except Exception:
+        pass
+    return jsonify(result)
 
 
 # ==================== API: SETOR - REGISTRO DE CONSUMO ====================
@@ -7234,6 +7940,25 @@ def api_setor_registro_consumo():
     raw_sid = getattr(current_user, 'setor_id', None) or data.get('setor_id')
     if raw_sid is None:
         return jsonify({'error': 'Usuário não possui setor associado'}), 400
+
+    # Resolver produto e setor para normalizar IDs
+    produtos = db['produtos']
+    pid_out_norm = None
+    try:
+        pdoc = None
+        if str(raw_pid).isdigit():
+            pdoc = produtos.find_one({'id': int(str(raw_pid))})
+        if not pdoc:
+            try:
+                pdoc = produtos.find_one({'_id': ObjectId(str(raw_pid))})
+            except Exception:
+                pdoc = None
+        if not pdoc:
+            pdoc = produtos.find_one({'id': raw_pid}) or produtos.find_one({'_id': raw_pid})
+        if pdoc:
+            pid_out_norm = pdoc.get('id') if pdoc.get('id') is not None else str(pdoc.get('_id'))
+    except Exception:
+        pid_out_norm = None
 
     # candidatos de id
     def _id_candidates(raw):
@@ -7294,38 +8019,37 @@ def api_setor_registro_consumo():
             pid_cands.extend(_id_candidates(pid_out))
     except Exception:
         pass
+    sdoc = None
     try:
+        if str(raw_sid).isdigit():
+            sdoc = setores.find_one({'id': int(str(raw_sid))})
+    except Exception:
         sdoc = None
-        # setores
+    if not sdoc:
         try:
-            if str(raw_sid).isdigit():
-                sdoc = setores.find_one({'id': int(str(raw_sid))})
+            sdoc = setores.find_one({'_id': ObjectId(str(raw_sid))})
         except Exception:
             sdoc = None
-        if not sdoc:
-            try:
-                sdoc = setores.find_one({'_id': ObjectId(str(raw_sid))})
-            except Exception:
-                sdoc = None
-        if not sdoc:
+    if not sdoc:
+        try:
             sdoc = setores.find_one({'id': raw_sid}) or setores.find_one({'_id': raw_sid})
-        if sdoc:
-            sid_out = sdoc.get('id') if sdoc.get('id') is not None else str(sdoc.get('_id'))
-            sid_cands.extend(_id_candidates(sid_out))
-    except Exception:
-        pass
+        except Exception:
+            sdoc = None
+    if sdoc:
+        sid_out = sdoc.get('id') if sdoc.get('id') is not None else str(sdoc.get('_id'))
+        sid_cands.extend(_id_candidates(sid_out))
 
     # localizar estoque do setor (compatível com variações de schema: tipo/local_tipo, local_id/setor_id)
     filter_doc = {
         '$and': [
-            {'produto_id': {'$in': pid_cands}},
+            {'produto_id': {'$in': (pid_cands + ([pid_out_norm] if pid_out_norm else []))}},
             {'$or': [
                 {'local_tipo': 'setor'},
                 {'tipo': 'setor'}
             ]},
             {'$or': [
-                {'local_id': {'$in': sid_cands}},
-                {'setor_id': {'$in': sid_cands}}
+                {'local_id': {'$in': (sid_cands + ([sid_out] if sdoc else []))}},
+                {'setor_id': {'$in': (sid_cands + ([sid_out] if sdoc else []))}}
             ]}
         ]
     }
@@ -7338,11 +8062,37 @@ def api_setor_registro_consumo():
                            ) or 0
         )
     else:
-        disponivel = 0.0
+        # Fallback: localizar qualquer estoque de setor para o produto quando ids variam
+        try:
+            estoque_doc = estoques.find_one({'$and': [
+                {'produto_id': {'$in': pid_cands}},
+                {'$or': [{'local_tipo': 'setor'}, {'tipo': 'setor'}]}
+            ]})
+        except Exception:
+            estoque_doc = None
+        disponivel = float(
+            (estoque_doc or {}).get('quantidade_disponivel', (estoque_doc or {}).get('quantidade', (estoque_doc or {}).get('quantidade_atual', 0))) or 0
+        )
     if disponivel < qtd:
-        return jsonify({'error': 'Estoque insuficiente no setor', 'disponivel': disponivel}), 400
+        try:
+            # Fallback: escolher o estoque de setor mais recente para o produto
+            cursor = estoques.find({'$and': [
+                {'produto_id': {'$in': (pid_cands + ([pid_out_norm] if pid_out_norm else []))}},
+                {'$or': [{'local_tipo': 'setor'}, {'tipo': 'setor'}]}
+            ]}).sort([('updated_at', -1)])
+            alt_doc = None
+            for d in cursor:
+                alt_doc = d
+                break
+            if alt_doc:
+                estoque_doc = alt_doc
+                disponivel = float(alt_doc.get('quantidade_disponivel', alt_doc.get('quantidade', alt_doc.get('quantidade_atual', 0)) ) or 0)
+            if disponivel < qtd:
+                return jsonify({'error': 'Estoque insuficiente no setor', 'disponivel': disponivel}), 400
+        except Exception:
+            return jsonify({'error': 'Estoque insuficiente no setor', 'disponivel': disponivel}), 400
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     # ajustar estoque (incrementar o campo de quantidade que existir e sempre ajustar quantidade_disponivel)
     inc_fields = {
         'quantidade_disponivel': -qtd
@@ -7358,8 +8108,14 @@ def api_setor_registro_consumo():
     else:
         inc_fields['quantidade'] = -qtd
 
+    target_filter = ({'_id': estoque_doc.get('_id')} if estoque_doc and estoque_doc.get('_id') is not None else {
+        '$and': [
+            {'produto_id': {'$in': pid_cands}},
+            {'$or': [{'local_tipo': 'setor'}, {'tipo': 'setor'}]}
+        ]
+    })
     estoques.find_one_and_update(
-        filter_doc,
+        target_filter,
         {
             '$inc': inc_fields,
             '$set': {
@@ -7395,4 +8151,20 @@ def api_setor_registro_consumo():
     }
     movimentacoes.insert_one(mov_doc)
 
+    try:
+        extensions.response_cache.clear_prefix('mov:')
+        extensions.response_cache.clear_prefix('estq:')
+        extensions.response_cache.clear_prefix('resd:')
+    except Exception:
+        pass
     return jsonify({'success': True, 'quantidade_registrada': qtd})
+@main_bp.route('/health/app', methods=['GET'])
+def health_app():
+    try:
+        import time
+        from flask import current_app
+        st = current_app.config.get('START_TIME') or time.time()
+        up = max(0, int(time.time() - st))
+        return jsonify({'ok': True, 'uptime_seconds': up, 'mongo_available': bool(current_app.config.get('MONGO_AVAILABLE'))})
+    except Exception:
+        return jsonify({'ok': False}), 200

@@ -89,6 +89,10 @@ def login():
             # Faz login do usuário
             remember_me = request.form.get('remember_me', False) if not request.is_json else data.get('remember_me', False)
             login_user(usuario, remember=remember_me)
+            try:
+                session['csrf_token'] = secrets.token_urlsafe(32)
+            except Exception:
+                pass
             # Reset tentativas em caso de sucesso
             ip = _get_client_ip()
             LOGIN_ATTEMPTS.pop(ip, None)

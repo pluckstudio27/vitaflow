@@ -126,6 +126,7 @@
                     const err = new Error('Falha de rede ou CORS ao acessar o servidor.');
                     err.status = 0;
                     err.payload = { error: 'network_error', detail: String(networkErr) };
+                    err.aborted = !!(networkErr && (networkErr.name === 'AbortError' || /abort/i.test(String(networkErr)) || /ERR_ABORTED/i.test(String(networkErr))));
                     throw err;
                 }
 
@@ -658,6 +659,16 @@
         .notify-item .btn-close {
             float: right;
         }
+        .help-fab {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1050;
+        }
+        .help-fab .btn {
+            border-radius: 999px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -758,6 +769,39 @@
         {% endwith %}
 
             {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <!-- Botão de Ajuda Global -->
+    <div class="help-fab">
+        <button class="btn btn-primary" id="helpButton" title="Ajuda">
+            <i class="fas fa-question-circle me-2"></i>
+            Ajuda
+        </button>
+    </div>
+
+    <!-- Modal Global de Ajuda -->
+    <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="helpModalLabel">Instruções de Uso</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {% block page_help %}
+                    <p>Bem-vindo! Use o menu lateral para navegar entre módulos. Em cada página, ações principais ficam no topo e tabelas apresentam dados com filtros e paginação. Para dúvidas específicas, procure ícones de informação próximos aos elementos.</p>
+                    <ul>
+                        <li>Filtros: ajuste e clique em "Limpar Filtros" para resetar.</li>
+                        <li>Ações: botões com ícones indicam editar, ativar/desativar e excluir.</li>
+                        <li>Notificações: mensagens de sucesso/erro aparecem no canto superior direito.</li>
+                    </ul>
+                    {% endblock %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -889,25 +933,7 @@
         // Função de logout
         function logout() {
             if (confirm('Tem certeza que deseja sair?')) {
-                fetch('/auth/logout', {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = '/auth/login';
-                    } else {
-                        alert('Erro ao fazer logout. Tente novamente.');
-                    }
-                })
-                .catch(error => {
-                    console.error('Erro:', error);
-                    // Fallback: redirecionar mesmo com erro
-                    window.location.href = '/auth/logout';
-                });
+                window.location.href = '/auth/logout';
             }
         }
         
@@ -1148,6 +1174,22 @@
                 return 'Ocorreu um erro. Tente novamente.';
             }
         };
+
+        // Ajuda Global
+        document.addEventListener('DOMContentLoaded', function() {
+            try {
+                const btn = document.getElementById('helpButton');
+                const modalEl = document.getElementById('helpModal');
+                if (btn && modalEl) {
+                    btn.addEventListener('click', function() {
+                        try {
+                            const modal = new bootstrap.Modal(modalEl);
+                            modal.show();
+                        } catch (_) {}
+                    });
+                }
+            } catch (_) {}
+        });
     </script>
     {% block extra_js %}{% endblock %}
 </body>

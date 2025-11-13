@@ -63,9 +63,8 @@
                     </div>
 
                     <!-- Paginação -->
-                    <nav aria-label="Paginação de categorias">
+                    <nav id="navPaginationCategorias" aria-label="Paginação de categorias" style="display: none;">
                         <ul class="pagination justify-content-center" id="pagination">
-                            <!-- Paginação carregada via JavaScript -->
                         </ul>
                     </nav>
                 </div>
@@ -319,9 +318,11 @@ function renderCategorias(categorias) {
 
 function renderPagination(data) {
     const pagination = document.getElementById('pagination');
+    const navEl = document.getElementById('navPaginationCategorias');
     
-    if (data.pages <= 1) {
+    if (!data || data.pages <= 1) {
         pagination.innerHTML = '';
+        if (navEl) navEl.style.display = 'none';
         return;
     }
 
@@ -357,6 +358,7 @@ function renderPagination(data) {
     }
 
     pagination.innerHTML = paginationHTML;
+    if (navEl) navEl.style.display = '';
 }
 
 function changePage(page) {
@@ -575,6 +577,67 @@ function showAlert(message, type) {
 }
 </script>
 
+{% endblock %}
+
+{% block page_help %}
+<div>
+    <h6 class="mb-3"><i class="fas fa-tags me-2"></i>Gerenciar Categorias — Guia Rápido</h6>
+    <ul>
+        <li>Use a busca para filtrar por nome, código ou descrição.</li>
+        <li>O filtro de status permite ver apenas categorias ativas/inativas.</li>
+        <li>Botão "Nova Categoria" abre o formulário para criação.</li>
+        <li>Na tabela, use os ícones para editar, ativar/desativar ou excluir.</li>
+        <li>As notificações de sucesso/erro aparecem no canto superior direito.</li>
+    </ul>
+    <p class="text-muted">Dica: códigos são únicos e ajudam na identificação em integrações.</p>
+    <div class="alert alert-info">Necessário perfil adequado para criar/editar categorias.</div>
+    <hr>
+    <h6>Atalhos</h6>
+    <ul>
+        <li><kbd>Ctrl</kbd> + <kbd>K</kbd>: focar a busca</li>
+        <li><kbd>Alt</kbd> + <kbd>N</kbd>: nova categoria</li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Mapeia showAlert para toasts globais se disponíveis
+function showAlert(message, type) {
+    if (window.showNotification) {
+        window.showNotification(type, message, { timeout: 5000 });
+    } else {
+        try {
+            const alertHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            `;
+            const container = document.querySelector('.container-fluid');
+            container.insertAdjacentHTML('afterbegin', alertHTML);
+        } catch (_) {}
+    }
+}
+
+// Atalhos de teclado (UX)
+document.addEventListener('keydown', function(e) {
+    try {
+        if (e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault();
+            const input = document.getElementById('searchInput');
+            if (input) input.focus();
+        }
+        if (e.altKey && (e.key === 'n' || e.key === 'N')) {
+            e.preventDefault();
+            const btn = document.getElementById('newCategoriaBtn');
+            if (btn) btn.click();
+        }
+    } catch (_) {}
+});
+</script>
+{% endblock %}
+{% block extra_css %}
 <style>
 .color-preview {
     display: inline-block;

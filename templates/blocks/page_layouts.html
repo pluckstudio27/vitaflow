@@ -299,23 +299,98 @@
                         </div>
                     </div>
                     {% elif section.id == 'backup' %}
-                    <div class="backup-info mb-4">
-                        <div class="d-flex align-items-center mb-2">
-                            <i class="fas fa-download text-primary me-2"></i>
-                            <span>Backup Automático</span>
-                            <span class="badge bg-success ms-auto">Ativo</span>
-                        </div>
-                        <div class="d-flex align-items-center mb-2">
-                            <i class="fas fa-upload text-success me-2"></i>
-                            <span>Restauração de Dados</span>
-                        </div>
-                        <div class="d-flex align-items-center mb-2">
-                            <i class="fas fa-archive text-info me-2"></i>
-                            <span>Arquivamento</span>
-                        </div>
-                        <div class="d-flex align-items-center mb-2">
-                            <i class="fas fa-cloud text-warning me-2"></i>
-                            <span>Backup em Nuvem</span>
+                    <div class="backup-tools mb-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <i class="fas fa-save me-2"></i>Backup Manual
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="d-flex gap-2">
+                                            <button id="btnBackupCreate" class="btn btn-primary">
+                                                <i class="fas fa-database me-1"></i>Criar Backup
+                                            </button>
+                                            {% if is_super_admin %}
+                                            <button id="btnResetDb" class="btn btn-danger">
+                                                <i class="fas fa-trash-alt me-1"></i>Apagar Banco
+                                            </button>
+                                            {% endif %}
+                                        </div>
+                                        <div class="form-check mt-2">
+                                            <input class="form-check-input" type="checkbox" id="chkPreserveAdmin" checked>
+                                            <label class="form-check-label" for="chkPreserveAdmin">Preservar usuário admin</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <i class="fas fa-upload me-2"></i>Restauração
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-2">
+                                            <select id="backupFilesSelect" class="form-select">
+                                                <option value="">Selecione um backup</option>
+                                            </select>
+                                        </div>
+                                        <div class="d-flex gap-2">
+                                            <button id="btnRestoreSelected" class="btn btn-success">
+                                                <i class="fas fa-undo me-1"></i>Restaurar
+                                            </button>
+                                            <select id="restoreMode" class="form-select" style="max-width: 180px;">
+                                                <option value="replace" selected>Substituir</option>
+                                                <option value="merge">Mesclar</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <i class="fas fa-archive me-2"></i>Arquivamento
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-2">
+                                            <input id="archiveCollection" class="form-control" placeholder="Coleção (ex.: movimentacoes)">
+                                        </div>
+                                        <div class="mb-2">
+                                            <textarea id="archiveQuery" class="form-control" rows="2" placeholder='Filtro em JSON (ex.: {"data_movimentacao": {"$lt": "2024-01-01"}})'></textarea>
+                                        </div>
+                                        <div class="d-flex gap-2">
+                                            <button id="btnArchiveRun" class="btn btn-outline-primary">
+                                                <i class="fas fa-box me-1"></i>Arquivar
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <i class="fas fa-clock me-2"></i>Agendamento de Backup
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="schEnabled">
+                                            <label class="form-check-label" for="schEnabled">Ativar agendamento</label>
+                                        </div>
+                                        <div class="d-flex gap-2 mb-2">
+                                            <select id="schInterval" class="form-select" style="max-width: 180px;">
+                                                <option value="daily" selected>Diário</option>
+                                                <option value="weekly">Semanal</option>
+                                            </select>
+                                            <input id="schTime" type="time" class="form-control" value="02:00" style="max-width: 160px;">
+                                            <input id="schRetention" type="number" min="1" class="form-control" value="7" style="max-width: 120px;" placeholder="Retenção">
+                                        </div>
+                                        <button id="btnSaveSchedule" class="btn btn-outline-success">
+                                            <i class="fas fa-save me-1"></i>Salvar Agendamento
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     {% elif section.id == 'integracao' %}

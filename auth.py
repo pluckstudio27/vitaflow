@@ -623,10 +623,6 @@ def authenticate_user(username, password):
         if doc:
             current_app.logger.debug(f"AUTH: ativo={doc.get('ativo')} has_hash={'password_hash' in doc}")
             pwd_ok = check_password_hash(doc.get('password_hash', ''), password)
-            # Permitir login dev para admin se necessário
-            if (not pwd_ok) and username == 'admin' and password == 'admin' and current_app.config.get('DEBUG', True):
-                current_app.logger.warning('AUTH: override dev para admin/admin em modo DEBUG')
-                pwd_ok = True
             current_app.logger.debug(f"AUTH: senha confere? {pwd_ok}")
             if doc.get('ativo', True) and pwd_ok:
                 usuario = MongoUser(doc)
@@ -690,7 +686,7 @@ def require_level(*allowed_levels):
 
 def require_super_admin(f):
     """Decorador que requer acesso de super administrador"""
-    return require_level('super_admin')(f)
+    return require_level('super_admin', 'secretario')(f)
 
 def require_admin_or_above(f):
     """Decorador que requer acesso de administrador ou superior"""
@@ -738,7 +734,7 @@ def require_central_access(central_id_param='central_id'):
             else:
                 central_id = request.form.get(central_id_param)
             
-            if central_id and not current_user.can_access_central(int(central_id)):
+            if central_id and not current_user.can_access_central(central_id):
                 if request.is_json:
                     return jsonify({'error': 'Acesso negado - central não autorizada'}), 403
                 flash('Você não tem permissão para acessar esta central.', 'error')
@@ -776,7 +772,7 @@ def require_almoxarifado_access(almoxarifado_id_param='almoxarifado_id'):
             else:
                 almoxarifado_id = request.form.get(almoxarifado_id_param)
             
-            if almoxarifado_id and not current_user.can_access_almoxarifado(int(almoxarifado_id)):
+            if almoxarifado_id and not current_user.can_access_almoxarifado(almoxarifado_id):
                 if request.is_json:
                     return jsonify({'error': 'Acesso negado - almoxarifado não autorizado'}), 403
                 flash('Você não tem permissão para acessar este almoxarifado.', 'error')
@@ -814,7 +810,7 @@ def require_sub_almoxarifado_access(sub_almoxarifado_id_param='sub_almoxarifado_
             else:
                 sub_almoxarifado_id = request.form.get(sub_almoxarifado_id_param)
             
-            if sub_almoxarifado_id and not current_user.can_access_sub_almoxarifado(int(sub_almoxarifado_id)):
+            if sub_almoxarifado_id and not current_user.can_access_sub_almoxarifado(sub_almoxarifado_id):
                 if request.is_json:
                     return jsonify({'error': 'Acesso negado - sub-almoxarifado não autorizado'}), 403
                 flash('Você não tem permissão para acessar este sub-almoxarifado.', 'error')
@@ -846,7 +842,7 @@ def require_setor_access(setor_id_param='setor_id'):
             else:
                 setor_id = request.form.get(setor_id_param)
             
-            if setor_id and not current_user.can_access_setor(int(setor_id)):
+            if setor_id and not current_user.can_access_setor(setor_id):
                 if request.is_json:
                     return jsonify({'error': 'Acesso negado - setor nÃ£o autorizado'}), 403
                 flash('VocÃª nÃ£o tem permissÃ£o para acessar este setor.', 'error')

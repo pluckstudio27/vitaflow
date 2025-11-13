@@ -6,3 +6,156 @@
 {% block content %}
 {{ settings_page_layout(settings_sections) }}
 {% endblock %}
+
+{% block page_help %}
+<div>
+    <h6 class="mb-2"><i class="fas fa-database me-2"></i>Backup e Restauração</h6>
+    <ul>
+        <li>Use Criar Backup para exportar todas as coleções do MongoDB.</li>
+        <li>Selecione um arquivo para Restaurar e escolha Substituir ou Mesclar.</li>
+        <li>Apagar Banco remove dados e mantém o usuário admin (configurável).</li>
+        <li>Arquivamento move dados filtrados para uma coleção de arquivo.</li>
+        <li>Agendamento salva preferências para execução automática por tarefa externa.</li>
+    </ul>
+    <p class="text-muted">A restauração exige atenção: prefira ambiente de teste antes de produção.</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    async function refreshBackupList() {
+        try {
+            const data = await window.fetchJson('/api/admin/backup/list');
+            const sel = document.getElementById('backupFilesSelect');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">Selecione um backup</option>';
+            (data.items || []).forEach(i => {
+                const opt = document.createElement('option');
+                opt.value = i.name;
+                opt.textContent = `${i.name} (${Math.round((i.size||0)/1024)} KB)`;
+                sel.appendChild(opt);
+            });
+        } catch (e) {
+            window.showNotification('Erro ao carregar lista de backups', 'danger');
+        }
+    }
+
+    async function createBackup() {
+        try {
+            const res = await window.fetchJson('/api/admin/backup/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+            window.showNotification(`Backup criado: ${res.file}`, 'success');
+            refreshBackupList();
+        } catch (e) {
+            window.showNotification(e.message || 'Erro ao criar backup', 'danger');
+        }
+    }
+
+    async function restoreSelected() {
+        try {
+            const file = document.getElementById('backupFilesSelect').value;
+            const mode = document.getElementById('restoreMode').value;
+            if (!file) { window.showNotification('Selecione um arquivo de backup', 'warning'); return; }
+            await window.fetchJson('/api/admin/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file, mode }) });
+            window.showNotification('Restauração concluída', 'success');
+        } catch (e) {
+            window.showNotification(e.message || 'Erro na restauração', 'danger');
+        }
+    }
+
+    async function resetDatabase() {
+        try {
+            const preserve_admin = document.getElementById('chkPreserveAdmin').checked;
+            await window.fetchJson('/api/admin/reset-db', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preserve_admin }) });
+            window.showNotification('Banco zerado com sucesso', 'success');
+        } catch (e) {
+            window.showNotification(e.message || 'Erro ao zerar banco', 'danger');
+        }
+    }
+
+    async function runArchive() {
+        try {
+            const collection = document.getElementById('archiveCollection').value.trim();
+            const raw = document.getElementById('archiveQuery').value.trim();
+            const query = raw ? JSON.parse(raw) : {};
+            if (!collection) { window.showNotification('Informe a coleção', 'warning'); return; }
+            const res = await window.fetchJson('/api/admin/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collection, query }) });
+            window.showNotification(`Arquivados: ${res.moved}`, 'success');
+        } catch (e) {
+            window.showNotification(e.message || 'Erro ao arquivar', 'danger');
+        }
+    }
+
+    async function saveSchedule() {
+        try {
+            const enabled = document.getElementById('schEnabled').checked;
+            const interval = document.getElementById('schInterval').value;
+            const time = document.getElementById('schTime').value;
+            const retention = parseInt(document.getElementById('schRetention').value || '7', 10);
+            await window.fetchJson('/api/admin/backup/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, interval, time, retention }) });
+            window.showNotification('Agendamento salvo', 'success');
+        } catch (e) {
+            window.showNotification(e.message || 'Erro ao salvar agendamento', 'danger');
+        }
+    }
+
+    refreshBackupList();
+    const btnBackupCreate = document.getElementById('btnBackupCreate');
+    const btnResetDb = document.getElementById('btnResetDb');
+    const btnRestoreSelected = document.getElementById('btnRestoreSelected');
+    const btnArchiveRun = document.getElementById('btnArchiveRun');
+    const btnSaveSchedule = document.getElementById('btnSaveSchedule');
+    if (btnBackupCreate) btnBackupCreate.addEventListener('click', e => { e.preventDefault(); createBackup(); });
+    if (btnResetDb) btnResetDb.addEventListener('click', e => { e.preventDefault(); showConfirmReset(); });
+    if (btnRestoreSelected) btnRestoreSelected.addEventListener('click', e => { e.preventDefault(); restoreSelected(); });
+    if (btnArchiveRun) btnArchiveRun.addEventListener('click', e => { e.preventDefault(); runArchive(); });
+    if (btnSaveSchedule) btnSaveSchedule.addEventListener('click', e => { e.preventDefault(); saveSchedule(); });
+    function showConfirmReset() {
+        const modalEl = document.getElementById('confirmResetModal');
+        if (!modalEl) { resetDatabase(); return; }
+        const input = document.getElementById('confirmText');
+        const proceed = document.getElementById('confirmProceed');
+        input.value = '';
+        proceed.disabled = true;
+        input.oninput = function(){ proceed.disabled = (input.value.trim().toUpperCase() !== 'APAGAR'); };
+        proceed.onclick = function(){ const bs = bootstrap.Modal.getOrCreateInstance(modalEl); bs.hide(); resetDatabase(); };
+        const bs = bootstrap.Modal.getOrCreateInstance(modalEl);
+        bs.show();
+    }
+});
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.modal-danger .modal-header { background-color: #dc3545; color: #fff; }
+</style>
+{% endblock %}
+
+{% block body_end %}
+<div class="modal fade modal-danger" id="confirmResetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Apagar Banco</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Esta ação remove dados de todas as coleções do MongoDB. Os índices são mantidos e o usuário <strong>admin</strong> pode ser preservado.</p>
+        <p class="mb-2">Para confirmar, digite <strong>APAGAR</strong> abaixo:</p>
+        <input id="confirmText" class="form-control" placeholder="APAGAR">
+        <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" id="chkPreserveAdmin">
+            <label class="form-check-label" for="chkPreserveAdmin">Preservar usuário admin</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" id="confirmProceed" class="btn btn-danger" disabled>
+            <i class="fas fa-trash-alt me-1"></i>Apagar Banco
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

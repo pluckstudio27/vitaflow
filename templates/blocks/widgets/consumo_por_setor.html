@@ -1,0 +1,249 @@
+<div class="card border-0 shadow-sm h-100">
+  <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+    <h5 class="card-title mb-0">
+      <i class="fas fa-chart-line me-2"></i>
+      Consumo por Setor (30 dias)
+    </h5>
+    <div class="d-flex align-items-center gap-2" id="setor-legend">
+      <!-- Legenda dinâmica de centrais -->
+    </div>
+  </div>
+  <div class="card-body">
+    <div style="height:260px">
+      <canvas id="consumoSetorChart"></canvas>
+    </div>
+    <div class="mt-3">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle" id="consumo-central-resumo">
+          <thead>
+            <tr>
+              <th>Setor</th>
+              <th class="text-end">Média 7d</th>
+              <th class="text-end">Saídas 30d</th>
+              <th class="text-end">Tem agora</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="4" class="text-center text-muted">Carregando dados por setor...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer bg-transparent">
+    <small class="text-muted">Séries com média móvel de 7 dias por setor. Escopo respeitado pelo seu nível de acesso.</small>
+  </div>
+</div>
+
+<!-- Chart.js CDN scoped to widget -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  // Helpers reutilizados do widget de consumo médio
+  function formatDateKey(date) {
+    const d = new Date(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function getLastNDays(n) {
+    const days = [];
+    const today = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      days.push(formatDateKey(d));
+    }
+    return days;
+  }
+
+  function movingAverage(series, windowSize) {
+    const result = [];
+    let sum = 0;
+    const q = [];
+    for (let i = 0; i < series.length; i++) {
+      sum += series[i];
+      q.push(series[i]);
+      if (q.length > windowSize) sum -= q.shift();
+      const denom = Math.min(windowSize, i + 1);
+      result.push(sum / denom);
+    }
+    return result;
+  }
+
+  function normalizeTipo(t) {
+    const s = String(t || '').toLowerCase();
+    if (!s) return '';
+    if (s.startsWith('sub') && s.includes('almox')) return 'sub_almoxarifado';
+    if (s.includes('almox') && !s.includes('sub')) return 'almoxarifado';
+    if (s.startsWith('cen')) return 'central';
+    if (s.startsWith('set')) return 'setor';
+    return s;
+  }
+
+  function normalizeIdStr(val) {
+    const s = String(val ?? '').trim();
+    if (!s) return '';
+    const m = s.match(/ObjectId\(['"]?([0-9a-fA-F]{24})['"]?\)/);
+    if (m && m[1]) return m[1];
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith('\'') && s.endsWith('\''))) {
+      return s.slice(1, -1);
+    }
+    return s;
+  }
+
+  // Paleta dinâmica para setores
+  function setorColor(idx, total) {
+    // Gera cores distintas em HSL, variação de matiz
+    const hue = Math.round((idx / Math.max(1, total)) * 300); // 0..300
+    return `hsl(${hue}, 70%, 50%)`;
+  }
+
+  async function loadConsumoPorSetor() {
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      const data_inicio = start.toISOString().substring(0, 10);
+      const data_fim = end.toISOString().substring(0, 10);
+
+      // Listar setores acessíveis
+      const sResp = await fetchJson(`/api/setores?per_page=200`);
+      const setores = Array.isArray(sResp.items) ? sResp.items : [];
+      const totalSetores = setores.length;
+      const days = getLastNDays(30);
+
+      // Buscar movimentações no período e filtrar saídas por setor
+      const mResp = await fetchJson(`/api/movimentacoes?per_page=3000&data_inicio=${encodeURIComponent(data_inicio)}&data_fim=${encodeURIComponent(data_fim)}`);
+      const movs = Array.isArray(mResp.items) ? mResp.items : [];
+      const tiposSaida = new Set(['transferencia', 'saida', 'consumo', 'retirada']);
+
+      // Estoque atual por setor
+      const estResp = await fetchJson(`/api/estoque/hierarquia?per_page=2000`);
+      const estItems = Array.isArray(estResp.items) ? estResp.items : (Array.isArray(estResp) ? estResp : []);
+
+      // Preparar estruturas
+      const datasets = [];
+      const resumoRows = [];
+
+      // Legenda dinâmica
+      const legendEl = document.getElementById('setor-legend');
+      if (legendEl) legendEl.innerHTML = '';
+
+      setores.forEach((s, idx) => {
+        const sid = normalizeIdStr(s.id);
+        const sname = s.nome || `Setor ${sid}`;
+        const color = setorColor(idx, Math.max(6, totalSetores));
+
+        // Mapa diário de saídas por setor
+        const daily = {};
+        for (const d of days) daily[d] = 0;
+
+        for (const m of movs) {
+          const tipoMov = String(m.tipo_movimentacao || m.tipo || '').toLowerCase();
+          if (!tiposSaida.has(tipoMov)) continue;
+          const origemTipo = normalizeTipo(m.origem_tipo || m.local_tipo || '');
+          if (origemTipo !== 'setor') continue;
+          const origemId = normalizeIdStr(m.origem_id || m.local_id || '');
+          if (origemId !== sid) continue;
+          const dayKey = formatDateKey(m.data_movimentacao || m.created_at || Date.now());
+          if (!daily[dayKey]) continue;
+          const qty = Number(m.quantidade || 0);
+          if (!isFinite(qty) || qty <= 0) continue;
+          daily[dayKey] += qty;
+        }
+
+        const series = days.map(d => daily[d] || 0);
+        const avg7 = movingAverage(series, 7);
+        const total30d = series.reduce((a, b) => a + b, 0);
+        const last7Avg = (() => { const last7 = avg7.slice(-7); return last7.length ? (last7.reduce((a,b)=>a+b,0) / last7.length) : 0; })();
+
+        // Estoque atual (quantidade_disponivel) para este setor
+        let estoqueAtual = 0;
+        for (const it of estItems) {
+          const tipo = normalizeTipo(it.local_tipo || '');
+          if (tipo !== 'setor') continue;
+          const lid = normalizeIdStr(it.local_id || it.setor_id || '');
+          if (lid !== sid) continue;
+          const q = Number(it.quantidade_disponivel ?? it.quantidade ?? 0);
+          estoqueAtual += (isFinite(q) ? q : 0);
+        }
+
+        datasets.push({
+          label: sname,
+          data: avg7,
+          borderColor: color,
+          backgroundColor: color,
+          tension: 0.25,
+          pointRadius: 0,
+          borderWidth: 2
+        });
+
+        resumoRows.push({ nome: sname, media7d: last7Avg, saidas30d: total30d, estoqueAtual });
+
+        // Atualizar legenda
+        if (legendEl) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.style.backgroundColor = color;
+          badge.style.color = '#fff';
+          badge.textContent = sname;
+          legendEl.appendChild(badge);
+        }
+      });
+
+      // Renderizar gráfico
+      const ctx = document.getElementById('consumoSetorChart');
+      if (ctx) {
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: days.map(d => d.substring(5)),
+            datasets
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+              y: { beginAtZero: true, title: { display: true, text: 'Consumo (média 7d)' } },
+              x: { title: { display: true, text: 'Últimos 30 dias' } }
+            }
+          }
+        });
+      }
+
+      // Renderizar tabela resumo
+      const tbl = document.getElementById('consumo-central-resumo');
+      if (tbl) {
+        const tbody = tbl.querySelector('tbody');
+        if (tbody) {
+          tbody.innerHTML = '';
+          for (const r of resumoRows) {
+            const tr = document.createElement('tr');
+            const tdNome = document.createElement('td'); tdNome.textContent = r.nome;
+            const tdMedia = document.createElement('td'); tdMedia.className = 'text-end'; tdMedia.textContent = Number(r.media7d).toFixed(1);
+            const tdSaidas = document.createElement('td'); tdSaidas.className = 'text-end'; tdSaidas.textContent = Number(r.saidas30d).toFixed(1);
+            const tdEstoque = document.createElement('td'); tdEstoque.className = 'text-end'; tdEstoque.textContent = Number(r.estoqueAtual).toFixed(1);
+            tr.appendChild(tdNome); tr.appendChild(tdMedia); tr.appendChild(tdSaidas); tr.appendChild(tdEstoque);
+            tbody.appendChild(tr);
+          }
+        }
+      }
+    } catch (e) {
+      const tbl = document.getElementById('consumo-central-resumo');
+      if (tbl) {
+        const tbody = tbl.querySelector('tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Não foi possível carregar dados por setor.</td></tr>';
+      }
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', loadConsumoPorSetor);
+})();
+</script>

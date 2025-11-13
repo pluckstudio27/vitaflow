@@ -118,14 +118,11 @@
                             </div>
                         </div>
                         <div class="card-body">
-                            <div id="tabelaEstoque">
-                                <div class="text-center py-4">
-                                    <div class="spinner-border" role="status">
-                                        <span class="visually-hidden">Carregando estoque...</span>
-                                    </div>
-                                </div>
+                            <div id="loadingFeedback" class="alert alert-info text-center" style="display:none;">
+                                <i class="fas fa-spinner fa-spin"></i> Carregando dados de estoque, aguarde...
                             </div>
-                            <nav aria-label="Paginação do estoque">
+                            <div id="tabelaEstoque"></div>
+                            <nav id="navPaginationEstoque" aria-label="Paginação do estoque" style="display: none;">
                                 <ul id="paginationEstoque" class="pagination justify-content-center mt-3"></ul>
                             </nav>
                         </div>
@@ -169,8 +166,12 @@
 <script>
 let dadosEstoque = [];
 let dadosFiltrados = [];
-let itemsPerPage = 20;
+let itemsPerPage = 0;
 let currentPage = 1;
+let isLoading = false;
+let locaisCache = null;
+let locaisFetching = false;
+let pendingReload = false;
 
 // Formata quantidade como inteiro e anexa unidade de medida
 function formatQuantidade(valor, unidade) {
@@ -181,40 +182,64 @@ function formatQuantidade(valor, unidade) {
 
 // Carregar dados com paginação
 function carregarDados(page = 1) {
+    if (isLoading) { pendingReload = true; return; }
     currentPage = page;
+    isLoading = true;
+    const lf = document.getElementById('loadingFeedback');
+    if (lf) lf.style.display = '';
     const params = new URLSearchParams({
-        page: currentPage,
+        page: 1,
         per_page: itemsPerPage,
+        no_pagination: 1,
         produto: document.getElementById('filtroProduto').value,
         tipo: document.getElementById('filtroTipo').value,
         status: document.getElementById('filtroStatus').value,
         local: document.getElementById('filtroLocal').value
     });
 
-    Promise.all([
-        fetchJson(`/api/estoque/hierarquia?${params.toString()}`, { headers: { 'Accept': 'application/json' } }),
-        fetchJson('/api/hierarquia/locais', { headers: { 'Accept': 'application/json' } })
-    ])
-    .then(([resp, locais]) => {
+    fetchJson(`/api/estoque/hierarquia?${params.toString()}`, { headers: { 'Accept': 'application/json' } })
+    .then(resp => {
         const estoque = Array.isArray(resp.items) ? resp.items : (Array.isArray(resp) ? resp : []);
         const pagination = resp.pagination || { page: currentPage, pages: 1 };
         dadosEstoque = estoque;
         dadosFiltrados = [...dadosEstoque];
-
-        preencherFiltroLocais(locais);
+        preencherFiltroLocais(locaisCache || []);
         atualizarResumo();
         renderizarTabela();
         renderizarPaginacao(pagination);
+        prefetchLocais();
+        if (lf) lf.style.display = 'none';
     })
     .catch(error => {
+        try {
+            const det = String((error && (error.payload && error.payload.detail)) || error).toLowerCase();
+            if (error && (error.aborted || error.status === 0 || det.includes('abort'))) {
+                if (lf) lf.style.display = 'none';
+                return;
+            }
+        } catch (_) {}
         console.error('Erro ao carregar dados:', error);
+        if (lf) lf.style.display = 'none';
         document.getElementById('tabelaEstoque').innerHTML = `
             <div class="alert alert-danger">
                 <i class="fas fa-exclamation-triangle"></i> Erro ao carregar dados do estoque
             </div>
         `;
         document.getElementById('paginationEstoque').innerHTML = '';
+    })
+    .finally(() => {
+        isLoading = false;
+        if (pendingReload) { pendingReload = false; carregarDados(currentPage); }
     });
+}
+
+function prefetchLocais() {
+    if (locaisCache || locaisFetching) return;
+    locaisFetching = true;
+    fetchJson('/api/hierarquia/locais', { headers: { 'Accept': 'application/json' } })
+        .then(locais => { locaisCache = locais; preencherFiltroLocais(locaisCache || []); })
+        .catch(() => {})
+        .finally(() => { locaisFetching = false; });
 }
 
 // Preencher filtro de locais
@@ -547,15 +572,17 @@ function atualizarDados() {
 // Renderizar paginação
 function renderizarPaginacao(pagination) {
     const paginationEl = document.getElementById('paginationEstoque');
+    const navEl = document.getElementById('navPaginationEstoque');
     if (!pagination || !pagination.pages || pagination.pages <= 1) {
         paginationEl.innerHTML = '';
+        if (navEl) navEl.style.display = 'none';
         return;
     }
 
     let html = '';
     html += `
         <li class="page-item ${pagination.page <= 1 ? 'disabled' : ''}">
-            <a class="page-link" href="#" onclick="carregarDados(${Math.max(1, pagination.page - 1)})">Anterior</a>
+            <a class="page-link" href="javascript:void(0)" onclick="carregarDados(${Math.max(1, pagination.page - 1)})">Anterior</a>
         </li>
     `;
 
@@ -563,7 +590,7 @@ function renderizarPaginacao(pagination) {
         if (i === pagination.page || i === 1 || i === pagination.pages || (i >= pagination.page - 2 && i <= pagination.page + 2)) {
             html += `
                 <li class="page-item ${i === pagination.page ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="carregarDados(${i})">${i}</a>
+                    <a class="page-link" href="javascript:void(0)" onclick="carregarDados(${i})">${i}</a>
                 </li>
             `;
         } else if (i === pagination.page - 3 || i === pagination.page + 3) {
@@ -573,10 +600,11 @@ function renderizarPaginacao(pagination) {
 
     html += `
         <li class="page-item ${pagination.page >= pagination.pages ? 'disabled' : ''}">
-            <a class="page-link" href="#" onclick="carregarDados(${Math.min(pagination.pages, pagination.page + 1)})">Próxima</a>
+            <a class="page-link" href="javascript:void(0)" onclick="carregarDados(${Math.min(pagination.pages, pagination.page + 1)})">Próxima</a>
         </li>
     `;
     paginationEl.innerHTML = html;
+    if (navEl) navEl.style.display = '';
 }
 
 // Exportar para Excel

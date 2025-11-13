@@ -162,6 +162,18 @@ class UIBlocksConfig:
                 active_endpoints=['main.relatorios', 'main.compras_aprovacao']
             ),
             MenuBlock(
+                id='relatorios_admin',
+                label='Relatórios',
+                icon='fas fa-chart-line',
+                url='main.relatorios_admin',
+                access_levels=[
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.SECRETARIO
+                ],
+                active_endpoints=['main.relatorios_admin']
+            ),
+            MenuBlock(
                 id='configuracoes',
                 label='Configurações',
                 icon='fas fa-cog',
@@ -188,13 +200,14 @@ class UIBlocksConfig:
                 priority=3
             ),
             DashboardWidget(
-                id='consumo_por_central',
-                title='Consumo por Central',
-                template='blocks/widgets/consumo_por_central.html',
+                id='consumo_por_setor',
+                title='Consumo por Setor',
+                template='blocks/widgets/consumo_por_setor.html',
                 size='lg-12',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
-                    AccessLevel.ADMIN_CENTRAL
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.SECRETARIO
                 ],
                 priority=4
             ),
@@ -236,7 +249,8 @@ class UIBlocksConfig:
                 icon='fas fa-sitemap',
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
-                    AccessLevel.ADMIN_CENTRAL
+                    AccessLevel.ADMIN_CENTRAL,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='main.configuracoes_hierarquia',
                 action_text='Gerenciar Hierarquia'
@@ -261,7 +275,8 @@ class UIBlocksConfig:
                 access_levels=[
                     AccessLevel.SUPER_ADMIN,
                     AccessLevel.ADMIN_CENTRAL,
-                    AccessLevel.GERENTE_ALMOX
+                    AccessLevel.GERENTE_ALMOX,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='main.configuracoes_categorias',
                 action_text='Gerenciar Categorias'
@@ -273,7 +288,8 @@ class UIBlocksConfig:
                 icon='fas fa-cogs',
                 size='lg-6',
                 access_levels=[
-                    AccessLevel.SUPER_ADMIN
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='#',
                 action_text='Configurar Sistema'
@@ -285,7 +301,8 @@ class UIBlocksConfig:
                 icon='fas fa-clipboard-list',
                 size='lg-6',
                 access_levels=[
-                    AccessLevel.SUPER_ADMIN
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='#',
                 action_text='Ver Auditoria'
@@ -297,7 +314,8 @@ class UIBlocksConfig:
                 icon='fas fa-database',
                 size='lg-6',
                 access_levels=[
-                    AccessLevel.SUPER_ADMIN
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='#',
                 action_text='Gerenciar Backup'
@@ -309,7 +327,8 @@ class UIBlocksConfig:
                 icon='fas fa-plug',
                 size='lg-6',
                 access_levels=[
-                    AccessLevel.SUPER_ADMIN
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='#',
                 action_text='Configurar APIs'
@@ -321,7 +340,8 @@ class UIBlocksConfig:
                 icon='fas fa-chart-bar',
                 size='lg-6',
                 access_levels=[
-                    AccessLevel.SUPER_ADMIN
+                    AccessLevel.SUPER_ADMIN,
+                    AccessLevel.SECRETARIO
                 ],
                 action_url='main.relatorios',
                 action_text='Ver Relatórios'
