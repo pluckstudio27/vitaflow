@@ -145,8 +145,9 @@ async function carregarDemandasGerencia() {
         const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
         const rows = data.items.map(d => {
             const dataAttr = encodeURIComponent(JSON.stringify(d));
-            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
-            const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
+            const isGrupo = Number(d.items_count || 0) > 0 || String(d.produto_nome||'').startsWith('Lista (');
+            const qtdStr = isGrupo ? nf0.format(Number(d.quantidade_solicitada || 0)) : nf0.format(Number(d.quantidade_solicitada || 0));
+            const unidade = isGrupo ? '' : (d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '');
             return `
             <tr>
                 <td>${htmlEscape(d.display_id || d.id)}</td>

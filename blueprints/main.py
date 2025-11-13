@@ -6658,6 +6658,20 @@ def api_produto_lote_entrada(produto_id, numero_lote):
             if data_mov.tzinfo is None:
                 data_mov = data_mov.replace(tzinfo=timezone.utc)
 
+            lote_df = None
+            lote_dv = None
+            try:
+                lcoll = extensions.mongo_db['lotes']
+                pid_out = entrada.get('produto_id')
+                lote_num = entrada.get('lote')
+                almox_id = entrada.get('local_id') or entrada.get('almoxarifado_id')
+                if pid_out is not None and lote_num and almox_id is not None:
+                    ldoc = lcoll.find_one({'produto_id': pid_out, 'lote': lote_num, 'almoxarifado_id': almox_id})
+                    if ldoc:
+                        lote_df = ldoc.get('data_fabricacao')
+                        lote_dv = ldoc.get('data_vencimento')
+            except Exception:
+                pass
             return jsonify({'success': True, 'entrada': {
                 'id': str(entrada.get('_id')) if entrada.get('_id') is not None else None,
                 'lote': entrada.get('lote'),
@@ -6667,7 +6681,9 @@ def api_produto_lote_entrada(produto_id, numero_lote):
                 'observacoes': entrada.get('observacoes'),
                 'data_recebimento': data_mov.isoformat(),
                 'destino_nome': entrada.get('destino_nome'),
-                'quantidade': entrada.get('quantidade') or entrada.get('quantidade_movimentada')
+                'quantidade': entrada.get('quantidade') or entrada.get('quantidade_movimentada'),
+                'lote_data_fabricacao': lote_df,
+                'lote_data_vencimento': lote_dv
             }})
 
         # PATCH
@@ -6768,11 +6784,131 @@ def api_produto_lote_entrada(produto_id, numero_lote):
                 except Exception:
                     pass
 
+        df_payload = payload.get('data_fabricacao')
+        dv_payload = payload.get('data_vencimento')
+        try:
+            if df_payload or dv_payload:
+                pid_out = entrada.get('produto_id')
+                lote_num = entrada.get('lote')
+                almox_id = entrada.get('local_id') or entrada.get('almoxarifado_id')
+                if pid_out is not None and lote_num and almox_id is not None:
+                    sf = {}
+                    if df_payload:
+                        sf['data_fabricacao'] = df_payload
+                    if dv_payload:
+                        sf['data_vencimento'] = dv_payload
+                    if sf:
+                        extensions.mongo_db['lotes'].update_one({'produto_id': pid_out, 'lote': lote_num, 'almoxarifado_id': almox_id}, {'$set': sf})
+        except Exception:
+            pass
+
         res = coll.update_one({'_id': entrada.get('_id')}, {'$set': set_fields})
         ok = bool(getattr(res, 'modified_count', 0))
         return jsonify({'success': True, 'updated': ok})
     except Exception as e:
         return jsonify({'success': False, 'error': f'Erro ao editar entrada de lote: {e}'})
+
+@main_bp.route('/api/produtos/<string:produto_id>/entradas/sem-lote', methods=['GET'])
+@require_level('super_admin', 'admin_central')
+def api_produto_entradas_sem_lote(produto_id):
+    try:
+        coll = extensions.mongo_db['movimentacoes']
+        pid_candidates = [produto_id]
+        try:
+            if str(produto_id).isdigit():
+                pid_candidates.append(int(produto_id))
+        except Exception:
+            pass
+        try:
+            oid = ObjectId(str(produto_id))
+            pid_candidates.append(oid)
+            pid_candidates.append(str(oid))
+        except Exception:
+            pass
+        query = {
+            'produto_id': {'$in': pid_candidates},
+            'tipo': 'entrada',
+            '$or': [{'lote': {'$exists': False}}, {'lote': ''}, {'lote': None}]
+        }
+        items = []
+        for m in coll.find(query).sort('data_movimentacao', -1).limit(50):
+            items.append({
+                'id': str(m.get('_id')),
+                'quantidade': float(m.get('quantidade') or m.get('quantidade_movimentada') or 0),
+                'data_recebimento': (m.get('data_movimentacao') or m.get('created_at') or m.get('updated_at')),
+                'nota_fiscal': m.get('nota_fiscal'),
+                'fornecedor': m.get('origem_nome'),
+                'destino_nome': m.get('destino_nome'),
+            })
+        return jsonify({'items': items})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/movimentacoes/<string:mov_id>/definir-lote', methods=['PATCH'])
+@require_level('super_admin', 'admin_central')
+def api_mov_definir_lote(mov_id):
+    try:
+        db = extensions.mongo_db
+        movs = db['movimentacoes']
+        lotes = db['lotes']
+        m = movs.find_one({'_id': ObjectId(mov_id)})
+        if not m:
+            m = movs.find_one({'_id': mov_id})
+        if not m:
+            return jsonify({'error': 'Movimentação não encontrada'}), 404
+        if str(m.get('tipo') or '').lower() != 'entrada':
+            return jsonify({'error': 'Somente entradas podem definir lote'}), 400
+        payload = request.get_json(silent=True) or {}
+        novo_lote = str(payload.get('lote') or '').strip()
+        if not novo_lote:
+            return jsonify({'error': 'lote é obrigatório'}), 400
+        now = datetime.utcnow()
+        old_lote = m.get('lote') or ''
+        qty = float(m.get('quantidade') or m.get('quantidade_movimentada') or 0)
+        pid_out = m.get('produto_id')
+        almox_id = m.get('local_id') or m.get('almoxarifado_id') or m.get('destino_id')
+        if old_lote and old_lote != novo_lote:
+            try:
+                lotes.update_one({'produto_id': pid_out, 'lote': old_lote, 'almoxarifado_id': almox_id}, {'$inc': {'quantidade_atual': -qty}, '$set': {'updated_at': now}})
+            except Exception:
+                pass
+        if not old_lote:
+            try:
+                lotes.find_one_and_update(
+                    {'produto_id': pid_out, 'lote': novo_lote, 'almoxarifado_id': almox_id},
+                    {
+                        '$inc': {'quantidade_atual': qty},
+                        '$set': {
+                            'produto_id': pid_out,
+                            'lote': novo_lote,
+                            'almoxarifado_id': almox_id,
+                            'updated_at': now
+                        },
+                        '$setOnInsert': {'created_at': now}
+                    },
+                    upsert=True
+                )
+            except Exception:
+                pass
+        movs.update_one({'_id': m.get('_id')}, {'$set': {'lote': novo_lote, 'updated_at': now}})
+        df = payload.get('data_fabricacao')
+        dv = payload.get('data_vencimento')
+        set_extra = {}
+        if df:
+            set_extra['data_fabricacao'] = df
+        if dv:
+            set_extra['data_vencimento'] = dv
+        if set_extra:
+            lotes.update_one({'produto_id': pid_out, 'lote': novo_lote, 'almoxarifado_id': almox_id}, {'$set': set_extra})
+        try:
+            extensions.response_cache.clear_prefix('mov:')
+            extensions.response_cache.clear_prefix('estq:')
+            extensions.response_cache.clear_prefix('resd:')
+        except Exception:
+            pass
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @main_bp.route('/api/movimentacoes/transferencia', methods=['POST'])
 @require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'secretario')
@@ -7578,7 +7714,52 @@ def api_demandas():
         setores = db['setores']
         items = []
         for d in cursor:
-            # Produto
+            # Resumo de grupo (itens)
+            group_items = d.get('items') or d.get('itens')
+            if isinstance(group_items, list) and group_items:
+                total_qtd = 0.0
+                try:
+                    total_qtd = sum(float((it or {}).get('quantidade') or 0) for it in group_items)
+                except Exception:
+                    total_qtd = 0.0
+                raw_sid = d.get('setor_id')
+                setor_doc = None
+                try:
+                    if isinstance(raw_sid, int):
+                        setor_doc = setores.find_one({'id': raw_sid})
+                    elif isinstance(raw_sid, str) and len(raw_sid) == 24:
+                        try:
+                            setor_doc = setores.find_one({'_id': ObjectId(raw_sid)})
+                        except Exception:
+                            setor_doc = None
+                    elif isinstance(raw_sid, ObjectId):
+                        setor_doc = setores.find_one({'_id': raw_sid})
+                    else:
+                        setor_doc = setores.find_one({'id': raw_sid})
+                except Exception:
+                    setor_doc = None
+                created_at = d.get('created_at')
+                updated_at = d.get('updated_at')
+                created_at_str = created_at.isoformat() if isinstance(created_at, datetime) else (str(created_at) if created_at else None)
+                updated_at_str = updated_at.isoformat() if isinstance(updated_at, datetime) else (str(updated_at) if updated_at else None)
+                items.append({
+                    'id': str(d.get('_id')) if d.get('_id') is not None else str(d.get('id')),
+                    'display_id': (str(d.get('_id'))[:8] if d.get('_id') is not None else None),
+                    'produto_id': None,
+                    'produto_nome': f"Lista ({len(group_items)} itens)",
+                    'setor_id': (str(raw_sid) if raw_sid is not None else None),
+                    'setor_nome': setor_doc.get('nome') if setor_doc else None,
+                    'quantidade_solicitada': total_qtd,
+                    'unidade_medida': None,
+                    'destino_tipo': d.get('destino_tipo'),
+                    'status': d.get('status') or 'pendente',
+                    'created_at': created_at_str,
+                    'updated_at': updated_at_str,
+                    'items_count': len(group_items)
+                })
+                continue
+
+            # Demanda individual
             raw_pid = d.get('produto_id')
             prod_doc = None
             try:
@@ -7598,7 +7779,6 @@ def api_demandas():
             produto_nome = prod_doc.get('nome') if prod_doc else None
             unidade_medida = d.get('unidade_medida') or (prod_doc.get('unidade_medida') if prod_doc else None)
 
-            # Setor
             raw_sid = d.get('setor_id')
             setor_doc = None
             try:
@@ -7686,6 +7866,194 @@ def api_demandas():
     }
     res = coll.insert_one(doc)
     return jsonify({'id': str(res.inserted_id)}), 200
+
+@main_bp.route('/api/demandas/lista', methods=['GET'])
+@require_any_level
+def api_demandas_lista_get():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        usuario_id = str(current_user.get_id())
+        setor_id = getattr(current_user, 'setor_id', None)
+        coll = db['listas_demandas']
+        itens = []
+        pcoll = db['produtos']
+        def _resolve_prod(key):
+            if key is None:
+                return None
+            k = str(key)
+            if k.isdigit():
+                return pcoll.find_one({'id': int(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+            try:
+                return pcoll.find_one({'_id': ObjectId(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+            except Exception:
+                return pcoll.find_one({'_id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+        for doc in coll.find({'usuario_id': usuario_id, 'setor_id': setor_id}).sort('created_at', -1):
+            pdoc = _resolve_prod(doc.get('produto_key') or doc.get('produto_id_raw'))
+            pid_out = pdoc.get('id') if pdoc and pdoc.get('id') is not None else (str(pdoc.get('_id')) if pdoc else doc.get('produto_key'))
+            itens.append({
+                'id': str(doc.get('_id')),
+                'produto_id': pid_out,
+                'produto_nome': (pdoc or {}).get('nome') or '-',
+                'produto_codigo': (pdoc or {}).get('codigo') or '-',
+                'unidade_medida': (pdoc or {}).get('unidade_medida') or null,
+                'quantidade': float(doc.get('quantidade') or 0),
+                'observacao': doc.get('observacao') or ''
+            })
+        return jsonify({'items': itens})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao carregar lista de demandas: {e}'}), 500
+
+@main_bp.route('/api/demandas/lista', methods=['POST'])
+@require_any_level
+def api_demandas_lista_add():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        data = request.get_json(silent=True) or {}
+        produto_id = data.get('produto_id')
+        quantidade = data.get('quantidade')
+        observacao = (data.get('observacao') or '').strip()
+        if produto_id is None:
+            return jsonify({'error': 'produto_id é obrigatório'}), 400
+        try:
+            quantidade = float(quantidade)
+        except Exception:
+            quantidade = 0.0
+        if quantidade <= 0:
+            return jsonify({'error': 'quantidade deve ser > 0'}), 400
+        usuario_id = str(current_user.get_id())
+        setor_id = getattr(current_user, 'setor_id', None)
+        coll = db['listas_demandas']
+        produto_key = str(produto_id)
+        now = datetime.utcnow()
+        existing = coll.find_one({'usuario_id': usuario_id, 'setor_id': setor_id, 'produto_key': produto_key})
+        if existing:
+            coll.update_one({'_id': existing['_id']}, {'$set': {'quantidade': quantidade, 'observacao': observacao, 'updated_at': now}})
+            item_id = str(existing['_id'])
+        else:
+            res = coll.insert_one({'usuario_id': usuario_id, 'setor_id': setor_id, 'produto_key': produto_key, 'produto_id_raw': produto_id, 'quantidade': quantidade, 'observacao': observacao, 'created_at': now, 'updated_at': now})
+            item_id = str(res.inserted_id)
+        return jsonify({'status': 'ok', 'item_id': item_id})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao adicionar item: {e}'}), 500
+
+@main_bp.route('/api/demandas/lista/<string:item_id>', methods=['PUT'])
+@require_any_level
+def api_demandas_lista_update(item_id):
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        data = request.get_json(silent=True) or {}
+        update = {}
+        if 'quantidade' in data:
+            try:
+                q = float(data.get('quantidade'))
+                if q <= 0:
+                    return jsonify({'error': 'quantidade deve ser > 0'}), 400
+                update['quantidade'] = q
+            except Exception:
+                return jsonify({'error': 'quantidade inválida'}), 400
+        if 'observacao' in data:
+            update['observacao'] = (data.get('observacao') or '').strip()
+        if not update:
+            return jsonify({'error': 'Nada para atualizar'}), 400
+        update['updated_at'] = datetime.utcnow()
+        coll = db['listas_demandas']
+        try:
+            res = coll.update_one({'_id': ObjectId(item_id), 'usuario_id': str(current_user.get_id())}, {'$set': update})
+        except Exception:
+            return jsonify({'error': 'item_id inválido'}), 400
+        if not res or res.matched_count == 0:
+            return jsonify({'error': 'Item não encontrado'}), 404
+        return jsonify({'status': 'updated'})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao atualizar item: {e}'}), 500
+
+@main_bp.route('/api/demandas/lista/<string:item_id>', methods=['DELETE'])
+@require_any_level
+def api_demandas_lista_delete(item_id):
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['listas_demandas']
+        try:
+            res = coll.delete_one({'_id': ObjectId(item_id), 'usuario_id': str(current_user.get_id())})
+        except Exception:
+            return jsonify({'error': 'item_id inválido'}), 400
+        if not res or res.deleted_count == 0:
+            return jsonify({'error': 'Item não encontrado'}), 404
+        return jsonify({'status': 'deleted'})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao remover item: {e}'}), 500
+
+@main_bp.route('/api/demandas/lista/clear', methods=['POST'])
+@require_any_level
+def api_demandas_lista_clear():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        coll = db['listas_demandas']
+        usuario_id = str(current_user.get_id())
+        setor_id = getattr(current_user, 'setor_id', None)
+        res = coll.delete_many({'usuario_id': usuario_id, 'setor_id': setor_id})
+        return jsonify({'status': 'cleared', 'deleted': int(res.deleted_count or 0)})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao limpar lista: {e}'}), 500
+
+@main_bp.route('/api/demandas/finalizar', methods=['POST'])
+@require_any_level
+def api_demandas_finalizar():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        usuario_id = str(current_user.get_id())
+        setor_id = getattr(current_user, 'setor_id', None)
+        listas = db['listas_demandas']
+        coll = db['demandas']
+        destino_tipo = (request.get_json(silent=True) or {}).get('destino_tipo') or 'almoxarifado'
+        itens_cursor = listas.find({'usuario_id': usuario_id, 'setor_id': setor_id}).sort('created_at', -1)
+        itens = list(itens_cursor)
+        if not itens:
+            return jsonify({'error': 'Lista de demandas vazia'}), 400
+        prod_coll = db['produtos']
+        def _resolve_prod_snapshot(prod_key, prod_id_raw):
+            k = str(prod_key or prod_id_raw or '')
+            pdoc = None
+            if k.isdigit():
+                pdoc = prod_coll.find_one({'id': int(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+            elif isinstance(k, str) and len(k) == 24:
+                try:
+                    pdoc = prod_coll.find_one({'_id': ObjectId(k)}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+                except Exception:
+                    pdoc = prod_coll.find_one({'_id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+            else:
+                pdoc = prod_coll.find_one({'id': k}, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1})
+            if not pdoc:
+                return {'produto_key': k, 'produto_id': k, 'produto_nome': '-', 'produto_codigo': '-', 'unidade_medida': None}
+            pid_out = pdoc.get('id') if pdoc.get('id') is not None else str(pdoc.get('_id'))
+            return {'produto_key': k, 'produto_id': pid_out, 'produto_nome': pdoc.get('nome') or '-', 'produto_codigo': pdoc.get('codigo') or '-', 'unidade_medida': pdoc.get('unidade_medida')}
+        now = datetime.utcnow()
+        items_out = []
+        for it in itens:
+            snap = _resolve_prod_snapshot(it.get('produto_key'), it.get('produto_id_raw'))
+            items_out.append({**snap, 'quantidade': float(it.get('quantidade') or 0), 'observacao': it.get('observacao') or ''})
+        doc = {'grupo': True, 'usuario_id': usuario_id, 'setor_id': setor_id, 'destino_tipo': destino_tipo, 'status': 'pendente', 'items': items_out, 'created_at': now, 'updated_at': now}
+        res = coll.insert_one(doc)
+        demanda_id = str(res.inserted_id)
+        try:
+            listas.delete_many({'usuario_id': usuario_id, 'setor_id': setor_id})
+        except Exception:
+            pass
+        return jsonify({'status': 'created', 'demanda_id': demanda_id})
+    except Exception as e:
+        return jsonify({'error': f'Falha ao finalizar lista de demandas: {e}'}), 500
 
 @main_bp.route('/api/demandas/<string:id>', methods=['PUT'])
 @require_responsible_or_above

@@ -97,6 +97,13 @@
                                     </div>
                                 </div>
                             </div>
+                            {% if is_super_admin or is_admin_central %}
+                            <hr>
+                            <h6><i class="fas fa-exclamation-circle"></i> Correção de lote em recebimentos</h6>
+                            <div id="entradasSemLote" class="limited-section">
+                                <div class="text-muted">Carregando entradas sem lote...</div>
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -738,6 +745,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Verificação de vencimento
     const vencEl = document.getElementById('data_vencimento');
     if (vencEl) vencEl.addEventListener('change', verificarVencimentoModal);
+    carregarEntradasSemLote();
 });
 
 // Helper: formatar quantidade como inteiro + unidade
@@ -922,6 +930,16 @@ function verificarVencimentoModal() {
           </div>
           <div class="row">
             <div class="col-md-6 mb-3">
+              <label for="edit_data_fabricacao" class="form-label">Data de Fabricação</label>
+              <input type="date" class="form-control" id="edit_data_fabricacao" name="edit_data_fabricacao">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label for="edit_data_vencimento" class="form-label">Data de Vencimento</label>
+              <input type="date" class="form-control" id="edit_data_vencimento" name="edit_data_vencimento">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
               <label for="edit_quantidade" class="form-label">Quantidade</label>
               <input type="number" step="0.01" min="0" class="form-control" id="edit_quantidade" name="edit_quantidade" placeholder="0,00">
             </div>
@@ -964,6 +982,13 @@ function abrirEditarEntradaLote(numeroLote) {
       const pad = n => String(n).padStart(2, '0');
       const isoLocal = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
       document.getElementById('edit_data_recebimento').value = isoLocal;
+      try {
+        const df = ent.lote_data_fabricacao ? new Date(ent.lote_data_fabricacao) : null;
+        const dv = ent.lote_data_vencimento ? new Date(ent.lote_data_vencimento) : null;
+        const pad2 = n => String(n).padStart(2, '0');
+        document.getElementById('edit_data_fabricacao').value = df ? `${df.getFullYear()}-${pad2(df.getMonth()+1)}-${pad2(df.getDate())}` : '';
+        document.getElementById('edit_data_vencimento').value = dv ? `${dv.getFullYear()}-${pad2(dv.getMonth()+1)}-${pad2(dv.getDate())}` : '';
+      } catch (_) {}
       if (editarEntradaModalInstance) editarEntradaModalInstance.show();
     })
     .catch(err => {
@@ -992,7 +1017,9 @@ document.getElementById('salvarEdicaoEntrada')?.addEventListener('click', () => 
     nota_fiscal: document.getElementById('edit_nota_fiscal').value || null,
     preco_unitario: document.getElementById('edit_preco_unitario').value || null,
     observacoes: document.getElementById('edit_observacoes').value || null,
-    quantidade: quantidade
+    quantidade: quantidade,
+    data_fabricacao: document.getElementById('edit_data_fabricacao').value || null,
+    data_vencimento: document.getElementById('edit_data_vencimento').value || null
   };
   fetch(`/api/produtos/${produtoId}/lotes/${encodeURIComponent(loteEditando)}/entrada`, {
     method: 'PATCH',
@@ -1012,6 +1039,58 @@ document.getElementById('salvarEdicaoEntrada')?.addEventListener('click', () => 
     alert(`Erro: ${err.message}`);
   });
 });
+</script>
+<script>
+async function carregarEntradasSemLote() {
+  const el = document.getElementById('entradasSemLote');
+  if (!el) return;
+  try {
+    const data = await fetchJson(`/api/produtos/${produtoId}/entradas/sem-lote`);
+    const items = data.items || [];
+    if (!items.length) { el.innerHTML = '<div class="text-muted">Nenhuma entrada sem lote.</div>'; return; }
+    let html = '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Recebido</th><th>Qtd</th><th>Fornecedor</th><th>Destino</th><th>Definir lote</th></tr></thead><tbody>';
+    for (const it of items) {
+      const dt = it.data_recebimento ? new Date(it.data_recebimento) : null;
+      const dtStr = dt ? dt.toLocaleString('pt-BR') : '-';
+      html += `<tr>
+        <td>${dtStr}</td>
+        <td>${formatQuantidade(it.quantidade)}</td>
+        <td>${it.fornecedor || '-'}</td>
+        <td>${it.destino_nome || '-'}</td>
+        <td>
+          <div class="input-group input-group-sm">
+            <input type="text" class="form-control" placeholder="Lote" data-movid="${it.id}" />
+            <button class="btn btn-outline-primary" data-action="definir-lote" data-movid="${it.id}"><i class="fas fa-save"></i></button>
+          </div>
+        </td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+    el.querySelectorAll('[data-action="definir-lote"]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const movid = btn.getAttribute('data-movid');
+        const inp = el.querySelector(`input[data-movid="${movid}"]`);
+        const lote = inp ? inp.value.trim() : '';
+        if (!lote) { alert('Informe o número do lote'); return; }
+        try {
+          await fetchJson(`/api/movimentacoes/${encodeURIComponent(movid)}/definir-lote`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lote })
+          });
+          inp.value = '';
+          carregarLotes();
+          carregarEntradasSemLote();
+          alert('Lote definido com sucesso');
+        } catch (err) {
+          alert(err.message || 'Erro ao definir lote');
+        }
+      });
+    });
+  } catch (err) {
+    el.innerHTML = `<div class="text-danger">Erro: ${err.message}</div>`;
+  }
+}
 </script>
 <style>
 .limited-section { max-height: 360px; overflow-y: auto; }
