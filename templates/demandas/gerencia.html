@@ -73,7 +73,7 @@
                         <div class="mb-2"><strong>Qtd solicitada:</strong> <span id="modalQuantidadeSolicitada">0</span></div>
                         <div class="mb-2"><strong>Disponível total:</strong> <span id="modalDisponivelTotal">-</span></div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" id="locaisDisponiveisSection">
                         <label class="form-label">Locais disponíveis</label>
                         <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
                             <ul class="list-group list-group-flush" id="listaLocaisDisponiveis">
@@ -85,7 +85,7 @@
 
                 <hr>
 
-                <div class="row g-3">
+                <div class="row g-3" id="origemGlobalRow">
                     <div class="col-md-4">
                         <label for="tipoOrigemDemanda" class="form-label">Tipo de Origem *</label>
                         <select class="form-select" id="tipoOrigemDemanda" onchange="carregarLocaisOrigemDemanda()">
@@ -109,11 +109,34 @@
                     <label for="observacoesDemanda" class="form-label">Observações</label>
                     <textarea class="form-control" id="observacoesDemanda" rows="2" placeholder="Opcional"></textarea>
                 </div>
+                <div id="grupoContainer" class="mt-3" style="display:none;">
+                    <h6>Itens da lista</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Enviar</th>
+                                    <th>Produto</th>
+                                    <th class="text-end">Solicitado</th>
+                                    <th>Tipo origem</th>
+                                    <th>Local origem</th>
+                                    <th class="text-end">Disponível</th>
+                                    <th class="text-end">Qtd a enviar</th>
+                                </tr>
+                            </thead>
+                
+                            <tbody id="grupoItensBody"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="executarAtendimentoDemanda()">
+                <button type="button" id="btnEnviarUnico" class="btn btn-primary" onclick="executarAtendimentoDemanda()">
                     <i class="fas fa-paper-plane"></i> Enviar para setor
+                </button>
+                <button type="button" id="btnEnviarSelecionados" class="btn btn-primary" style="display:none;" onclick="executarAtendimentoDemandaGrupo()">
+                    <i class="fas fa-paper-plane"></i> Atender selecionados
                 </button>
             </div>
         </div>
@@ -132,21 +155,80 @@ async function carregarDemandasGerencia() {
     const el = document.getElementById('listaDemandasGerencia');
     el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
     try {
-        const res = await fetch('/api/demandas?status=pendente&per_page=50');
+        const cacheKey = 'cache:/api/demandas?status=pendente&per_page=50';
+        const cached = window.readCacheJson(cacheKey);
+        let base = (cached && Array.isArray(cached.items)) ? cached.items.slice() : [];
+        if (base.length) {
+            const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+            const rows = base.map(d => {
+                const dataAttr = encodeURIComponent(JSON.stringify(d));
+                const isGrupo = Number(d.items_count || 0) > 0 || String(d.produto_nome||'').startsWith('Lista (');
+                const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
+                const unidade = isGrupo ? '' : (d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '');
+                return `
+                <tr>
+                    <td>${htmlEscape(d.display_id || d.id)}</td>
+                    <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
+                    <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
+                    <td class="text-end">${qtdStr}${unidade}</td>
+                    <td>${htmlEscape(d.destino_tipo || '')}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-primary" data-demanda="${dataAttr}" onclick="abrirModalAtenderDemanda(this)"><i class="fas fa-paper-plane"></i> Enviar</button>
+                            <button class="btn btn-outline-danger" onclick="atualizarStatus('${htmlEscape(d.id)}','negado')"><i class="fas fa-ban"></i> Rejeitar</button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+            el.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Produto</th>
+                                <th>Setor</th>
+                                <th class="text-end">Qtd</th>
+                                <th>Destino</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+        let lastTs = '';
+        try {
+            const parse = v => { try { return v ? Date.parse(v) : 0; } catch(_) { return 0; } };
+            lastTs = base.reduce((acc, it) => {
+                const t = parse(it.updated_at || it.created_at);
+                return t > acc ? t : acc;
+            }, 0);
+            if (lastTs) lastTs = new Date(lastTs).toISOString();
+        } catch (_) {}
+        const url = lastTs ? `/api/demandas?status=pendente&per_page=50&updated_since=${encodeURIComponent(lastTs)}` : '/api/demandas?status=pendente&per_page=50';
+        const res = await fetch(url);
         const data = await res.json();
         if (!res.ok) {
             el.innerHTML = `<div class="alert alert-danger">${htmlEscape(data.error || 'Erro ao listar')}</div>`;
             return;
         }
+        window.writeCacheJson(cacheKey, data, 300000);
         if (!data.items || !data.items.length) {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda pendente.</div>';
             return;
         }
         const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-        const rows = data.items.map(d => {
+        const seen = new Set();
+        const merged = (data.items || []).concat(base || []);
+        const rows = merged.filter(d => {
+            const id = String(d.id || d.display_id || '');
+            if (seen.has(id)) return false; seen.add(id); return true;
+        }).map(d => {
             const dataAttr = encodeURIComponent(JSON.stringify(d));
             const isGrupo = Number(d.items_count || 0) > 0 || String(d.produto_nome||'').startsWith('Lista (');
-            const qtdStr = isGrupo ? nf0.format(Number(d.quantidade_solicitada || 0)) : nf0.format(Number(d.quantidade_solicitada || 0));
+            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
             const unidade = isGrupo ? '' : (d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '');
             return `
             <tr>
@@ -189,6 +271,48 @@ async function carregarDemandasResolvidas() {
     const el = document.getElementById('listaDemandasResolvidas');
     el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
     try {
+        const cacheKey = 'cache:/api/demandas-resolvidas:listas';
+        const cached = window.readCacheJson(cacheKey);
+        if (cached && Array.isArray(cached.items) && cached.items.length) {
+            const parseDate = (v) => { try { return v ? Date.parse(v) : 0; } catch (_) { return 0; } };
+            const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+            const itemsCached = cached.items.slice().sort((a, b) => (parseDate(b.updated_at || b.created_at) - parseDate(a.updated_at || a.created_at)));
+            const rowsCached = itemsCached.map(d => {
+                const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : (d.status === 'parcialmente_atendido' ? 'warning' : 'secondary'));
+                const whenIso = htmlEscape(d.updated_at || d.created_at || '');
+                const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
+                const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
+                return `
+                <tr>
+                    <td>${htmlEscape(d.display_id || d.id)}</td>
+                    <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
+                    <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
+                    <td class="text-end">${qtdStr}${unidade}</td>
+                    <td>${htmlEscape(d.destino_tipo || '')}</td>
+                    <td><span class="badge bg-${badgeClass}">${htmlEscape(d.status || '')}</span></td>
+                    <td class="text-muted"><span data-datetime-iso="${whenIso}">${whenIso}</span></td>
+                </tr>`;
+            }).join('');
+            el.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Produto</th>
+                                <th>Setor</th>
+                                <th class="text-end">Qtd</th>
+                                <th>Destino</th>
+                                <th>Status</th>
+                                <th>Atualizado</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsCached}</tbody>
+                    </table>
+                </div>
+            `;
+            if (window.applyLocalDateFormatting) window.applyLocalDateFormatting(el);
+        }
         const [resAtendido, resParcial, resNegado] = await Promise.all([
             fetch('/api/demandas?status=atendido&per_page=50'),
             fetch('/api/demandas?status=parcialmente_atendido&per_page=50'),
@@ -204,6 +328,7 @@ async function carregarDemandasResolvidas() {
             return;
         }
         const items = [...(dataAt.items || []), ...(dataParc.items || []), ...(dataNeg.items || [])];
+        window.writeCacheJson(cacheKey, { items }, 300000);
         if (!items.length) {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda resolvida.</div>';
             return;
@@ -215,7 +340,7 @@ async function carregarDemandasResolvidas() {
         const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
         const rows = items.map(d => {
             const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : (d.status === 'parcialmente_atendido' ? 'warning' : 'secondary'));
-            const when = htmlEscape(d.updated_at || d.created_at || '');
+            const whenIso = htmlEscape(d.updated_at || d.created_at || '');
             const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
             const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
             return `
@@ -226,7 +351,7 @@ async function carregarDemandasResolvidas() {
                 <td class="text-end">${qtdStr}${unidade}</td>
                 <td>${htmlEscape(d.destino_tipo || '')}</td>
                 <td><span class="badge bg-${badgeClass}">${htmlEscape(d.status || '')}</span></td>
-                <td class="text-muted">${when}</td>
+                <td class="text-muted"><span data-datetime-iso="${whenIso}">${whenIso}</span></td>
             </tr>`;
         }).join('');
         el.innerHTML = `
@@ -247,6 +372,7 @@ async function carregarDemandasResolvidas() {
                 </table>
             </div>
         `;
+        if (window.applyLocalDateFormatting) window.applyLocalDateFormatting(el);
     } catch (e) {
         el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
     }
@@ -275,7 +401,7 @@ async function atualizarStatus(id, status, quantidade_autorizada, opts = {}) {
     }
 }
 
-function abrirModalAtenderDemanda(btnEl) {
+async function abrirModalAtenderDemanda(btnEl) {
     try {
         const d = JSON.parse(decodeURIComponent(btnEl.getAttribute('data-demanda')));
         demandaAtual = d;
@@ -289,8 +415,35 @@ function abrirModalAtenderDemanda(btnEl) {
         document.getElementById('infoDisponivelLocal').textContent = '';
         document.getElementById('quantidadeDemanda').value = Number(d.quantidade_solicitada || 0);
         document.getElementById('observacoesDemanda').value = '';
-        // Carregar estoque do produto e preencher listas
-        carregarLocaisProdutoDemanda(String(d.produto_id));
+        // Grupo vs único
+        const isGrupo = (Array.isArray(d.items) && d.items.length > 0) || (Number(d.items_count || 0) > 0) || String(d.produto_nome||'').startsWith('Lista (');
+        const grupoEl = document.getElementById('grupoContainer');
+        const btnUnico = document.getElementById('btnEnviarUnico');
+        const btnSel = document.getElementById('btnEnviarSelecionados');
+        const origemGlobalRow = document.getElementById('origemGlobalRow');
+        const locaisDispSec = document.getElementById('locaisDisponiveisSection');
+        if (grupoEl && btnUnico && btnSel) {
+            grupoEl.style.display = isGrupo ? 'block' : 'none';
+            btnUnico.style.display = isGrupo ? 'none' : 'inline-block';
+            btnSel.style.display = isGrupo ? 'inline-block' : 'none';
+        }
+        if (origemGlobalRow) origemGlobalRow.style.display = isGrupo ? 'none' : 'flex';
+        if (locaisDispSec) locaisDispSec.style.display = isGrupo ? 'none' : 'block';
+        if (isGrupo) {
+            let items = Array.isArray(d.items) ? d.items : [];
+            if (!items.length) {
+                try {
+                    const det = await fetchJson(`/api/demandas/${encodeURIComponent(d.id || d.display_id || '')}`);
+                    if (Array.isArray(det.items)) items = det.items;
+                } catch (e) {}
+            }
+            renderizarItensGrupo(items, d.setor_id);
+        } else {
+            const baseProdutoId = String(d.produto_id);
+            if (baseProdutoId) {
+                carregarLocaisProdutoDemanda(baseProdutoId);
+            }
+        }
         // Abrir modal
         const modal = new bootstrap.Modal(document.getElementById('atenderDemandaModal'));
         modal.show();
@@ -320,7 +473,11 @@ async function carregarLocaisProdutoDemanda(produtoId) {
         const dispTotal = (data && data.resumo && data.resumo.total_disponivel) ? Number(data.resumo.total_disponivel || 0) : 0;
         dispTotalEl.textContent = dispTotal.toLocaleString('pt-BR');
         // Filtrar locais válidos para origem (exclui setor)
-        const validos = estoques.filter(e => String(e.tipo).toLowerCase() !== 'setor' && Number(e.quantidade_disponivel || 0) > 0);
+        const validos = estoques.filter(e => {
+            const t = String(e.tipo).toLowerCase();
+            const disp = Number((e.quantidade_disponivel ?? e.quantidade ?? 0));
+            return t !== 'setor' && disp > 0;
+        });
         if (!validos.length) {
             listaEl.innerHTML = '<li class="list-group-item text-danger">Produto sem estoque disponível para envio.</li>';
             tipoSelect.innerHTML = '<option value="">Sem estoque disponível</option>';
@@ -328,13 +485,17 @@ async function carregarLocaisProdutoDemanda(produtoId) {
             return;
         }
         // Render lista
-        listaEl.innerHTML = validos.map(v => `<li class="list-group-item">${htmlEscape(tipoLabel(v.tipo))} • ${htmlEscape(v.nome_local)} <span class="float-end">Disponível: ${Number(v.quantidade_disponivel || 0).toLocaleString('pt-BR')}</span></li>`).join('');
+        listaEl.innerHTML = validos.map(v => {
+            const disp = Number((v.quantidade_disponivel ?? v.quantidade ?? 0));
+            return `<li class="list-group-item">${htmlEscape(tipoLabel(v.tipo))} • ${htmlEscape(v.nome_local)} <span class="float-end">Disponível: ${disp.toLocaleString('pt-BR')}</span></li>`;
+        }).join('');
         // Agrupar por tipo
         const tipos = {};
         validos.forEach(v => {
             const t = String(v.tipo).toLowerCase();
             if (!tipos[t]) tipos[t] = [];
-            tipos[t].push({ id: String(v.local_id), nome: v.nome_local, quantidade: Number(v.quantidade_disponivel || 0) });
+            const disp = Number((v.quantidade_disponivel ?? v.quantidade ?? 0));
+            tipos[t].push({ id: String(v.local_id), nome: v.nome_local, quantidade: disp });
         });
         locaisDisponiveisDemanda = tipos;
         // Preencher tipo
@@ -363,6 +524,7 @@ function carregarLocaisOrigemDemanda() {
     infoDisp.textContent = '';
     if (!tipo || !locaisDisponiveisDemanda[tipo]) {
         localSelect.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
+        updateDisponibilidadeGrupoParaLocal();
         return;
     }
     const locais = locaisDisponiveisDemanda[tipo] || [];
@@ -380,7 +542,9 @@ function carregarLocaisOrigemDemanda() {
         const disp = Number(sel && sel.getAttribute('data-quantidade') || 0);
         infoDisp.textContent = sel && sel.value ? `Disponível neste local: ${disp.toLocaleString('pt-BR')}` : '';
         qtdInput.max = sel && sel.value ? String(disp) : '';
+        updateDisponibilidadeGrupoParaLocal();
     }, { once: true });
+    updateDisponibilidadeGrupoParaLocal();
 }
 
 async function executarAtendimentoDemanda() {
@@ -419,8 +583,10 @@ async function executarAtendimentoDemanda() {
             alert(data.error || 'Falha ao enviar produto');
             return;
         }
-        // Atualizar demanda como atendida (somente sucesso completo mostra confirmação)
-        const upd = await atualizarStatus(demandaAtual.id, 'atendido', parseFloat(quantidade), { silent: true });
+        const qtdSolic = Number(demandaAtual.quantidade_solicitada || 0);
+        const qtdEnv = parseFloat(quantidade);
+        const novoStatus = qtdEnv >= qtdSolic ? 'atendido' : 'parcialmente_atendido';
+        const upd = await atualizarStatus(demandaAtual.id, novoStatus, qtdEnv, { silent: true });
         if (!upd.ok) {
             alert('Transferência realizada, porém não foi possível atualizar a demanda: ' + upd.message);
             return;
@@ -430,7 +596,7 @@ async function executarAtendimentoDemanda() {
         if (modal) modal.hide();
         demandaAtual = null;
         carregarDemandasResolvidas();
-        alert('Demanda atendida com sucesso!');
+        alert(novoStatus === 'atendido' ? 'Demanda atendida com sucesso!' : 'Demanda parcialmente atendida!');
     } catch (err) {
         console.error('Erro ao atender demanda:', err);
         alert('Erro ao atender demanda: ' + (err && err.message ? err.message : String(err)));
@@ -439,13 +605,18 @@ async function executarAtendimentoDemanda() {
 
 async function executarAtendimentoDemandaGrupo() {
     if (!demandaAtual || !Array.isArray(demandaAtual.items)) {
-        alert('Demanda em grupo não carregada');
-        return;
+        try {
+            const det = await fetchJson(`/api/demandas/${encodeURIComponent(demandaAtual && (demandaAtual.id || demandaAtual.display_id || ''))}`);
+            if (Array.isArray(det.items)) {
+                demandaAtual.items = det.items;
+            }
+        } catch (_) {}
+        if (!demandaAtual || !Array.isArray(demandaAtual.items)) {
+            alert('Demanda em grupo não carregada');
+            return;
+        }
     }
-    const tipo = document.getElementById('tipoOrigemDemanda').value;
-    const localId = document.getElementById('localOrigemDemanda').value;
     const observacoes = document.getElementById('observacoesDemanda').value || null;
-    if (!tipo || !localId) { alert('Preencha tipo e local de origem.'); return; }
     const setorId = String(demandaAtual.setor_id);
     const linhas = Array.from(document.querySelectorAll('#grupoItensBody tr'));
     const selecionados = [];
@@ -453,18 +624,29 @@ async function executarAtendimentoDemandaGrupo() {
         const chk = tr.querySelector('input[type="checkbox"]');
         if (chk && chk.checked) {
             const pid = tr.getAttribute('data-pid');
-            const qtdInput = tr.querySelector('input[type="number"]');
+            const tipoSel = tr.querySelector('select[id^="itemTipo_"]');
+            const localSel = tr.querySelector('select[id^="itemLocal_"]');
+            const qtdInput = tr.querySelector('input[id^="itemQtd_"]');
             const qtd = parseFloat(qtdInput && qtdInput.value || '0');
-            if (pid && qtd > 0) selecionados.push({ produto_id: pid, quantidade: qtd });
+            const tipo = tipoSel ? tipoSel.value : '';
+            const localId = localSel ? localSel.value : '';
+            if (pid && qtd > 0 && tipo && localId) selecionados.push({ produto_id: pid, quantidade: qtd, tipo, localId });
         }
     }
     if (!selecionados.length) { alert('Selecione ao menos um item com quantidade > 0'); return; }
     let enviados = [];
     for (const it of selecionados) {
+        // Cap quantidade ao disponível no local selecionado
+        const entries = grupoItemsEstoque[String(it.produto_id)] || [];
+        const match = entries.find(e => String(e.tipo) === String(it.tipo) && String(e.local_id) === String(it.localId));
+        const disp = Number(match ? match.quantidade : 0);
+        if (disp > 0 && it.quantidade > disp) {
+            it.quantidade = disp;
+        }
         const payload = {
             produto_id: String(it.produto_id),
             quantidade: parseFloat(it.quantidade),
-            origem: { tipo: tipo, id: String(localId) },
+            origem: { tipo: it.tipo, id: String(it.localId) },
             destino: { tipo: 'setor', id: setorId },
             motivo: `Atendimento parcial de demanda ${demandaAtual.id}`,
             observacoes: observacoes
@@ -477,8 +659,24 @@ async function executarAtendimentoDemandaGrupo() {
             }
         } catch (_) {}
     }
-    const status = (enviados.length === (demandaAtual.items || []).length) ? 'atendido' : (enviados.length > 0 ? 'parcialmente_atendido' : 'pendente');
-    await atualizarStatus(demandaAtual.id, status, enviados.reduce((s, x) => s + Number(x.quantidade || 0), 0), { atendimento: enviados });
+    const solicitadasByPid = new Map();
+    for (const it of (demandaAtual.items || [])) {
+        solicitadasByPid.set(String(it.produto_id), Number(it.quantidade || 0));
+    }
+    const enviadosByPid = new Map();
+    for (const e of enviados) {
+        const k = String(e.produto_id);
+        const prev = enviadosByPid.get(k) || 0;
+        enviadosByPid.set(k, prev + Number(e.quantidade || 0));
+    }
+    let fullCount = 0, anySent = enviados.length > 0;
+    for (const [pid, qtdSol] of solicitadasByPid.entries()) {
+        const qtdEnv = enviadosByPid.get(pid) || 0;
+        if (qtdEnv >= qtdSol && qtdSol > 0) fullCount++;
+    }
+    const totalItems = solicitadasByPid.size;
+    const status = fullCount === totalItems && totalItems > 0 ? 'atendido' : (anySent ? 'parcialmente_atendido' : 'pendente');
+    await atualizarStatus(demandaAtual.id, status, Array.from(enviadosByPid.values()).reduce((s, v) => s + Number(v || 0), 0), { atendimento: enviados });
     const modal = bootstrap.Modal.getInstance(document.getElementById('atenderDemandaModal'));
     if (modal) modal.hide();
     demandaAtual = null;
@@ -487,28 +685,173 @@ async function executarAtendimentoDemandaGrupo() {
     alert(status === 'atendido' ? 'Demanda atendida.' : 'Demanda parcialmente atendida.');
 }
 
+let grupoItemsEstoque = {};
 async function renderizarItensGrupo(items, setorId) {
     const tbody = document.getElementById('grupoItensBody');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div></td></tr>';
     const rows = [];
+    grupoItemsEstoque = {};
+    let totalDispSum = 0;
     for (const it of (items || [])) {
-        let disponivel = '0';
+        let estoqueEntries = [];
         try {
             const res = await fetch(`/api/produtos/${encodeURIComponent(it.produto_id)}/estoque`);
             const data = await res.json();
-            disponivel = (data && data.resumo && data.resumo.total_disponivel) ? String(Number(data.resumo.total_disponivel || 0).toLocaleString('pt-BR')) : '0';
-        } catch (_) { disponivel = '0'; }
+            const estoques = (data && data.estoques) ? data.estoques : [];
+            estoqueEntries = estoques.map(e => ({ tipo: String(e.tipo).toLowerCase(), local_id: String(e.local_id), nome_local: e.nome_local, quantidade: Number((e.quantidade_disponivel ?? e.quantidade ?? 0)) }));
+            try { totalDispSum += Number((data && data.resumo && data.resumo.total_disponivel) || 0); } catch (_) {}
+        } catch (_) {}
+        grupoItemsEstoque[String(it.produto_id)] = estoqueEntries;
         const qtdSolicStr = Number(it.quantidade || 0).toLocaleString('pt-BR');
+        const tipos = Array.from(new Set(estoqueEntries.map(e => e.tipo)));
+        const tipoOpts = tipos.map(t => `<option value="${t}">${htmlEscape(tipoLabel(t))}</option>`).join('');
+        const firstTipo = tipos[0] || '';
+        const locais = estoqueEntries.filter(e => e.tipo === firstTipo);
+        const localOpts = locais.map((l, idx) => `<option ${idx===0?'selected':''} value="${htmlEscape(String(l.local_id))}" data-quantidade="${Number(l.quantidade)}">${htmlEscape(l.nome_local || l.local_id)}</option>`).join('');
+        const dispFirst = locais.length ? Number(locais[0].quantidade) : 0;
         rows.push(`<tr data-pid="${htmlEscape(String(it.produto_id))}">
-            <td><input type="checkbox" checked></td>
+            <td><input type="checkbox" ${dispFirst>0?'checked':''}></td>
             <td>${htmlEscape(it.produto_nome || String(it.produto_id))}</td>
             <td class="text-end">${qtdSolicStr}</td>
-            <td class="text-end">${disponivel}</td>
-            <td class="text-end"><input type="number" class="form-control form-control-sm" step="0.001" min="0" value="${Number(it.quantidade || 0)}"></td>
+            <td><select class="form-select form-select-sm" id="itemTipo_${htmlEscape(String(it.produto_id))}" onchange="onItemTipoChange('${htmlEscape(String(it.produto_id))}')">${tipoOpts}</select></td>
+            <td><select class="form-select form-select-sm" id="itemLocal_${htmlEscape(String(it.produto_id))}" onchange="updateDisponibilidadeItemRow('${htmlEscape(String(it.produto_id))}')">${localOpts}</select><div class="form-text text-danger" id="itemErr_${htmlEscape(String(it.produto_id))}"></div></td>
+            <td class="text-end"><span id="itemDisp_${htmlEscape(String(it.produto_id))}">${dispFirst.toLocaleString('pt-BR')}</span></td>
+            <td class="text-end"><input type="number" class="form-control form-control-sm" id="itemQtd_${htmlEscape(String(it.produto_id))}" step="0.001" min="0" value="${dispFirst>0?Number(it.quantidade || 0):0}"></td>
         </tr>`);
     }
     tbody.innerHTML = rows.join('');
+    const dispTotalEl = document.getElementById('modalDisponivelTotal');
+    if (dispTotalEl) dispTotalEl.textContent = Number(totalDispSum).toLocaleString('pt-BR');
+    validateSelecionados();
+}
+
+function onItemTipoChange(pid) {
+    const tipoSel = document.getElementById(`itemTipo_${pid}`);
+    const localSel = document.getElementById(`itemLocal_${pid}`);
+    const entries = grupoItemsEstoque[String(pid)] || [];
+    const t = String(tipoSel.value || '').toLowerCase();
+    const locais = entries.filter(e => String(e.tipo) === t);
+    localSel.innerHTML = '<option value="">Selecione...</option>' + locais.map((l, idx) => `<option ${idx===0?'selected':''} value="${htmlEscape(String(l.local_id))}" data-quantidade="${Number(l.quantidade)}">${htmlEscape(l.nome_local || l.local_id)}</option>`).join('');
+    if (locais.length) {
+        try { localSel.value = String(locais[0].local_id); } catch (_) {}
+    }
+    updateDisponibilidadeItemRow(pid);
+    validateSelecionados();
+}
+
+function updateDisponibilidadeItemRow(pid) {
+    const tipoSel = document.getElementById(`itemTipo_${pid}`);
+    const localSel = document.getElementById(`itemLocal_${pid}`);
+    const dispEl = document.getElementById(`itemDisp_${pid}`);
+    const qtdEl = document.getElementById(`itemQtd_${pid}`);
+    const errEl = document.getElementById(`itemErr_${pid}`);
+    const chk = document.querySelector(`tr[data-pid="${CSS.escape(pid)}"] input[type="checkbox"]`);
+    const entries = grupoItemsEstoque[String(pid)] || [];
+    const t = String(tipoSel.value || '').toLowerCase();
+    const lid = String(localSel.value || '');
+    let disp = 0;
+    if (t && lid) {
+        const match = entries.find(e => String(e.tipo) === t && String(e.local_id) === lid);
+        disp = Number(match ? match.quantidade : 0);
+    } else if (t) {
+        disp = entries.filter(e => String(e.tipo) === t).reduce((s, e) => s + Number(e.quantidade || 0), 0);
+    }
+    dispEl.textContent = Number(disp).toLocaleString('pt-BR');
+    if (qtdEl) {
+        qtdEl.max = disp > 0 ? String(disp) : '';
+        const val = parseFloat(qtdEl.value || '0');
+        if (disp > 0 && val > disp) qtdEl.value = String(disp);
+    }
+    if (chk) {
+        if (disp <= 0) {
+            chk.checked = false;
+            if (errEl) errEl.textContent = 'Sem estoque no local selecionado.';
+        } else {
+            if (errEl) errEl.textContent = '';
+        }
+    }
+    validateSelecionados();
+}
+
+async function enviarItemDemandaRow(pid) {
+    if (!demandaAtual) return;
+    const tipo = document.getElementById(`itemTipo_${pid}`).value;
+    const localId = document.getElementById(`itemLocal_${pid}`).value;
+    const qtd = parseFloat(document.getElementById(`itemQtd_${pid}`).value || '0');
+    const observacoes = document.getElementById('observacoesDemanda').value || null;
+    if (!tipo || !localId || !(qtd > 0)) return;
+    const payload = {
+        produto_id: String(pid),
+        quantidade: qtd,
+        origem: { tipo: tipo, id: String(localId) },
+        destino: { tipo: 'setor', id: String(demandaAtual.setor_id) },
+        motivo: `Atendimento de demanda ${demandaAtual.id}`,
+        observacoes: observacoes
+    };
+    try {
+        const res = await fetch('/api/movimentacoes/transferencia', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Falha ao enviar'); return; }
+        await atualizarStatus(demandaAtual.id, 'parcialmente_atendido', qtd, { atendimento: [{ produto_id: String(pid), quantidade: qtd }] });
+        carregarDemandasGerencia();
+        carregarDemandasResolvidas();
+        alert('Item enviado');
+    } catch (e) {}
+}
+
+function updateDisponibilidadeGrupoParaLocal() {
+    const tipo = String(document.getElementById('tipoOrigemDemanda').value || '').toLowerCase();
+    const localId = String(document.getElementById('localOrigemDemanda').value || '');
+    const tbody = document.getElementById('grupoItensBody');
+    if (!tbody) return;
+    const trs = Array.from(tbody.querySelectorAll('tr'));
+    for (const tr of trs) {
+        const pid = tr.getAttribute('data-pid');
+        const entries = grupoItemsEstoque[pid] || [];
+        let disp = 0;
+        if (tipo && localId) {
+            const match = entries.find(e => e.tipo === tipo && String(e.local_id) === localId);
+            disp = Number(match ? match.quantidade : 0);
+        } else if (tipo) {
+            disp = entries.filter(e => e.tipo === tipo).reduce((s, e) => s + Number(e.quantidade || 0), 0);
+        }
+        const input = tr.querySelector('input[type="number"]');
+        if (input) {
+            input.max = disp > 0 ? String(disp) : '';
+            const val = parseFloat(input.value || '0');
+            if (disp > 0 && val > disp) {
+                input.value = String(disp);
+            }
+        }
+    }
+}
+
+function validateSelecionados() {
+    const btnSel = document.getElementById('btnEnviarSelecionados');
+    const linhas = Array.from(document.querySelectorAll('#grupoItensBody tr'));
+    let anySelected = false;
+    let invalid = false;
+    for (const tr of linhas) {
+        const chk = tr.querySelector('input[type="checkbox"]');
+        const pid = tr.getAttribute('data-pid');
+        const tipoSel = tr.querySelector('select[id^="itemTipo_"]');
+        const localSel = tr.querySelector('select[id^="itemLocal_"]');
+        const qtdInput = tr.querySelector('input[id^="itemQtd_"]');
+        const errEl = document.getElementById(`itemErr_${pid}`);
+        const selected = !!(chk && chk.checked);
+        const tipoOk = !!(tipoSel && tipoSel.value);
+        const localOk = !!(localSel && localSel.value);
+        const qtdOk = (parseFloat(qtdInput && qtdInput.value || '0') > 0);
+        if (selected) anySelected = true;
+        if (selected && (!tipoOk || !localOk || !qtdOk)) {
+            invalid = true;
+            if (errEl) errEl.textContent = 'Preencha tipo, local e quantidade.';
+        } else {
+            if (errEl) errEl.textContent = '';
+        }
+    }
+    if (btnSel) btnSel.disabled = (!anySelected || invalid);
 }
 
 window.addEventListener('DOMContentLoaded', () => {

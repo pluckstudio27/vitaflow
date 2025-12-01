@@ -5694,11 +5694,20 @@ def api_dashboard_vencimentos():
             if not value:
                 return None
             if isinstance(value, datetime):
-                return value
+                return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
             try:
-                return datetime.fromisoformat(str(value))
+                dt = datetime.fromisoformat(str(value))
             except Exception:
+                dt = None
+            if dt is None:
                 return None
+            if dt.tzinfo is None:
+                try:
+                    local_tz = datetime.now().astimezone().tzinfo
+                except Exception:
+                    local_tz = timezone.utc
+                dt = dt.replace(tzinfo=local_tz)
+            return dt
 
         def _resolve_produto(pid):
             try:
@@ -6011,7 +6020,8 @@ def api_movimentacoes():
         'tipo': (request.args.get('tipo') or '').strip().lower(),
         'produto': (request.args.get('produto') or '').strip(),
         'data_inicio': (request.args.get('data_inicio') or '').strip(),
-        'data_fim': (request.args.get('data_fim') or '').strip()
+        'data_fim': (request.args.get('data_fim') or '').strip(),
+        'updated_since': (request.args.get('updated_since') or '').strip()
     }
 
     coll = extensions.mongo_db['movimentacoes']
@@ -6102,6 +6112,17 @@ def api_movimentacoes():
             except Exception:
                 pass
             date_range['$lte'] = df
+    # Filtro incremental: updated_since
+    if filtros['updated_since']:
+        us = parse_date_str(filtros['updated_since'])
+        if us:
+            if '$gte' in date_range:
+                try:
+                    date_range['$gte'] = max(date_range['$gte'], us)
+                except Exception:
+                    date_range['$gte'] = us
+            else:
+                date_range['$gte'] = us
     if date_range:
         # aceitar campos data_movimentacao e created_at
         if '$and' in query:
@@ -6697,11 +6718,19 @@ def api_produto_lote_entrada(produto_id, numero_lote):
             if not value:
                 return None
             if isinstance(value, datetime):
-                return value
+                return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
             try:
                 dt = datetime.fromisoformat(str(value))
             except Exception:
                 dt = None
+            if dt is None:
+                return None
+            if dt.tzinfo is None:
+                try:
+                    local_tz = datetime.now().astimezone().tzinfo
+                except Exception:
+                    local_tz = timezone.utc
+                dt = dt.replace(tzinfo=local_tz)
             return dt
 
         dr = _parse_date(payload.get('data_recebimento')) or None
@@ -7581,6 +7610,7 @@ def api_demandas():
         per_page = int(request.args.get('per_page', 20))
         status = (request.args.get('status') or '').strip().lower()
         mine = str(request.args.get('mine', '')).lower() in ('1', 'true', 'yes')
+        updated_since = (request.args.get('updated_since') or '').strip()
 
         query = {}
         if status:
@@ -7590,6 +7620,33 @@ def api_demandas():
             if sid is None:
                 return jsonify({'items': [], 'page': 1, 'pages': 1, 'per_page': per_page, 'total': 0})
             query['setor_id'] = sid
+
+        # Filtro por updated_since
+        if updated_since:
+            def _parse_updated_since(s):
+                try:
+                    if '-' in s:
+                        return datetime.fromisoformat(s)
+                    else:
+                        d, m, y = s.split('/')
+                        return datetime(int(y), int(m), int(d))
+                except Exception:
+                    return None
+            us = _parse_updated_since(updated_since)
+            if us is not None:
+                time_or = {'$or': [
+                    {'updated_at': {'$gt': us}},
+                    {'created_at': {'$gt': us}}
+                ]}
+                if '$and' in query:
+                    query['$and'].append(time_or)
+                elif '$or' in query:
+                    query = {'$and': [
+                        {'$or': query['$or']},
+                        time_or
+                    ]}
+                else:
+                    query.update(time_or)
 
         # Escopo por central: para todos os níveis abaixo de super_admin,
         # restringir demandas aos setores pertencentes à central do usuário.
@@ -7708,7 +7765,11 @@ def api_demandas():
         pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, pages))
         skip = max(0, (page - 1) * per_page)
-        cursor = coll.find(query).sort('created_at', -1).skip(skip).limit(per_page)
+        # Ordenar pela atualização mais recente quando disponível
+        try:
+            cursor = coll.find(query).sort([('updated_at', -1), ('created_at', -1)]).skip(skip).limit(per_page)
+        except Exception:
+            cursor = coll.find(query).sort('created_at', -1).skip(skip).limit(per_page)
 
         produtos = db['produtos']
         setores = db['setores']
@@ -8055,10 +8116,13 @@ def api_demandas_finalizar():
     except Exception as e:
         return jsonify({'error': f'Falha ao finalizar lista de demandas: {e}'}), 500
 
-@main_bp.route('/api/demandas/<string:id>', methods=['PUT'])
+@main_bp.route('/api/demandas/<string:id>', methods=['GET', 'PUT'])
 @require_responsible_or_above
 def api_demandas_update(id):
-    """Atualiza status de uma demanda e quantidade autorizada."""
+    """Obtém ou atualiza uma demanda.
+    GET: retorna documento com itens quando for grupo.
+    PUT: atualiza status e quantidade autorizada.
+    """
     db = extensions.mongo_db
     coll = db['demandas']
     # localizar demanda
@@ -8069,6 +8133,46 @@ def api_demandas_update(id):
         doc = coll.find_one({'id': id})
     if not doc:
         return jsonify({'error': 'Demanda não encontrada'}), 404
+
+    if request.method == 'GET':
+        out = {
+            'id': str(doc.get('_id')) if doc.get('_id') is not None else str(doc.get('id')),
+            'status': doc.get('status') or 'pendente',
+            'setor_id': str(doc.get('setor_id')) if doc.get('setor_id') is not None else None,
+            'destino_tipo': doc.get('destino_tipo'),
+            'created_at': doc.get('created_at'),
+            'updated_at': doc.get('updated_at')
+        }
+        if doc.get('atendimento') is not None:
+            out['atendimento'] = doc.get('atendimento')
+        if doc.get('quantidade_autorizada') is not None:
+            try:
+                out['quantidade_autorizada'] = float(doc.get('quantidade_autorizada') or 0)
+            except Exception:
+                out['quantidade_autorizada'] = doc.get('quantidade_autorizada')
+        group_items = doc.get('items') or doc.get('itens')
+        if isinstance(group_items, list) and group_items:
+            # mapear itens mínimos para a UI
+            items_out = []
+            for it in group_items:
+                items_out.append({
+                    'produto_id': str(it.get('produto_id') or it.get('produto_key') or ''),
+                    'produto_nome': it.get('produto_nome') or '-',
+                    'quantidade': float(it.get('quantidade') or 0)
+                })
+            out['items'] = items_out
+            out['items_count'] = len(items_out)
+        else:
+            out['produto_id'] = str(doc.get('produto_id')) if doc.get('produto_id') is not None else None
+            out['quantidade_solicitada'] = float(doc.get('quantidade_solicitada') or 0)
+        # serializar datas
+        for k in ('created_at', 'updated_at'):
+            v = out.get(k)
+            if isinstance(v, datetime):
+                out[k] = v.isoformat()
+            elif v is not None:
+                out[k] = str(v)
+        return jsonify(out)
 
     data = request.get_json(silent=True) or {}
     status = (data.get('status') or '').strip().lower()

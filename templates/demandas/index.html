@@ -55,9 +55,6 @@
                             <button class="btn btn-outline-primary" type="button" onclick="adicionarItemListaDemanda()">
                                 <i class="fas fa-plus"></i> Adicionar à Lista
                             </button>
-                            <button class="btn btn-primary" type="button" onclick="finalizarListaDemanda()">
-                                <i class="fas fa-paper-plane"></i> Enviar Lista
-                            </button>
                         </div>
                     </form>
                 </div>
@@ -82,6 +79,7 @@
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm btn-outline-danger" onclick="limparListaDemanda()"><i class="fas fa-trash"></i> Limpar</button>
                         <button class="btn btn-sm btn-outline-primary" onclick="carregarListaDemanda()"><i class="fas fa-sync-alt"></i> Atualizar</button>
+                        <button class="btn btn-sm btn-primary" onclick="finalizarListaDemanda()"><i class="fas fa-paper-plane"></i> Enviar Lista</button>
                     </div>
                 </div>
                 <div class="card-body" id="listaDemandaRascunho">
@@ -265,10 +263,40 @@ async function finalizarListaDemanda() {
 
 async function carregarDemandas() {
     const el = document.getElementById('listaDemandas');
-    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
+    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visivelmente-hidden">Carregando...</span></div></div>';
     try {
-        const data = await fetchJson('/api/demandas?mine=true&per_page=50');
+        const cacheKey = 'cache:/api/demandas?mine=true&per_page=50';
+        const cached = window.readCacheJson(cacheKey);
+        let base = (cached && Array.isArray(cached.items)) ? cached.items.slice() : [];
+        if (base.length) renderDemandasList(el, base);
+        let lastTs = '';
+        try {
+            const parse = v => { try { return v ? Date.parse(v) : 0; } catch(_) { return 0; } };
+            lastTs = base.reduce((acc, it) => {
+                const t = parse(it.updated_at || it.created_at);
+                return t > acc ? t : acc;
+            }, 0);
+            if (lastTs) lastTs = new Date(lastTs).toISOString();
+        } catch (_) {}
+        let data;
+        if (lastTs) {
+            data = await fetchJson(`/api/demandas?mine=true&per_page=50&updated_since=${encodeURIComponent(lastTs)}`);
+        } else {
+            data = await fetchJson('/api/demandas?mine=true&per_page=50');
+        }
+        window.writeCacheJson(cacheKey, data, 300000);
         let items = Array.isArray(data.items) ? data.items : [];
+        if (base.length && lastTs) {
+            const mergedIds = new Set();
+            const merged = [];
+            items.concat(base).forEach(it => {
+                const id = String(it.id || it.display_id || '');
+                if (mergedIds.has(id)) return;
+                mergedIds.add(id);
+                merged.push(it);
+            });
+            items = merged;
+        }
         const qEl = document.getElementById('minhasDemandasSearch');
         const q = (qEl ? qEl.value : '').trim().toLowerCase();
         if (q) {
@@ -284,43 +312,80 @@ async function carregarDemandas() {
             el.innerHTML = '<div class="text-muted">Nenhuma demanda encontrada.</div>';
             return;
         }
-        const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-        const rows = items.map(d => {
-            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
-            const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
-            return `
-            <tr>
-                <td>${htmlEscape(d.display_id || d.id)}</td>
-                <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
-                <td class="text-end">${qtdStr}${unidade}</td>
-                <td>${htmlEscape(d.destino_tipo || '')}</td>
-                <td><span class="badge bg-${d.status==='aprovado'?'success':d.status==='negado'?'danger':d.status==='atendido'?'primary':'secondary'}">${htmlEscape(d.status || '')}</span></td>
-                <td>${htmlEscape(d.created_at || '')}</td>
-            </tr>
-            `;
-        }).join('');
-        el.innerHTML = `
-            <div class="table-responsive">
-                <table class="table table-sm table-striped">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Produto</th>
-                            <th class="text-end">Qtd</th>
-                            <th>Destino</th>
-                            <th>Status</th>
-                            <th>Criado em</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>
-        `;
+        renderDemandasList(el, items);
     } catch (e) {
         const friendly = (window.friendlyErrorMessage ? window.friendlyErrorMessage(e, 'demandas_lista') : (e && e.message ? e.message : String(e)));
         el.innerHTML = `<div class="alert alert-danger">Falha ao listar demandas: ${htmlEscape(String(friendly))}</div>`;
         if (window.showNotification) window.showNotification('danger', `Falha ao listar demandas: ${friendly}`);
     }
+}
+
+function renderDemandasList(el, items) {
+    let list = Array.isArray(items) ? items : [];
+    const qEl = document.getElementById('minhasDemandasSearch');
+    const q = (qEl ? qEl.value : '').trim().toLowerCase();
+    if (q) {
+        list = list.filter(d => {
+            const a = String(d.display_id || d.id || '').toLowerCase();
+            const b = String(d.produto_nome || d.produto_id || '').toLowerCase();
+            const c = String(d.status || '').toLowerCase();
+            const e = String(d.created_at || '').toLowerCase();
+            return a.includes(q) || b.includes(q) || c.includes(q) || e.includes(q);
+        });
+    }
+    if (!list.length) {
+        el.innerHTML = '<div class="text-muted">Nenhuma demanda encontrada.</div>';
+        return;
+    }
+    const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+    const rows = list.map(d => {
+        const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
+        const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
+        const dt = htmlEscape(d.created_at || '');
+        let detalhes = '—';
+        const st = String(d.status||'').toLowerCase();
+        if (st === 'atendido' || st === 'parcialmente_atendido') {
+            const atd = Array.isArray(d.atendimento) ? d.atendimento : [];
+            if (atd.length) {
+                try {
+                    const parts = atd.map(a => `${htmlEscape(String(a.produto_id))} × ${nf0.format(Number(a.quantidade||0))}`);
+                    detalhes = `Itens: ${parts.join(', ')}`;
+                } catch (_) {}
+            } else if (d.quantidade_autorizada != null) {
+                try { detalhes = `Enviado: ${nf0.format(Number(d.quantidade_autorizada||0))}${unidade}`; } catch(_){}
+            }
+        }
+        return `
+        <tr>
+            <td>${htmlEscape(d.display_id || d.id)}</td>
+            <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
+            <td class="text-end">${qtdStr}${unidade}</td>
+            <td>${htmlEscape(d.destino_tipo || '')}</td>
+            <td><span class="badge bg-${d.status==='aprovado'?'success':d.status==='negado'?'danger':d.status==='atendido'?'primary':'secondary'}">${htmlEscape(d.status || '')}</span></td>
+            <td><span data-datetime-iso="${dt}">${dt}</span></td>
+            <td>${detalhes}</td>
+        </tr>
+        `;
+    }).join('');
+    el.innerHTML = `
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Produto</th>
+                        <th class="text-end">Qtd</th>
+                        <th>Destino</th>
+                        <th>Status</th>
+                        <th>Criado em</th>
+                        <th>Detalhes</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+    if (window.applyLocalDateFormatting) window.applyLocalDateFormatting(el);
 }
 
 let _minhasDemandasSearchTimer = null;

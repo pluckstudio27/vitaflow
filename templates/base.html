@@ -1191,6 +1191,80 @@
             } catch (_) {}
         });
     </script>
+    <script>
+        window.formatLocalDateTime = function(iso) {
+            try {
+                if (!iso) return '';
+                const d = new Date(String(iso));
+                if (isNaN(d.getTime())) return String(iso);
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = String(d.getFullYear());
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                return dd + '/' + mm + '/' + yyyy + ' ' + hh + ':' + min;
+            } catch (_) {
+                return String(iso);
+            }
+        };
+        window.applyLocalDateFormatting = function(root) {
+            try {
+                const r = root || document;
+                const nodes = r.querySelectorAll('[data-datetime-iso]');
+                nodes.forEach(function(el) {
+                    const iso = el.getAttribute('data-datetime-iso');
+                    const txt = window.formatLocalDateTime(iso);
+                    if (txt) el.textContent = txt;
+                });
+            } catch (_) {}
+        };
+        document.addEventListener('DOMContentLoaded', function() {
+            try {
+                window.applyLocalDateFormatting(document);
+                const mo = new MutationObserver(function(muts) {
+                    try {
+                        muts.forEach(function(m) {
+                            const t = m.target;
+                            if (t && t.querySelectorAll) window.applyLocalDateFormatting(t);
+                        });
+                    } catch (_) {}
+                });
+                mo.observe(document.body, { childList: true, subtree: true });
+            } catch (_) {}
+        });
+    </script>
+    <script>
+        (function(){
+            const LS = window.localStorage;
+            function nowMs(){ return Date.now(); }
+            window.writeCacheJson = function(key, data, ttlMs){
+                try {
+                    const exp = nowMs() + Math.max(1000, Number(ttlMs||120000));
+                    const obj = { v: 1, exp, data };
+                    LS.setItem(String(key), JSON.stringify(obj));
+                } catch(_){}
+            };
+            window.readCacheJson = function(key){
+                try {
+                    const raw = LS.getItem(String(key));
+                    if (!raw) return null;
+                    const obj = JSON.parse(raw);
+                    if (!obj || typeof obj !== 'object') return null;
+                    if (Number(obj.exp||0) < nowMs()) return null;
+                    return obj.data;
+                } catch(_){ return null; }
+            };
+            window.cachedFetchJson = async function(url, opts){
+                const key = 'cache:' + String(url);
+                const ttl = (opts && opts.ttlMs) || 120000;
+                const cached = window.readCacheJson(key);
+                if (cached) return cached;
+                const data = await window.fetchJson(url, opts && opts.options || {});
+                window.writeCacheJson(key, data, ttl);
+                return data;
+            };
+        })();
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
