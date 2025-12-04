@@ -616,6 +616,7 @@ def api_categorias_list():
     try:
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 10))
+        per_page = max(1, min(per_page, 100))
         search = (request.args.get('search') or '').strip()
         ativo_param = request.args.get('ativo')
 
@@ -2572,6 +2573,8 @@ def api_produtos_busca_rapida():
 @main_bp.route('/api/usuarios', methods=['GET'])
 @require_admin_or_above
 def api_usuarios_list():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     """Lista usuários com paginação básica (para compatibilidade futura)."""
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
@@ -3059,8 +3062,11 @@ def api_almoxarifado_detail(almox_id):
 @main_bp.route('/api/centrais')
 @require_any_level
 def api_centrais_list():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    per_page = max(1, min(per_page, 100))
     ativo_param = request.args.get('ativo')
     search = (request.args.get('search') or '').strip()
 
@@ -3242,8 +3248,11 @@ def api_centrais_delete(id):
 @main_bp.route('/api/almoxarifados')
 @require_any_level
 def api_almoxarifados():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    per_page = max(1, min(per_page, 100))
     ativo = request.args.get('ativo')
     central_param = request.args.get('central_id')
 
@@ -3263,15 +3272,46 @@ def api_almoxarifados():
             # Legacy documents may store central_id as ObjectId hex string
             filter_query['central_id'] = central_param
 
-    # Scope filter: admin_central only sees almoxarifados from their central
+    # Scope filter: admin_central only sees almoxarifados da própria central,
+    # cobrindo diferentes representações de central_id (sequencial int, ObjectId, hex string)
     try:
         nivel = getattr(current_user, 'nivel_acesso', None)
         central_user = getattr(current_user, 'central_id', None)
         if nivel == 'admin_central' and central_user is not None and 'central_id' not in filter_query:
-            if str(central_user).isdigit():
-                filter_query['central_id'] = int(central_user)
-            else:
-                filter_query['central_id'] = central_user
+            candidate_values = []
+            # Sequencial numérico
+            if isinstance(central_user, int) or (isinstance(central_user, str) and central_user.isdigit()):
+                candidate_values.append(int(central_user))
+            # ObjectId e sua string hex
+            try:
+                if isinstance(central_user, ObjectId):
+                    candidate_values.append(central_user)  # campo armazenado como ObjectId
+                    candidate_values.append(str(central_user))  # campo armazenado como string hex
+                elif isinstance(central_user, str) and len(central_user) == 24:
+                    candidate_values.append(central_user)  # string hex
+                    try:
+                        candidate_values.append(ObjectId(central_user))  # ObjectId real
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Mapear para id sequencial via coleção de centrais, se disponível
+            try:
+                centrais_coll = extensions.mongo_db['centrais']
+                doc = None
+                if isinstance(central_user, ObjectId):
+                    doc = centrais_coll.find_one({'_id': central_user}, {'id': 1})
+                elif isinstance(central_user, str) and len(central_user) == 24:
+                    doc = centrais_coll.find_one({'_id': ObjectId(central_user)}, {'id': 1})
+                if doc and 'id' in doc:
+                    candidate_values.append(int(doc['id']))
+            except Exception:
+                pass
+            candidate_values = [cv for cv in candidate_values if cv is not None]
+            if len(candidate_values) == 1:
+                filter_query['central_id'] = candidate_values[0]
+            elif len(candidate_values) > 1:
+                filter_query['$or'] = [{'central_id': cv} for cv in candidate_values]
     except Exception:
         pass
 
@@ -3488,8 +3528,11 @@ def api_almoxarifados_delete(id):
 @main_bp.route('/api/sub-almoxarifados')
 @require_any_level
 def api_sub_almoxarifados():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    per_page = max(1, min(per_page, 100))
 
     coll = extensions.mongo_db['sub_almoxarifados']
     total = coll.count_documents({})
@@ -3575,6 +3618,8 @@ def api_sub_almoxarifados():
 @main_bp.route('/api/sub-almoxarifados/<id>')
 @require_any_level
 def api_sub_almoxarifado_get(id):
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     coll = extensions.mongo_db['sub_almoxarifados']
     doc = None
     if str(id).isdigit():
@@ -3635,6 +3680,8 @@ def api_sub_almoxarifado_get(id):
 @main_bp.route('/api/sub-almoxarifados', methods=['POST'])
 @require_any_level
 def api_sub_almoxarifados_create():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     data = request.get_json() or {}
     nome = (data.get('nome') or '').strip()
     almoxarifado_id = data.get('almoxarifado_id')
@@ -3665,6 +3712,8 @@ def api_sub_almoxarifados_create():
 @main_bp.route('/api/sub-almoxarifados/<id>', methods=['PUT'])
 @require_any_level
 def api_sub_almoxarifados_update(id):
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     data = request.get_json() or {}
     update = {}
     for field in ('nome', 'descricao', 'ativo', 'almoxarifado_id'):
@@ -3685,6 +3734,8 @@ def api_sub_almoxarifados_update(id):
 @main_bp.route('/api/sub-almoxarifados/<id>', methods=['DELETE'])
 @require_any_level
 def api_sub_almoxarifados_delete(id):
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     coll = extensions.mongo_db['sub_almoxarifados']
     if str(id).isdigit():
         coll.delete_one({'id': int(id)})
@@ -3699,14 +3750,17 @@ def api_sub_almoxarifados_delete(id):
 @main_bp.route('/api/setores')
 @require_any_level
 def api_setores():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    per_page = max(1, min(per_page, 100))
 
     coll = extensions.mongo_db['setores']
-    # Escopo: admin_central não possui restrição
+    # Escopo: admin_central restringe à própria central
     nivel = getattr(current_user, 'nivel_acesso', None)
     central_user = getattr(current_user, 'central_id', None)
-    enforce_scope = False
+    enforce_scope = (nivel == 'admin_central' and central_user is not None)
 
     base_query = {}
     total = coll.count_documents(base_query)
@@ -4162,14 +4216,17 @@ def api_setores_delete(id):
 @main_bp.route('/api/produtos')
 @require_any_level
 def api_produtos():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    per_page = max(1, min(per_page, 100))
     search = (request.args.get('search') or '').strip()
     categoria_id = request.args.get('categoria_id')
     ativo_param = request.args.get('ativo')
     # Escopo por nível: restringir produtos fora da central do usuário
     nivel = getattr(current_user, 'nivel_acesso', None)
-    enforce_scope = nivel in ('gerente_almox', 'resp_sub_almox', 'operador_setor')
+    enforce_scope = nivel in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor')
 
     # Montar filtro
     filter_query = {}
@@ -4257,7 +4314,7 @@ def api_produto_detalhe(produto_id):
     """Detalhes reais do produto a partir do MongoDB (compatível com templates)."""
     # Proteção de acesso por escopo: níveis restritos não podem acessar detalhes
     try:
-        if getattr(current_user, 'nivel_acesso', None) in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+        if getattr(current_user, 'nivel_acesso', None) in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor'):
             if not current_user.can_access_produto(produto_id):
                 return jsonify({'error': 'Acesso negado: produto fora da sua central'}), 403
     except Exception:
@@ -4533,9 +4590,15 @@ def api_produto_delete(produto_id):
 def api_produto_estoque(produto_id):
     """Retorna estrutura mínima de estoque compatível com templates.
     Tenta computar a partir da coleção 'estoques' quando possível."""
+    try:
+        if getattr(current_user, 'nivel_acesso', None) in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor'):
+            if not current_user.can_access_produto(produto_id):
+                return jsonify({'error': 'Acesso negado: produto fora da sua central'}), 403
+    except Exception:
+        return jsonify({'error': 'Acesso negado'}), 403
     # Escopo: níveis restritos só podem ver estoque do produto da própria central
     nivel = getattr(current_user, 'nivel_acesso', None)
-    if nivel not in ('super_admin', 'admin_central'):
+    if nivel != 'super_admin':
         if not current_user.can_access_produto(produto_id):
             return jsonify({'error': 'Produto fora do escopo da sua central'}), 403
     estoques = []
@@ -4587,7 +4650,7 @@ def api_produto_lotes(produto_id):
     """Placeholder compatível com templates: retorna lista de lotes."""
     # Escopo: níveis restritos só podem ver lotes do produto da própria central
     nivel = getattr(current_user, 'nivel_acesso', None)
-    if nivel not in ('super_admin', 'admin_central'):
+    if nivel != 'super_admin':
         if not current_user.can_access_produto(produto_id):
             return jsonify({'error': 'Produto fora do escopo da sua central'}), 403
     items = []
@@ -4617,9 +4680,11 @@ def api_produto_lotes(produto_id):
 @require_any_level
 def api_produto_movimentacoes(produto_id):
     """Lista movimentações de um produto com campos Local e Usuário e suporte a filtros."""
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     # Escopo: níveis restritos só podem ver movimentações do produto da própria central
     nivel = getattr(current_user, 'nivel_acesso', None)
-    if nivel not in ('super_admin', 'admin_central'):
+    if nivel != 'super_admin':
         if not current_user.can_access_produto(produto_id):
             return jsonify({'error': 'Produto fora do escopo da sua central'}), 403
     page = int(request.args.get('page', 1))
@@ -4856,6 +4921,8 @@ def api_estoque_hierarquia():
     """Agrega estoque por hierarquia com suporte a filtros e paginação.
     Parâmetros aceitos: page, per_page, produto, tipo, status, local.
     """
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     # Filtros e paginação
     page = int(request.args.get('page', 1))
     per_page_raw = request.args.get('per_page', 20)
@@ -5113,9 +5180,10 @@ def api_estoque_hierarquia():
 
             # Aplicar escopo por produto: níveis restritos só veem produtos da própria central
             try:
-                if getattr(current_user, 'nivel_acesso', None) in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+                if getattr(current_user, 'nivel_acesso', None) in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor'):
                     if not current_user.can_access_produto(produto_id_out):
                         continue
+                
             except Exception:
                 # Em caso de erro na checagem, negar por segurança
                 continue
@@ -5332,7 +5400,7 @@ def api_estoque_hierarquia_export():
 
             # Escopo por produto para níveis restritos
             try:
-                if getattr(current_user, 'nivel_acesso', None) in ('gerente_almox', 'resp_sub_almox', 'operador_setor'):
+                if getattr(current_user, 'nivel_acesso', None) in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor'):
                     if not current_user.can_access_produto(produto_id_out):
                         continue
             except Exception:
@@ -6001,6 +6069,8 @@ def api_explica_notificacao():
 @main_bp.route('/api/movimentacoes')
 @require_any_level
 def api_movimentacoes():
+    if extensions.mongo_db is None:
+        return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     try:
@@ -6147,7 +6217,7 @@ def api_movimentacoes():
     # Filtro de escopo por central: restringir produtos para níveis abaixo de admin
     try:
         nivel = getattr(current_user, 'nivel_acesso', None)
-        restricted = nivel in ('gerente_almox', 'resp_sub_almox', 'operador_setor')
+        restricted = nivel in ('admin_central', 'gerente_almox', 'resp_sub_almox', 'operador_setor')
     except Exception:
         restricted = False
 
@@ -6385,7 +6455,7 @@ def api_produto_almoxarifados(produto_id):
     """
     # Escopo: níveis restritos só podem ver almoxarifados de produtos da própria central
     nivel = getattr(current_user, 'nivel_acesso', None)
-    if nivel not in ('super_admin', 'admin_central'):
+    if nivel != 'super_admin':
         if not current_user.can_access_produto(produto_id):
             return jsonify({'success': False, 'error': 'Produto fora do escopo da sua central'}), 403
     try:
@@ -7612,6 +7682,19 @@ def api_demandas():
         mine = str(request.args.get('mine', '')).lower() in ('1', 'true', 'yes')
         updated_since = (request.args.get('updated_since') or '').strip()
 
+        try:
+            q = request.query_string.decode('utf-8', 'ignore')
+        except Exception:
+            q = ''
+        user_scope = f"{getattr(current_user, 'nivel_acesso', None)}:{getattr(current_user, 'central_id', None)}:{getattr(current_user, 'id', None)}"
+        cache_key = f"dem:{user_scope}:{q}:{page}:{per_page}"
+        try:
+            cached = extensions.response_cache.get(cache_key)
+            if cached is not None:
+                return jsonify(cached)
+        except Exception:
+            pass
+
         query = {}
         if status:
             query['status'] = status
@@ -7803,7 +7886,7 @@ def api_demandas():
                 updated_at = d.get('updated_at')
                 created_at_str = created_at.isoformat() if isinstance(created_at, datetime) else (str(created_at) if created_at else None)
                 updated_at_str = updated_at.isoformat() if isinstance(updated_at, datetime) else (str(updated_at) if updated_at else None)
-                items.append({
+                item = {
                     'id': str(d.get('_id')) if d.get('_id') is not None else str(d.get('id')),
                     'display_id': (str(d.get('_id'))[:8] if d.get('_id') is not None else None),
                     'produto_id': None,
@@ -7817,7 +7900,15 @@ def api_demandas():
                     'created_at': created_at_str,
                     'updated_at': updated_at_str,
                     'items_count': len(group_items)
-                })
+                }
+                if d.get('atendimento') is not None:
+                    item['atendimento'] = d.get('atendimento')
+                if d.get('quantidade_autorizada') is not None:
+                    try:
+                        item['quantidade_autorizada'] = float(d.get('quantidade_autorizada') or 0)
+                    except Exception:
+                        item['quantidade_autorizada'] = d.get('quantidade_autorizada')
+                items.append(item)
                 continue
 
             # Demanda individual
@@ -7861,8 +7952,7 @@ def api_demandas():
             updated_at = d.get('updated_at')
             created_at_str = created_at.isoformat() if isinstance(created_at, datetime) else (str(created_at) if created_at else None)
             updated_at_str = updated_at.isoformat() if isinstance(updated_at, datetime) else (str(updated_at) if updated_at else None)
-
-            items.append({
+            item = {
                 'id': str(d.get('_id')) if d.get('_id') is not None else str(d.get('id')),
                 'display_id': (str(d.get('_id'))[:8] if d.get('_id') is not None else None),
                 'produto_id': str(raw_pid) if raw_pid is not None else None,
@@ -7875,9 +7965,22 @@ def api_demandas():
                 'status': d.get('status') or 'pendente',
                 'created_at': created_at_str,
                 'updated_at': updated_at_str
-            })
+            }
+            if d.get('atendimento') is not None:
+                item['atendimento'] = d.get('atendimento')
+            if d.get('quantidade_autorizada') is not None:
+                try:
+                    item['quantidade_autorizada'] = float(d.get('quantidade_autorizada') or 0)
+                except Exception:
+                    item['quantidade_autorizada'] = d.get('quantidade_autorizada')
+            items.append(item)
 
-        return jsonify({'items': items, 'page': page, 'pages': pages, 'per_page': per_page, 'total': total})
+        result = {'items': items, 'page': page, 'pages': pages, 'per_page': per_page, 'total': total}
+        try:
+            extensions.response_cache.set(cache_key, result, ttl=10)
+        except Exception:
+            pass
+        return jsonify(result)
 
     # POST
     data = request.get_json(silent=True) or {}
@@ -7926,6 +8029,10 @@ def api_demandas():
         'updated_at': now
     }
     res = coll.insert_one(doc)
+    try:
+        extensions.response_cache.clear_prefix('dem:')
+    except Exception:
+        pass
     return jsonify({'id': str(res.inserted_id)}), 200
 
 @main_bp.route('/api/demandas/lista', methods=['GET'])
@@ -8112,6 +8219,10 @@ def api_demandas_finalizar():
             listas.delete_many({'usuario_id': usuario_id, 'setor_id': setor_id})
         except Exception:
             pass
+        try:
+            extensions.response_cache.clear_prefix('dem:')
+        except Exception:
+            pass
         return jsonify({'status': 'created', 'demanda_id': demanda_id})
     except Exception as e:
         return jsonify({'error': f'Falha ao finalizar lista de demandas: {e}'}), 500
@@ -8196,6 +8307,10 @@ def api_demandas_update(id):
 
     updated = coll.find_one_and_update({'_id': doc.get('_id')}, {'$set': upd}, return_document=ReturnDocument.AFTER)
     ts = updated.get('updated_at')
+    try:
+        extensions.response_cache.clear_prefix('dem:')
+    except Exception:
+        pass
     return jsonify({
         'id': str(updated.get('_id')),
         'status': updated.get('status'),

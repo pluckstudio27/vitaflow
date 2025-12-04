@@ -112,7 +112,7 @@
                             <div class="mb-3">
                                 <label for="produtoTransferencia" class="form-label">Produto *</label>
                                 <input type="text" class="form-control mb-2" id="buscaProdutoTransferencia" placeholder="Buscar produto por nome ou código...">
-                                <select class="form-select" id="produtoTransferencia" required onchange="carregarLocaisProduto(); carregarTiposDestino();">
+                                <select class="form-select" id="produtoTransferencia" required onchange="carregarLocaisProdutoTransferencia();">
                                     <option value="">Selecione um produto...</option>
                                 </select>
                             </div>
@@ -129,35 +129,19 @@
                         <div class="col-md-6">
                             <h6 class="text-muted">Origem</h6>
                             <div class="mb-3">
-                                <label for="tipoOrigemTransferencia" class="form-label">Tipo de Local *</label>
-                                <select class="form-select" id="tipoOrigemTransferencia" required onchange="carregarLocaisOrigem()">
-                                    <option value="">Selecione...</option>
-                                    <option value="almoxarifado">Almoxarifado</option>
-                                    <option value="sub_almoxarifado">Sub-Almoxarifado</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label for="localOrigemTransferencia" class="form-label">Local *</label>
-                                <select class="form-select" id="localOrigemTransferencia" required>
-                                    <option value="">Selecione o tipo primeiro...</option>
-                                </select>
+                                <label class="form-label">Disponibilidade por Local</label>
+                                <div id="transferenciaDisponibilidade" class="border rounded p-2" style="max-height: 200px; overflow-y: auto;"></div>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <h6 class="text-muted">Destino</h6>
                             <div class="mb-3">
-                                <label for="tipoDestinoTransferencia" class="form-label">Tipo de Local *</label>
-                                <select class="form-select" id="tipoDestinoTransferencia" required onchange="carregarLocaisDestino()">
-                                    <option value="">Selecione...</option>
-                                    <option value="almoxarifado">Almoxarifado</option>
-                                    <option value="sub_almoxarifado">Sub-Almoxarifado</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label for="localDestinoTransferencia" class="form-label">Local *</label>
-                                <select class="form-select" id="localDestinoTransferencia" required>
-                                    <option value="">Selecione o tipo primeiro...</option>
-                                </select>
+                                <label class="form-label">Sub‑Almoxarifados de Destino</label>
+                                <div id="subAlmoxDestinos" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;"></div>
+                                <div id="resumoTransferencia" class="alert alert-info mt-2 d-flex justify-content-between align-items-center" style="display:none;">
+                                    <span>Disponível na origem: <strong id="dispOrigemTransf">0</strong></span>
+                                    <span>Selecionado para destino: <strong id="selTotalTransf">0</strong></span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -498,9 +482,11 @@ function carregarProdutos(searchTerm = '') {
 
 // Carregar locais de origem para transferência
 function carregarLocaisOrigem() {
-    const tipo = document.getElementById('tipoOrigemTransferencia').value;
-    const produtoId = document.getElementById('produtoTransferencia').value;
+    const tipoEl = document.getElementById('tipoOrigemTransferencia');
     const select = document.getElementById('localOrigemTransferencia');
+    if (!tipoEl || !select) return;
+    const tipo = tipoEl.value;
+    const produtoId = document.getElementById('produtoTransferencia').value;
     
     if (!tipo) {
         select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
@@ -625,6 +611,10 @@ function carregarLocaisOrigem() {
                 select.innerHTML = '<option value="">Selecione...</option>' + options;
             }
         })
+        .then(() => {
+            try { carregarTiposDestino(); } catch(_) {}
+            try { filtrarSubAlmoxDestinosTransferencia(); } catch(_) {}
+        })
         .catch(error => {
             console.error('Erro ao carregar locais de origem:', error);
             // Fallback para mostrar todos os locais do tipo (sem filtrar por estoque)
@@ -634,6 +624,8 @@ function carregarLocaisOrigem() {
             else if (tipo === 'setor') locais = (locaisData.setores || []);
             const options = locais.map(local => `<option value="${local.id}">${local.nome}</option>`).join('');
             select.innerHTML = '<option value="">Selecione...</option>' + options;
+            try { carregarTiposDestino(); } catch(_) {}
+            try { filtrarSubAlmoxDestinosTransferencia(); } catch(_) {}
         });
 }
 
@@ -642,6 +634,11 @@ function carregarTiposDestino() {
     const produtoId = document.getElementById('produtoTransferencia').value;
     const tipoSelect = document.getElementById('tipoDestinoTransferencia');
     const localSelect = document.getElementById('localDestinoTransferencia');
+    if (!tipoSelect || !localSelect) return;
+    const tipoOrigemEl = document.getElementById('tipoOrigemTransferencia');
+    const localOrigemEl = document.getElementById('localOrigemTransferencia');
+    const tipoOrigem = tipoOrigemEl ? tipoOrigemEl.value : '';
+    const localOrigem = localOrigemEl ? localOrigemEl.value : '';
     
     // Limpar seleções
     tipoSelect.value = '';
@@ -660,8 +657,10 @@ function carregarTiposDestino() {
             let opcoesDisponiveis = [];
 
             if (USE_MONGO) {
-                // Em Mongo, buscar listas via API e comparar por string central_id
-                const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produto.central_id)}&per_page=1000`);
+                // Em Mongo, buscar listas via API; se produto.central_id estiver ausente,
+                // usar escopo do usuário (endpoint aplica filtro pela central do usuário quando central_id não é informado)
+                const centralId = produto && produto.central_id ? String(produto.central_id) : '';
+                const almoxResp = await fetchJson(centralId ? `/api/almoxarifados?central_id=${encodeURIComponent(centralId)}&per_page=1000` : `/api/almoxarifados?per_page=1000`);
                 const almoxarifadosDaCentral = almoxResp.items || [];
                 if (almoxarifadosDaCentral.length > 0) {
                     opcoesDisponiveis.push('<option value="almoxarifado">Almoxarifado</option>');
@@ -672,6 +671,45 @@ function carregarTiposDestino() {
                 const subAlmoxarifadosDaCentral = (subsResp.items || []).filter(sa => almoxIds.includes(String(sa.almoxarifado_id)));
                 if (subAlmoxarifadosDaCentral.length > 0) {
                     opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
+                }
+                // Avaliar disponibilidade de Setor conforme a origem e vínculos
+                try {
+                    const setoresResp = await fetchJson(`/api/setores?ativo=true&per_page=1000`);
+                    const todosSetores = setoresResp.items || [];
+                    let setoresDisponiveis = [];
+                    if (tipoOrigem === 'sub_almoxarifado' && localOrigem) {
+                        const subRefId = String(localOrigem);
+                        setoresDisponiveis = todosSetores.filter(s => {
+                            const single = String(s.sub_almoxarifado_id || '');
+                            const multi = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+                            return single === subRefId || multi.includes(subRefId);
+                        });
+                    } else if (tipoOrigem === 'almoxarifado' && localOrigem) {
+                        const almoxRefId = String(localOrigem);
+                        const subsDoAlmox = (subAlmoxarifadosDaCentral || []).filter(sa => String(sa.almoxarifado_id) === almoxRefId).map(sa => String(sa.id));
+                        setoresDisponiveis = todosSetores.filter(s => {
+                            const aSingle = String(s.almoxarifado_id || '');
+                            const aMulti = Array.isArray(s.almoxarifado_ids) ? s.almoxarifado_ids.map(v => String(v)) : [];
+                            const sSingle = String(s.sub_almoxarifado_id || '');
+                            const sMulti = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+                            return aSingle === almoxRefId || aMulti.includes(almoxRefId) || subsDoAlmox.includes(sSingle) || sMulti.some(v => subsDoAlmox.includes(String(v)));
+                        });
+                    } else {
+                        // Sem origem definida: incluir setor se houver qualquer vínculo com almoxarifados da central
+                        const subsIdsCentral = (subAlmoxarifadosDaCentral || []).map(sa => String(sa.id));
+                        setoresDisponiveis = todosSetores.filter(s => {
+                            const aSingle = String(s.almoxarifado_id || '');
+                            const aMulti = Array.isArray(s.almoxarifado_ids) ? s.almoxarifado_ids.map(v => String(v)) : [];
+                            const sSingle = String(s.sub_almoxarifado_id || '');
+                            const sMulti = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+                            return almoxIds.includes(aSingle) || aMulti.some(v => almoxIds.includes(String(v))) || subsIdsCentral.includes(sSingle) || sMulti.some(v => subsIdsCentral.includes(String(v)));
+                        });
+                    }
+                    if (setoresDisponiveis.length > 0) {
+                        opcoesDisponiveis.push('<option value="setor">Setor</option>');
+                    }
+                } catch (_) {
+                    // Ignorar erro de setores; manter opções já calculadas
                 }
             } else {
                 // SQL: usar dados carregados do template sem chamadas à API
@@ -684,6 +722,45 @@ function carregarTiposDestino() {
                 if (subAlmoxarifadosDaCentral.length > 0) {
                     opcoesDisponiveis.push('<option value="sub_almoxarifado">Sub-Almoxarifado</option>');
                 }
+                // Disponibilidade de Setor (SQL): verificar vínculos
+                try {
+                    const todosSetores = (locaisData.setores || []);
+                    let setoresDisponiveis = [];
+                    if (tipoOrigem === 'sub_almoxarifado' && localOrigem) {
+                        const subRefId = localOrigem;
+                        setoresDisponiveis = todosSetores.filter(s => {
+                            const single = s.sub_almoxarifado_id;
+                            const multi = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids : [];
+                            return idEq(single, subRefId) || multi.some(v => idEq(v, subRefId));
+                        });
+                    } else if (tipoOrigem === 'almoxarifado' && localOrigem) {
+                        const almoxRefId = localOrigem;
+                        const subsDoAlmox = (locaisData.sub_almoxarifados || [])
+                            .filter(sa => idEq(sa.almoxarifado_id, almoxRefId))
+                            .map(sa => String(sa.id));
+                        setoresDisponiveis = todosSetores.filter(s => {
+                            const aSingle = s.almoxarifado_id;
+                            const aMulti = Array.isArray(s.almoxarifado_ids) ? s.almoxarifado_ids : [];
+                            const sSingle = String(s.sub_almoxarifado_id || '');
+                            const sMulti = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+                            return idEq(aSingle, almoxRefId) || aMulti.some(v => idEq(v, almoxRefId)) || subsDoAlmox.includes(sSingle) || sMulti.some(v => subsDoAlmox.includes(String(v)));
+                        });
+                    } else {
+                        const subsIdsCentral = (locaisData.sub_almoxarifados || [])
+                            .filter(sa => almoxIds.includes(String(sa.almoxarifado_id)))
+                            .map(sa => String(sa.id));
+                        setoresDisponiveis = todosSetores.filter(s => {
+                            const aSingle = s.almoxarifado_id;
+                            const aMulti = Array.isArray(s.almoxarifado_ids) ? s.almoxarifado_ids : [];
+                            const sSingle = String(s.sub_almoxarifado_id || '');
+                            const sMulti = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+                            return almoxIds.includes(String(aSingle)) || aMulti.some(v => almoxIds.includes(String(v))) || subsIdsCentral.includes(sSingle) || sMulti.some(v => subsIdsCentral.includes(String(v)));
+                        });
+                    }
+                    if (setoresDisponiveis.length > 0) {
+                        opcoesDisponiveis.push('<option value="setor">Setor</option>');
+                    }
+                } catch(_) {}
             }
             
             if (opcoesDisponiveis.length === 0) {
@@ -706,11 +783,15 @@ function carregarTiposDestino() {
 
 // Carregar locais de destino para transferência
 function carregarLocaisDestino() {
-    const tipo = document.getElementById('tipoDestinoTransferencia').value;
-    const produtoId = document.getElementById('produtoTransferencia').value;
+    const tipoEl = document.getElementById('tipoDestinoTransferencia');
     const select = document.getElementById('localDestinoTransferencia');
-    const tipoOrigem = document.getElementById('tipoOrigemTransferencia').value;
-    const localOrigem = document.getElementById('localOrigemTransferencia').value;
+    if (!tipoEl || !select) return;
+    const tipo = tipoEl.value;
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const tipoOrigemEl = document.getElementById('tipoOrigemTransferencia');
+    const localOrigemEl = document.getElementById('localOrigemTransferencia');
+    const tipoOrigem = tipoOrigemEl ? tipoOrigemEl.value : '';
+    const localOrigem = localOrigemEl ? localOrigemEl.value : '';
     
     if (!tipo) {
         select.innerHTML = '<option value="">Selecione o tipo primeiro...</option>';
@@ -1321,21 +1402,188 @@ function carregarLocaisProduto() {
         });
 }
 
+// Nova Transferência: disponibilidade por local e seleção de múltiplos sub‑almox destinos
+window.origemTransferenciaSelecionada = null;
+window.disponivelOrigemTransferencia = 0;
+
+function carregarLocaisProdutoTransferencia() {
+    const produtoId = document.getElementById('produtoTransferencia').value;
+    const cont = document.getElementById('transferenciaDisponibilidade');
+    const tipoOrigemSelect = document.getElementById('tipoOrigemTransferencia');
+    const localOrigemSelect = document.getElementById('localOrigemTransferencia');
+    const destinosCont = document.getElementById('subAlmoxDestinos');
+    const resumo = document.getElementById('resumoTransferencia');
+    if (destinosCont) destinosCont.innerHTML = '<div class="text-muted">Selecione um local de origem para listar sub‑almoxarifados de destino.</div>';
+    if (resumo) { resumo.style.display = 'none'; document.getElementById('dispOrigemTransf').textContent = '0'; document.getElementById('selTotalTransf').textContent = '0'; }
+    window.origemTransferenciaSelecionada = null;
+    window.disponivelOrigemTransferencia = 0;
+    if (!cont) return;
+    if (!produtoId) { cont.innerHTML = '<div class="text-muted">Selecione um produto para visualizar a disponibilidade por local.</div>'; return; }
+    cont.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
+    fetchJson(`/api/produtos/${produtoId}/estoque`)
+        .then(data => {
+            const estoques = Array.isArray(data.estoques) ? data.estoques : [];
+            const normalizeTipo = (t) => String(t || '').toLowerCase().replace(/[-]/g, '_').replace(/^subalmoxarifado$/, 'sub_almoxarifado');
+            const rows = estoques
+                .filter(e => e && e.quantidade_disponivel > 0 && normalizeTipo(e.tipo) !== 'setor')
+                .map(e => {
+                    const tipo = normalizeTipo(e.tipo);
+                    const id = String(e.local_id);
+                    const nome = e.nome_local;
+                    const qtd = Number(e.quantidade_disponivel || e.quantidade || 0);
+                    return `<tr data-tipo="${tipo}" data-id="${id}" data-nome="${nome}"><td>${nome}</td><td class="text-end">${qtd}</td></tr>`;
+                }).join('');
+            if (!rows) {
+                cont.innerHTML = '<div class="text-muted">Produto sem estoque disponível.</div>';
+                return;
+            }
+            cont.innerHTML = `<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Local</th><th class="text-end">Disponível</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            // Bind seleção de origem
+            cont.querySelectorAll('tbody tr').forEach(tr => {
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', () => {
+                    const tipo = tr.getAttribute('data-tipo');
+                    const id = tr.getAttribute('data-id');
+                    const nome = tr.getAttribute('data-nome');
+                    const disp = parseFloat(tr.querySelector('td.text-end').textContent) || 0;
+                    if (tipoOrigemSelect) tipoOrigemSelect.value = tipo;
+                    if (localOrigemSelect) localOrigemSelect.value = id;
+                    window.origemTransferenciaSelecionada = { tipo, id, nome };
+                    window.disponivelOrigemTransferencia = disp;
+                    const resumoEl = document.getElementById('resumoTransferencia');
+                    if (resumoEl) { resumoEl.style.display = ''; document.getElementById('dispOrigemTransf').textContent = String(disp); }
+                    try { filtrarSubAlmoxDestinosTransferencia(); } catch(_) {}
+                });
+            });
+        })
+        .catch(err => {
+            cont.innerHTML = '<div class="text-danger">Erro ao carregar estoque</div>';
+            console.error('Erro disponibilidade transf:', err);
+        });
+}
+
+function renderSubAlmoxDestinosTransferencia(list) {
+    const cont = document.getElementById('subAlmoxDestinos');
+    if (!cont) return;
+    if (!list || !list.length) { cont.innerHTML = '<div class="text-muted">Nenhum sub‑almoxarifado disponível para o destino.</div>'; return; }
+    const rows = list.map(sa => {
+        const id = String(sa.id);
+        const nome = sa.nome || sa.descricao || `Sub‑Almox ${id}`;
+        return `<div class="d-flex justify-content-between align-items-center py-1">
+            <div class="form-check">
+                <input class="form-check-input sub-check" type="checkbox" value="${id}" id="sub_${id}">
+                <label class="form-check-label" for="sub_${id}">${nome}</label>
+            </div>
+            <input type="number" class="form-control form-control-sm ms-2 sub-qty" data-sub-id="${id}" min="0.001" step="0.001" placeholder="Qtd" disabled>
+        </div>`;
+    }).join('');
+    cont.innerHTML = rows;
+    cont.querySelectorAll('.sub-check').forEach(chk => {
+        chk.addEventListener('change', () => {
+            const inp = cont.querySelector(`.sub-qty[data-sub-id="${chk.value}"]`);
+            if (inp) inp.disabled = !chk.checked;
+            // Seleção única: ao escolher um sub‑almox, desmarca os demais e preenche o destino
+            if (chk.checked) {
+                cont.querySelectorAll('.sub-check').forEach(other => { if (other !== chk) { other.checked = false; const oi = cont.querySelector(`.sub-qty[data-sub-id="${other.value}"]`); if (oi) oi.disabled = true; } });
+                const tipoDest = document.getElementById('tipoDestinoTransferencia');
+                const localDest = document.getElementById('localDestinoTransferencia');
+                if (tipoDest) tipoDest.value = 'sub_almoxarifado';
+                if (localDest) localDest.value = String(chk.value);
+            }
+            updateResumoTransferencia();
+        });
+    });
+    cont.querySelectorAll('.sub-qty').forEach(inp => {
+        inp.addEventListener('input', updateResumoTransferencia);
+        inp.addEventListener('change', updateResumoTransferencia);
+        inp.addEventListener('change', () => {
+            // Ajustar quantidade principal se estiver vazio
+            const qInput = document.getElementById('quantidadeTransferencia');
+            const selChk = cont.querySelector('.sub-check:checked');
+            if (qInput && selChk && String(selChk.value) === String(inp.getAttribute('data-sub-id'))) {
+                const v = parseFloat(inp.value || '0');
+                if (!isNaN(v) && v > 0) qInput.value = String(v);
+            }
+        });
+    });
+    updateResumoTransferencia();
+}
+
+async function filtrarSubAlmoxDestinosTransferencia() {
+    const origemSel = window.origemTransferenciaSelecionada || {};
+    const destinosCont = document.getElementById('subAlmoxDestinos');
+    if (destinosCont) destinosCont.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm" role="status"><span class="visualmente-hidden">Carregando...</span></div></div>';
+    try {
+        let lista = [];
+        if (USE_MONGO) {
+            // Sub‑almox do mesmo almox de origem
+            if (!origemSel || !origemSel.tipo || !origemSel.id) { renderSubAlmoxDestinosTransferencia([]); return; }
+            let almoxRefId = null;
+            if (origemSel.tipo === 'almoxarifado') {
+                almoxRefId = String(origemSel.id);
+            } else if (origemSel.tipo === 'sub_almoxarifado') {
+                const subsAll = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                const subOrigem = (subsAll.items || []).find(sa => String(sa.id) === String(origemSel.id));
+                almoxRefId = subOrigem ? String(subOrigem.almoxarifado_id) : null;
+            } else if (origemSel.tipo === 'setor') {
+                const setoresAll = await fetchJson(`/api/setores?per_page=1000`);
+                const setorOrigem = (setoresAll.items || []).find(s => String(s.id) === String(origemSel.id));
+                if (setorOrigem) {
+                    const subsAll = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                    const subParent = (subsAll.items || []).find(sa => String(sa.id) === String(setorOrigem.sub_almoxarifado_id));
+                    almoxRefId = subParent ? String(subParent.almoxarifado_id) : null;
+                }
+            }
+            const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+            lista = (subsResp.items || []).filter(sa => almoxRefId ? String(sa.almoxarifado_id) === almoxRefId : true);
+            // Não permitir transferir para o mesmo sub‑almox de origem
+            if (origemSel.tipo === 'sub_almoxarifado') {
+                lista = lista.filter(sa => String(sa.id) !== String(origemSel.id));
+            }
+        } else {
+            // SQL fallback
+            renderSubAlmoxDestinosTransferencia((locaisData.sub_almoxarifados || []));
+            return;
+        }
+        renderSubAlmoxDestinosTransferencia(lista);
+    } catch (e) {
+        console.error('Erro ao filtrar sub‑almox destinos:', e);
+        renderSubAlmoxDestinosTransferencia([]);
+    }
+}
+
+function updateResumoTransferencia() {
+    const resumoEl = document.getElementById('resumoTransferencia');
+    if (!resumoEl) return;
+    const disp = typeof window.disponivelOrigemTransferencia === 'number' ? window.disponivelOrigemTransferencia : 0;
+    let total = 0;
+    document.querySelectorAll('#subAlmoxDestinos .sub-check').forEach(chk => {
+        if (chk.checked) {
+            const inp = document.querySelector(`#subAlmoxDestinos .sub-qty[data-sub-id="${chk.value}"]`);
+            const v = parseFloat(inp && inp.value ? inp.value : '0');
+            if (!isNaN(v) && v > 0) total += v;
+        }
+    });
+    document.getElementById('dispOrigemTransf').textContent = String(disp);
+    document.getElementById('selTotalTransf').textContent = String(total);
+    resumoEl.classList.toggle('alert-warning', total > disp);
+    resumoEl.classList.toggle('alert-info', total <= disp);
+}
+
 // Executar transferência
 function executarTransferencia() {
     const produtoId = document.getElementById('produtoTransferencia').value;
-    const quantidade = document.getElementById('quantidadeTransferencia').value;
-    const tipoOrigem = document.getElementById('tipoOrigemTransferencia').value;
-    const localOrigem = document.getElementById('localOrigemTransferencia').value;
-    const tipoDestino = document.getElementById('tipoDestinoTransferencia').value;
-    const localDestino = document.getElementById('localDestinoTransferencia').value;
+    const quantidadeInput = document.getElementById('quantidadeTransferencia');
+    let quantidade = quantidadeInput ? quantidadeInput.value : '';
+    const origemSel = window.origemTransferenciaSelecionada || null;
+    const selChk = document.querySelector('#subAlmoxDestinos .sub-check:checked');
     const motivo = document.getElementById('motivoTransferencia').value;
     const observacoes = document.getElementById('observacoesTransferencia').value;
     const msgEl = document.getElementById('transferenciaMsg');
     if (msgEl) { msgEl.classList.add('d-none'); msgEl.textContent = ''; }
     
     // Validações básicas
-    if (!produtoId || !quantidade || !tipoOrigem || !localOrigem || !tipoDestino || !localDestino) {
+    if (!produtoId || !origemSel || !selChk) {
         if (msgEl) {
             msgEl.textContent = 'Preencha todos os campos obrigatórios.';
             msgEl.classList.remove('d-none');
@@ -1347,56 +1595,12 @@ function executarTransferencia() {
         return;
     }
     
-    if (USE_MONGO) {
-        // Em Mongo, IDs são strings
-        if (!localOrigem || typeof localOrigem !== 'string') {
-            if (msgEl) {
-                msgEl.textContent = 'Por favor, selecione um local de origem válido.';
-                msgEl.classList.remove('d-none');
-                msgEl.classList.remove('alert-danger');
-                msgEl.classList.add('alert-warning');
-            } else {
-                alert('Por favor, selecione um local de origem válido.');
-            }
-            return;
-        }
-        if (!localDestino || typeof localDestino !== 'string') {
-            if (msgEl) {
-                msgEl.textContent = 'Por favor, selecione um local de destino válido.';
-                msgEl.classList.remove('d-none');
-                msgEl.classList.remove('alert-danger');
-                msgEl.classList.add('alert-warning');
-            } else {
-                alert('Por favor, selecione um local de destino válido.');
-            }
-            return;
-        }
-    } else {
-        // SQL: validar IDs numéricos
-        if (!localOrigem || localOrigem === '' || localOrigem === 'undefined' || localOrigem === undefined || localOrigem === null || isNaN(parseInt(localOrigem)) || parseInt(localOrigem) <= 0) {
-            if (msgEl) {
-                msgEl.textContent = 'Por favor, selecione um local de origem válido.';
-                msgEl.classList.remove('d-none');
-                msgEl.classList.remove('alert-danger');
-                msgEl.classList.add('alert-warning');
-            } else {
-                alert('Por favor, selecione um local de origem válido.');
-            }
-            return;
-        }
-        if (!localDestino || localDestino === '' || localDestino === 'undefined' || localDestino === undefined || localDestino === null || isNaN(parseInt(localDestino)) || parseInt(localDestino) <= 0) {
-            if (msgEl) {
-                msgEl.textContent = 'Por favor, selecione um local de destino válido.';
-                msgEl.classList.remove('d-none');
-                msgEl.classList.remove('alert-danger');
-                msgEl.classList.add('alert-warning');
-            } else {
-                alert('Por favor, selecione um local de destino válido.');
-            }
-            return;
-        }
+    const destinoIdStr = String(selChk.value);
+    if ((!quantidade || parseFloat(quantidade) <= 0)) {
+        const qEl = document.querySelector(`#subAlmoxDestinos .sub-qty[data-sub-id="${destinoIdStr}"]`);
+        const v = parseFloat(qEl && qEl.value ? qEl.value : '0');
+        if (!isNaN(v) && v > 0) { quantidade = String(v); }
     }
-    
     if (parseFloat(quantidade) <= 0) {
         if (msgEl) {
             msgEl.textContent = 'Quantidade deve ser maior que zero.';
@@ -1410,8 +1614,10 @@ function executarTransferencia() {
     }
     
     // Preparar IDs conforme modo
-    const origemId = USE_MONGO ? String(localOrigem) : parseInt(localOrigem);
-    const destinoId = USE_MONGO ? String(localDestino) : parseInt(localDestino);
+    const tipoOrigem = String(origemSel.tipo);
+    const origemId = USE_MONGO ? String(origemSel.id) : parseInt(origemSel.id);
+    const tipoDestino = 'sub_almoxarifado';
+    const destinoId = USE_MONGO ? destinoIdStr : parseInt(destinoIdStr);
     const produtoIdPayload = USE_MONGO ? String(produtoId) : parseInt(produtoId);
     
     // Validar se origem e destino são diferentes

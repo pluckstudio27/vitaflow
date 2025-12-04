@@ -1237,16 +1237,18 @@
         (function(){
             const LS = window.localStorage;
             function nowMs(){ return Date.now(); }
+            const userPrefix = "{{ (current_user.id or '') | string }}|{{ (current_user.nivel_acesso or '') | string }}|{{ (current_user.central_id or '') | string }}";
+            function scopedKey(k){ return 'usr:' + userPrefix + ':' + String(k); }
             window.writeCacheJson = function(key, data, ttlMs){
                 try {
                     const exp = nowMs() + Math.max(1000, Number(ttlMs||120000));
                     const obj = { v: 1, exp, data };
-                    LS.setItem(String(key), JSON.stringify(obj));
+                    LS.setItem(scopedKey(key), JSON.stringify(obj));
                 } catch(_){}
             };
             window.readCacheJson = function(key){
                 try {
-                    const raw = LS.getItem(String(key));
+                    const raw = LS.getItem(scopedKey(key));
                     if (!raw) return null;
                     const obj = JSON.parse(raw);
                     if (!obj || typeof obj !== 'object') return null;
@@ -1262,6 +1264,48 @@
                 const data = await window.fetchJson(url, opts && opts.options || {});
                 window.writeCacheJson(key, data, ttl);
                 return data;
+            };
+            window.cachedFetchJsonDelta = async function(url, opts){
+                const key = 'cache:' + String(url);
+                const ttl = (opts && opts.ttlMs) || 300000;
+                const listProp = (opts && opts.listProp) || 'items';
+                const options = opts && opts.options || {};
+                const cached = window.readCacheJson(key);
+                const base = (cached && Array.isArray(cached[listProp])) ? cached[listProp].slice() : [];
+                let lastTs = '';
+                try {
+                    const parseTs = v => { try { return v ? Date.parse(v) : 0; } catch(_) { return 0; } };
+                    const tsField = (opts && opts.tsField) || null;
+                    lastTs = base.reduce((acc, it) => {
+                        const t = parseTs(tsField ? (it[tsField]||'') : (it.updated_at || it.created_at));
+                        return t > acc ? t : acc;
+                    }, 0);
+                    if (lastTs) lastTs = new Date(lastTs).toISOString();
+                } catch(_) {}
+                let finalUrl = String(url);
+                if (lastTs) finalUrl += (finalUrl.indexOf('?') !== -1 ? '&' : '?') + 'updated_since=' + encodeURIComponent(lastTs);
+                const data = await window.fetchJson(finalUrl, options);
+                let items = Array.isArray(data[listProp]) ? data[listProp] : [];
+                if (base.length && lastTs) {
+                    const mergedIds = new Set();
+                    const merged = [];
+                    const idProp = (opts && opts.idProp) || 'id';
+                    const altIdProp = (opts && opts.altIdProp) || 'display_id';
+                    items.concat(base).forEach(it => {
+                        const id = String(it[idProp] || it[altIdProp] || '');
+                        if (!id) return;
+                        if (mergedIds.has(id)) return;
+                        mergedIds.add(id);
+                        merged.push(it);
+                    });
+                    const out = Object.assign({}, data);
+                    out[listProp] = merged;
+                    window.writeCacheJson(key, out, ttl);
+                    return out;
+                } else {
+                    window.writeCacheJson(key, data, ttl);
+                    return data;
+                }
             };
         })();
     </script>
