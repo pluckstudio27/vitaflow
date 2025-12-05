@@ -50,6 +50,16 @@
             <!-- Tabela de Produtos -->
             <div class="card">
                 <div class="card-body">
+                    <div class="d-flex justify-content-end mb-2">
+                        <div class="input-group" style="max-width: 200px;">
+                            <span class="input-group-text">Itens</span>
+                            <select class="form-select" id="perPageProdutos">
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-hover" id="produtosTable">
                             <thead class="table-light">
@@ -70,8 +80,7 @@
 
                     <!-- Paginação -->
                     <nav id="navPaginationProdutos" aria-label="Navegação de páginas" class="mt-3" style="display: none;">
-                        <ul class="pagination justify-content-center" id="pagination">
-                        </ul>
+                        <ul class="pagination justify-content-center" id="pagination" style="display:none"></ul>
                     </nav>
                 </div>
             </div>
@@ -173,37 +182,26 @@
 </div>
 
 <script>
-let currentPage = 1;
-let totalPages = 1;
-
 // Carregar produtos
-function carregarProdutos(page = 1) {
+function carregarProdutos() {
     const search = document.getElementById('searchInput').value;
     const categoria_id = document.getElementById('categoriaFilter').value;
     const ativo = document.getElementById('statusFilter').value;
-    
+    const perSel = document.getElementById('perPageProdutos');
+    const perVal = perSel ? parseInt(perSel.value, 10) || 20 : 20;
     const params = new URLSearchParams({
-        page: page,
-        per_page: 20
+        limit: perVal
     });
-    
     if (search) params.append('search', search);
     if (categoria_id) params.append('categoria_id', categoria_id);
     if (ativo !== '') params.append('ativo', ativo);
-    
     document.getElementById('loadingSpinner').style.display = 'block';
-    
-    fetch(`/api/produtos?${params}`)
-        .then(response => response.json())
+    fetchJson(`/api/produtos?${params}`)
         .then(data => {
             if (data.error) {
                 throw new Error(data.error);
             }
-            
             renderizarProdutos(data.items);
-            renderizarPaginacao(data);
-            currentPage = data.page;
-            totalPages = data.pages;
         })
         .catch(error => {
             console.error('Erro ao carregar produtos:', error);
@@ -272,59 +270,14 @@ function renderizarProdutos(produtos) {
     carregarEstoqueParaProdutos(produtos);
 }
 
-// Renderizar paginação
-function renderizarPaginacao(pagination) {
-    const paginationEl = document.getElementById('pagination');
-    const navEl = document.getElementById('navPaginationProdutos');
-    
-    if (!pagination || pagination.pages <= 1) {
-        paginationEl.innerHTML = '';
-        if (navEl) navEl.style.display = 'none';
-        return;
-    }
-    
-    let html = '';
-    
-    // Botão anterior
-    html += `
-        <li class="page-item ${pagination.page <= 1 ? 'disabled' : ''}">
-            <a class="page-link" href="#" onclick="carregarProdutos(${pagination.page - 1})">Anterior</a>
-        </li>
-    `;
-    
-    // Páginas
-    for (let i = 1; i <= pagination.pages; i++) {
-        if (i === pagination.page || 
-            i === 1 || 
-            i === pagination.pages || 
-            (i >= pagination.page - 2 && i <= pagination.page + 2)) {
-            html += `
-                <li class="page-item ${i === pagination.page ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="carregarProdutos(${i})">${i}</a>
-                </li>
-            `;
-        } else if (i === pagination.page - 3 || i === pagination.page + 3) {
-            html += '<li class="page-item disabled"><span class="page-link">...</span></li>';
-        }
-    }
-    
-    // Botão próximo
-    html += `
-        <li class="page-item ${pagination.page >= pagination.pages ? 'disabled' : ''}">
-            <a class="page-link" href="#" onclick="carregarProdutos(${pagination.page + 1})">Próximo</a>
-        </li>
-    `;
-    
-    paginationEl.innerHTML = html;
-    if (navEl) navEl.style.display = '';
-}
+// Paginação removida
 
 // Limpar filtros
 function limparFiltros() {
     document.getElementById('searchInput').value = '';
     document.getElementById('categoriaFilter').value = '';
     document.getElementById('statusFilter').value = '';
-    carregarProdutos(1);
+    carregarProdutos();
 }
 
 // Editar produto
@@ -461,8 +414,7 @@ function salvarEdicaoProduto() {
         const modal = bootstrap.Modal.getInstance(document.getElementById('editarProdutoModal'));
         modal.hide();
         
-        // Recarregar lista
-        carregarProdutos(currentPage);
+        carregarProdutos();
     })
     .catch(error => {
         console.error('Erro:', error);
@@ -522,11 +474,16 @@ function carregarEstoqueParaProdutos(produtos) {
 
 // Event listeners
 document.getElementById('searchInput').addEventListener('input', 
-    debounce(() => carregarProdutos(1), 500)
+    debounce(() => carregarProdutos(), 500)
 );
 
-document.getElementById('categoriaFilter').addEventListener('change', () => carregarProdutos(1));
-document.getElementById('statusFilter').addEventListener('change', () => carregarProdutos(1));
+document.getElementById('categoriaFilter').addEventListener('change', () => carregarProdutos());
+document.getElementById('statusFilter').addEventListener('change', () => carregarProdutos());
+const perSelEl = document.getElementById('perPageProdutos');
+if (perSelEl) perSelEl.addEventListener('change', () => {
+    try { localStorage.setItem('per_page_produtos', String(perSelEl.value)); } catch(_) {}
+    carregarProdutos();
+});
 
 // Função debounce para otimizar busca
 function debounce(func, wait) {
@@ -543,10 +500,14 @@ function debounce(func, wait) {
 
 // Carregar dados iniciais
 document.addEventListener('DOMContentLoaded', () => {
-    // Por padrão, listar apenas produtos ativos
     const statusSel = document.getElementById('statusFilter');
     if (statusSel) statusSel.value = 'true';
-    carregarProdutos(1);
+    try {
+        const p = localStorage.getItem('per_page_produtos');
+        const el = document.getElementById('perPageProdutos');
+        if (p && el) el.value = String(p);
+    } catch(_) {}
+    carregarProdutos();
 });
 </script>
 {% endblock %}

@@ -1190,10 +1190,26 @@ async function filtrarSetoresDistribuicao() {
         const matchAny = (list) => Array.isArray(list) && list.some(matchId);
         setoresFiltrados = todosSetores.filter(s => matchId(s.central_id) || matchAny(s.central_ids));
     } else if (tipo === 'almoxarifado') {
-        // Filtrar diretamente por almoxarifado_id(s) do setor
+        // Filtrar por vínculos diretos ao almox e também por sub‑almoxarifados pertencentes a este almox
         const matchId = (val) => idEq(val, origemId);
         const matchAny = (list) => Array.isArray(list) && list.some(matchId);
-        setoresFiltrados = todosSetores.filter(s => matchId(s.almoxarifado_id) || matchAny(s.almoxarifado_ids));
+        const diretos = todosSetores.filter(s => matchId(s.almoxarifado_id) || matchAny(s.almoxarifado_ids));
+        let porSubs = [];
+        try {
+            const respSubs = await fetchJson('/api/sub-almoxarifados?per_page=1000');
+            const subs = (respSubs && respSubs.items) ? respSubs.items : [];
+            const subsDoAlmox = subs.filter(sa => idEq(sa.almoxarifado_id, origemId)).map(sa => String(sa.id));
+            porSubs = todosSetores.filter(s => {
+                const sSingle = String(s.sub_almoxarifado_id || '');
+                const sMulti = Array.isArray(s.sub_almoxarifado_ids) ? s.sub_almoxarifado_ids.map(v => String(v)) : [];
+                return subsDoAlmox.includes(sSingle) || sMulti.some(v => subsDoAlmox.includes(String(v)));
+            });
+        } catch (_) {
+            porSubs = [];
+        }
+        const uniq = new Map();
+        [...diretos, ...porSubs].forEach(s => { if (s && s.id != null) uniq.set(String(s.id), s); });
+        setoresFiltrados = Array.from(uniq.values());
     } else if (tipo === 'sub_almoxarifado') {
         // Priorizar setores vinculados diretamente ao sub
         const diretos = todosSetores.filter(s => setorPertenceAoSub(s, origemId));

@@ -89,6 +89,8 @@ def ensure_collections_and_indexes(db, logger=None):
         try:
             db['movimentacoes'].create_index([('tipo', ASCENDING)], name='idx_mov_tipo')
             db['movimentacoes'].create_index([('produto_id', ASCENDING)], name='idx_mov_produto')
+            db['movimentacoes'].create_index([('created_at', DESCENDING)], name='idx_mov_created_at')
+            db['movimentacoes'].create_index([('produto_id', ASCENDING), ('data_movimentacao', DESCENDING)], name='idx_mov_prod_data')
         except Exception:
             pass
         try:

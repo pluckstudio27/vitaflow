@@ -2578,6 +2578,8 @@ def api_usuarios_list():
     """Lista usuários com paginação básica (para compatibilidade futura)."""
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+    sort_param = (request.args.get('sort') or '').strip().lower() or 'codigo'
+    order_param = (request.args.get('order') or '').strip().lower() or ('asc' if sort_param != 'created_at' else 'desc')
     search = (request.args.get('search') or '').strip()
     coll = extensions.mongo_db['usuarios']
     query = {}
@@ -3065,8 +3067,12 @@ def api_centrais_list():
     if extensions.mongo_db is None:
         return jsonify({'error': 'MongoDB não inicializado'}), 503
     page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 20))
-    per_page = max(1, min(per_page, 100))
+    per_page_raw = (request.args.get('per_page') or request.args.get('limit') or '10000')
+    try:
+        per_page = int(per_page_raw)
+    except Exception:
+        per_page = 10000
+    per_page = max(1, min(per_page, 100000))
     ativo_param = request.args.get('ativo')
     search = (request.args.get('search') or '').strip()
 
@@ -3086,7 +3092,7 @@ def api_centrais_list():
     coll = extensions.mongo_db['centrais']
     total = coll.count_documents(filter_query)
     skip = max(0, (page - 1) * per_page)
-    cursor = coll.find(filter_query).sort('id', 1).skip(skip).limit(per_page)
+    cursor = coll.find(filter_query, {'id': 1, '_id': 1, 'nome': 1, 'descricao': 1, 'ativo': 1}).sort('id', 1).skip(skip).limit(per_page)
 
     items = []
     for doc in cursor:
@@ -4218,9 +4224,14 @@ def api_setores_delete(id):
 def api_produtos():
     if extensions.mongo_db is None:
         return jsonify({'error': 'MongoDB não inicializado'}), 503
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 20))
-    per_page = max(1, min(per_page, 100))
+    limit_raw = (request.args.get('limit') or request.args.get('per_page') or '10000')
+    try:
+        limit = int(limit_raw)
+    except Exception:
+        limit = 10000
+    limit = max(1, min(limit, 100000))
+    sort_param = (request.args.get('sort') or '').strip().lower() or 'codigo'
+    order_param = (request.args.get('order') or '').strip().lower() or ('asc' if sort_param != 'created_at' else 'desc')
     search = (request.args.get('search') or '').strip()
     categoria_id = request.args.get('categoria_id')
     ativo_param = request.args.get('ativo')
@@ -4250,15 +4261,99 @@ def api_produtos():
             {'descricao': {'$regex': search, '$options': 'i'}}
         ]
 
+    # Aplicar escopo ANTES da paginação para evitar páginas vazias
+    if enforce_scope:
+        expected_cid = None
+        try:
+            expected_cid = getattr(current_user, 'central_id', None)
+            if expected_cid is None:
+                lvl = getattr(current_user, 'nivel_acesso', None)
+                if lvl == 'gerente_almox' and getattr(current_user, 'almoxarifado_id', None) is not None:
+                    a = extensions.mongo_db['almoxarifados'].find_one({'id': getattr(current_user, 'almoxarifado_id')}) or \
+                        extensions.mongo_db['almoxarifados'].find_one({'_id': current_user.almoxarifado_id})
+                    expected_cid = (a or {}).get('central_id')
+                elif lvl == 'resp_sub_almox' and getattr(current_user, 'sub_almoxarifado_id', None) is not None:
+                    s = extensions.mongo_db['sub_almoxarifados'].find_one({'id': getattr(current_user, 'sub_almoxarifado_id')}) or \
+                        extensions.mongo_db['sub_almoxarifados'].find_one({'_id': current_user.sub_almoxarifado_id})
+                    a = None
+                    if s:
+                        a = extensions.mongo_db['almoxarifados'].find_one({'id': s.get('almoxarifado_id')}) or \
+                            extensions.mongo_db['almoxarifados'].find_one({'_id': s.get('almoxarifado_id')})
+                    expected_cid = (a or {}).get('central_id')
+                elif lvl == 'operador_setor' and getattr(current_user, 'setor_id', None) is not None:
+                    se = extensions.mongo_db['setores'].find_one({'id': getattr(current_user, 'setor_id')}) or \
+                        extensions.mongo_db['setores'].find_one({'_id': current_user.setor_id})
+                    s = None
+                    a = None
+                    if se:
+                        s = extensions.mongo_db['sub_almoxarifados'].find_one({'id': se.get('sub_almoxarifado_id')}) or \
+                            extensions.mongo_db['sub_almoxarifados'].find_one({'_id': se.get('sub_almoxarifado_id')})
+                    if s:
+                        a = extensions.mongo_db['almoxarifados'].find_one({'id': s.get('almoxarifado_id')}) or \
+                            extensions.mongo_db['almoxarifados'].find_one({'_id': s.get('almoxarifado_id')})
+                    expected_cid = (a or {}).get('central_id')
+        except Exception:
+            expected_cid = None
+        # Montar filtro de central com tipos corretos: int, string e ObjectId
+        from bson.objectid import ObjectId
+        allowed = set()
+        if isinstance(expected_cid, int):
+            allowed.add(expected_cid)
+            allowed.add(str(expected_cid))
+        elif isinstance(expected_cid, str):
+            allowed.add(expected_cid)
+            if len(expected_cid) == 24:
+                try:
+                    allowed.add(ObjectId(expected_cid))
+                except Exception:
+                    pass
+        elif isinstance(expected_cid, ObjectId):
+            allowed.add(expected_cid)
+            allowed.add(str(expected_cid))
+        # Resolver central doc para adicionar variantes
+        central_doc = None
+        try:
+            if isinstance(expected_cid, int):
+                central_doc = extensions.mongo_db['centrais'].find_one({'id': expected_cid})
+            elif isinstance(expected_cid, ObjectId):
+                central_doc = extensions.mongo_db['centrais'].find_one({'_id': expected_cid})
+            elif isinstance(expected_cid, str):
+                if len(expected_cid) == 24:
+                    central_doc = extensions.mongo_db['centrais'].find_one({'_id': ObjectId(expected_cid)})
+                else:
+                    central_doc = extensions.mongo_db['centrais'].find_one({'id': expected_cid}) or \
+                        extensions.mongo_db['centrais'].find_one({'_id': expected_cid})
+        except Exception:
+            central_doc = None
+        if central_doc:
+            cid_id = central_doc.get('id')
+            cid_oid = central_doc.get('_id')
+            if cid_id is not None:
+                allowed.add(cid_id)
+                allowed.add(str(cid_id))
+            if cid_oid is not None:
+                allowed.add(cid_oid)
+                allowed.add(str(cid_oid))
+        if allowed:
+            filter_query['central_id'] = {'$in': list(allowed)}
+        else:
+            filter_query['central_id'] = {'$in': ['__none__']}
+
     coll = extensions.mongo_db['produtos']
+    sort_fields = [('codigo', 1), ('_id', 1)]
+    if sort_param in ('codigo', 'nome', 'id'):
+        direction = 1 if order_param == 'asc' else -1
+        sort_fields = [(sort_param, direction), ('_id', 1)]
+    elif sort_param == 'created_at':
+        direction = -1 if order_param != 'asc' else 1
+        sort_fields = [('created_at', direction), ('_id', 1)]
     total = coll.count_documents(filter_query)
-    pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(page, pages))
-    skip = max(0, (page - 1) * per_page)
+    try:
+        current_app.logger.info(f"/api/produtos query={filter_query} sort={sort_fields} limit={limit} total={total}")
+    except Exception:
+        pass
+    cursor = coll.find(filter_query).sort(sort_fields).limit(limit)
 
-    cursor = coll.find(filter_query).sort('created_at', -1).skip(skip).limit(per_page)
-
-    # Opcional: carregar categorias para mostrar nome/cor
     categorias_coll = extensions.mongo_db['categorias']
     categorias_by_seq = {c.get('id'): c for c in categorias_coll.find({}, {'id': 1, 'nome': 1, 'codigo': 1, 'cor': 1}) if 'id' in c}
     categorias_by_oid = {str(c.get('_id')): c for c in categorias_coll.find({}, {'_id': 1, 'nome': 1, 'codigo': 1, 'cor': 1})}
@@ -4267,14 +4362,7 @@ def api_produtos():
     for doc in cursor:
         # Normalizar id para string quando não existir id sequencial
         pid = doc.get('id') if doc.get('id') is not None else str(doc.get('_id'))
-        # Aplicar escopo: níveis restritos só veem produtos da própria central
-        if enforce_scope:
-            try:
-                if not current_user.can_access_produto(pid):
-                    continue
-            except Exception:
-                # Em caso de erro na checagem, negar por segurança
-                continue
+        # Escopo já aplicado no filtro; não revalidar aqui para não esvaziar páginas
         cat_raw = doc.get('categoria_id')
         cat_doc = None
         if isinstance(cat_raw, int):
@@ -4300,11 +4388,12 @@ def api_produtos():
             'categoria_produto': categoria_produto
         })
 
+    try:
+        current_app.logger.info(f"/api/produtos returned={len(items)} total={total}")
+    except Exception:
+        pass
     return jsonify({
         'items': items,
-        'page': page,
-        'pages': pages,
-        'per_page': per_page,
         'total': total
     })
 
@@ -6298,60 +6387,212 @@ def api_movimentacoes():
             # Fallback silencioso (escopo será aplicado dentro do loop)
             pass
 
+    ordem_param = (request.args.get('ordem') or '').strip().lower() or 'desc'
     total = coll.count_documents(query or {})
     page = max(1, page)
     per_page = max(1, min(per_page, 100))
     skip = max(0, (page - 1) * per_page)
 
-    cursor = coll.find(query or {}).sort('data_movimentacao', -1).skip(skip).limit(per_page)
+    try:
+        current_app.logger.info(f"/api/movimentacoes query={query} total={total} page={page} per_page={per_page} skip={skip} ordem={ordem_param}")
+    except Exception:
+        pass
 
-    # caches para resolução
-    prod_cache = {}
+    projection = {
+        'produto_id': 1,
+        'produto_nome': 1,
+        'produto_codigo': 1,
+        'produto_unidade': 1,
+        'origem_tipo': 1,
+        'origem_id': 1,
+        'origem_nome': 1,
+        'destino_tipo': 1,
+        'destino_id': 1,
+        'destino_nome': 1,
+        'usuario_responsavel': 1,
+        'usuario': 1,
+        'usuario_nome': 1,
+        'quantidade': 1,
+        'quantidade_movimentada': 1,
+        'data_movimentacao': 1,
+        'created_at': 1,
+        'updated_at': 1,
+        'tipo': 1,
+        'tipo_movimentacao': 1,
+        'motivo': 1,
+        'observacoes': 1,
+    }
 
-    def resolve_produto(pid):
-        key = str(pid)
-        if key in prod_cache:
-            return prod_cache[key]
-        doc = None
+    sort_fields = [('data_movimentacao', -1 if ordem_param != 'asc' else 1), ('_id', 1)]
+    cursor = coll.find(query or {}, projection).sort(sort_fields).skip(skip).limit(per_page)
+
+    docs = list(cursor)
+    fallback_used = False
+
+    # Fallback: se nada retornou e há restrição ativa, tentar sem pré-filtro de escopo e aplicar checagem no loop
+    if restricted and not docs:
         try:
-            coll_prod = extensions.mongo_db['produtos']
-            if str(pid).isdigit():
-                doc = coll_prod.find_one({'id': int(pid)})
-            if not doc:
+            alt_cursor = coll.find({}, projection).sort(sort_fields).skip(skip).limit(per_page)
+            docs = list(alt_cursor)
+            fallback_used = True
+            current_app.logger.info("/api/movimentacoes fallback sem escopo prévio aplicado")
+        except Exception:
+            pass
+
+    # Pré-busca em lote de produtos para evitar N+1 queries
+    produtos_coll = extensions.mongo_db['produtos']
+    pid_seq = []
+    pid_oid = []
+    pid_str = []
+    for d in docs:
+        pid = d.get('produto_id')
+        if pid is None:
+            continue
+        try:
+            if isinstance(pid, int):
+                pid_seq.append(pid)
+            elif isinstance(pid, ObjectId):
+                pid_oid.append(pid)
+            else:
+                pid_str.append(str(pid))
+        except Exception:
+            pid_str.append(str(pid))
+    # Converter strings de 24 chars para ObjectId quando possível
+    pid_str_oids = []
+    for s in pid_str:
+        if isinstance(s, str) and len(s) == 24:
+            try:
+                pid_str_oids.append(ObjectId(s))
+            except Exception:
+                pass
+    prod_filter = {'$or': []}
+    if pid_seq:
+        prod_filter['$or'].append({'id': {'$in': list(set(pid_seq))}})
+    if pid_oid:
+        prod_filter['$or'].append({'_id': {'$in': list(set(pid_oid))}})
+    if pid_str_oids:
+        prod_filter['$or'].append({'_id': {'$in': list(set(pid_str_oids))}})
+    if pid_str:
+        prod_filter['$or'].append({'id': {'$in': list(set(pid_str))}})
+    prod_map = {}
+    if prod_filter['$or']:
+        for p in produtos_coll.find(prod_filter, {'id': 1, '_id': 1, 'nome': 1, 'codigo': 1, 'unidade_medida': 1}):
+            key_candidates = []
+            if p.get('id') is not None:
+                key_candidates.append(str(p.get('id')))
+            if p.get('_id') is not None:
+                key_candidates.append(str(p.get('_id')))
+            for k in key_candidates:
+                prod_map[k] = p
+
+    # Pré-busca em lote de locais
+    locais_sets = {
+        'setores': set(),
+        'sub_almoxarifados': set(),
+        'almoxarifados': set(),
+        'centrais': set(),
+    }
+    def _collect_local(tipo, lid):
+        t = str(tipo or '').lower()
+        if lid is None:
+            return
+        if t in ('setor', 'setores'):
+            locais_sets['setores'].add(lid)
+        elif t in ('subalmoxarifado', 'sub_almoxarifado', 'sub_almoxarifados'):
+            locais_sets['sub_almoxarifados'].add(lid)
+        elif t in ('almoxarifado', 'almoxarifados'):
+            locais_sets['almoxarifados'].add(lid)
+        elif t in ('central', 'centrais'):
+            locais_sets['centrais'].add(lid)
+    for d in docs:
+        _collect_local(d.get('origem_tipo') or d.get('local_tipo'), d.get('origem_id') or d.get('local_id'))
+        _collect_local(d.get('destino_tipo'), d.get('destino_id'))
+
+    local_maps = {}
+    for coll_name, ids in locais_sets.items():
+        if not ids:
+            continue
+        seq_ids = []
+        oid_ids = []
+        str_ids = []
+        for v in ids:
+            try:
+                if isinstance(v, int):
+                    seq_ids.append(v)
+                elif isinstance(v, ObjectId):
+                    oid_ids.append(v)
+                else:
+                    str_ids.append(str(v))
+            except Exception:
+                str_ids.append(str(v))
+        str_oids = []
+        for s in str_ids:
+            if isinstance(s, str) and len(s) == 24:
                 try:
-                    doc = coll_prod.find_one({'_id': ObjectId(str(pid))})
+                    str_oids.append(ObjectId(s))
                 except Exception:
                     pass
-            if not doc and isinstance(pid, str):
-                doc = coll_prod.find_one({'id': pid}) or coll_prod.find_one({'_id': pid})
+        loc_filter = {'$or': []}
+        if seq_ids:
+            loc_filter['$or'].append({'id': {'$in': list(set(seq_ids))}})
+        if oid_ids:
+            loc_filter['$or'].append({'_id': {'$in': list(set(oid_ids))}})
+        if str_oids:
+            loc_filter['$or'].append({'_id': {'$in': list(set(str_oids))}})
+        if str_ids:
+            loc_filter['$or'].append({'id': {'$in': list(set(str_ids))}})
+        if not loc_filter['$or']:
+            continue
+        coll_loc = extensions.mongo_db[coll_name]
+        for doc in coll_loc.find(loc_filter, {'id': 1, '_id': 1, 'nome': 1, 'descricao': 1}):
+            key_candidates = []
+            if doc.get('id') is not None:
+                key_candidates.append(f"{coll_name}:{str(doc.get('id'))}")
+            if doc.get('_id') is not None:
+                key_candidates.append(f"{coll_name}:{str(doc.get('_id'))}")
+            for k in key_candidates:
+                local_maps[k] = doc
+
+    # Resolução utilizando mapas pré-carregados com fallback
+    def resolve_produto(pid):
+        key = str(pid)
+        doc = prod_map.get(key)
+        if doc is not None:
+            return doc
+        try:
+            return _find_by_id('produtos', pid)
         except Exception:
-            doc = None
-        prod_cache[key] = doc
-        return doc
+            return None
 
     def resolve_local(tipo, lid):
         if not tipo:
             return None
-        coll_name = None
-        if str(tipo).lower() in ('setor', 'setores'):
+        t = str(tipo).lower()
+        if t in ('setor', 'setores'):
             coll_name = 'setores'
-        elif str(tipo).lower() in ('subalmoxarifado', 'sub_almoxarifado', 'sub_almoxarifados'):
+        elif t in ('subalmoxarifado', 'sub_almoxarifado', 'sub_almoxarifados'):
             coll_name = 'sub_almoxarifados'
-        elif str(tipo).lower() in ('almoxarifado', 'almoxarifados'):
+        elif t in ('almoxarifado', 'almoxarifados'):
             coll_name = 'almoxarifados'
-        elif str(tipo).lower() in ('central', 'centrais'):
+        elif t in ('central', 'centrais'):
             coll_name = 'centrais'
+        else:
+            coll_name = None
         if not coll_name:
             return None
+        key = f"{coll_name}:{str(lid)}"
+        doc = local_maps.get(key)
+        if doc is not None:
+            return doc
         try:
             return _find_by_id(coll_name, lid)
         except Exception:
             return None
 
     items = []
-    for m in cursor:
-        # Escopo extra de segurança: níveis restritos só veem produtos da própria central
-        if restricted:
+    for m in docs:
+        # Escopo extra de segurança somente no modo fallback
+        if restricted and fallback_used:
             try:
                 if not current_user.can_access_produto(m.get('produto_id')):
                     continue
@@ -6442,7 +6683,7 @@ def api_movimentacoes():
 
     result = {'items': items, 'pagination': pagination}
     try:
-        extensions.response_cache.set(cache_key, result, ttl=10)
+        extensions.response_cache.set(cache_key, result, ttl=20)
     except Exception:
         pass
     return jsonify(result)
