@@ -448,17 +448,29 @@ function filtrarMovimentacoes() {
 
 // Carregar produtos para os selects
 function carregarProdutos(searchTerm = '') {
-    const params = new URLSearchParams({ativo: 'true', per_page: '100'});
+    const params = new URLSearchParams({ per_page: '1000', no_pagination: 'true', status: 'disponivel' });
     if (searchTerm && searchTerm.trim() !== '') {
-        params.set('search', searchTerm.trim());
+        params.set('produto', searchTerm.trim());
     }
-    cachedFetchJson('/api/produtos?' + params.toString(), { ttlMs: 300000 })
+    cachedFetchJson('/api/estoque/hierarquia?' + params.toString(), { ttlMs: 300000 })
         .then(data => {
-            const produtos = data.items || [];
+            const items = (data && data.items) ? data.items : [];
+            const byProduto = new Map();
+            items.forEach(it => {
+                const pid = String(it.produto_id);
+                if (!byProduto.has(pid)) {
+                    byProduto.set(pid, {
+                        id: pid,
+                        nome: it.produto_nome || '-',
+                        codigo: it.produto_codigo || ''
+                    });
+                }
+            });
+            const produtos = Array.from(byProduto.values());
             const selectTransferencia = document.getElementById('produtoTransferencia');
             const selectDistribuicao = document.getElementById('produtoDistribuicao');
             const options = produtos.map(produto => 
-                `<option value="${produto.id}">${produto.codigo || ''} - ${produto.nome}</option>`
+                `<option value="${produto.id}">${produto.codigo ? produto.codigo + ' - ' : ''}${produto.nome}</option>`
             ).join('');
             if (selectTransferencia) {
                 const current = selectTransferencia.value;
@@ -476,7 +488,7 @@ function carregarProdutos(searchTerm = '') {
             }
         })
         .catch(error => {
-            console.error('Erro ao carregar produtos:', error);
+            console.error('Erro ao carregar produtos (hierarquia):', error);
         });
 }
 
@@ -1165,6 +1177,9 @@ async function filtrarSetoresDistribuicao() {
     try {
         const resp = await fetchJson('/api/setores?per_page=1000');
         todosSetores = resp.items || [];
+        if (!Array.isArray(todosSetores) || todosSetores.length === 0) {
+            todosSetores = locaisData.setores || [];
+        }
     } catch (err) {
         console.error('Erro ao carregar setores via API:', err);
         // Fallback para dados embutidos no template
@@ -1211,16 +1226,15 @@ async function filtrarSetoresDistribuicao() {
         [...diretos, ...porSubs].forEach(s => { if (s && s.id != null) uniq.set(String(s.id), s); });
         setoresFiltrados = Array.from(uniq.values());
     } else if (tipo === 'sub_almoxarifado') {
-        // Priorizar setores vinculados diretamente ao sub
-        const diretos = todosSetores.filter(s => setorPertenceAoSub(s, origemId));
-        // Além disso, incluir setores vinculados ao almoxarifado pai do sub selecionado
-        let almoxDoSub = null;
+        let subData;
         try {
-            const subData = await fetchJson(`/api/sub-almoxarifados/${encodeURIComponent(origemId)}`);
-            almoxDoSub = subData ? subData.almoxarifado_id : null;
+            subData = await fetchJson(`/api/sub-almoxarifados/${encodeURIComponent(origemId)}`);
         } catch (_) {
-            almoxDoSub = null;
+            subData = null;
         }
+        const subKey = (subData && (subData.id_normalized ?? subData.id)) ? String(subData.id_normalized ?? subData.id) : String(origemId);
+        const diretos = todosSetores.filter(s => setorPertenceAoSub(s, subKey));
+        let almoxDoSub = (subData && subData.almoxarifado_id) ? subData.almoxarifado_id : null;
         let porAlmox = [];
         if (almoxDoSub) {
             const matchId = (val) => idEq(val, almoxDoSub);
@@ -1295,6 +1309,8 @@ function renderDisponibilidadeProduto(estoques) {
     const rows = cont.querySelectorAll('tbody tr');
     if (rows.length === 1) {
         rows[0].click();
+    } else if (!window.origemDistribuicaoSelecionada && rows.length > 0) {
+        rows[0].click();
     }
 }
 
@@ -1335,15 +1351,25 @@ function carregarLocaisProdutoDistribuicao() {
         if (cont) cont.innerHTML = '<div class="text-muted">Selecione um produto para visualizar a disponibilidade por local.</div>';
         return;
     }
-    // Buscar estoque do produto e renderizar tabela
-    fetchJson(`/api/produtos/${produtoId}/estoque`)
-        .then(data => {
+    // Buscar estoque agregado pela hierarquia e renderizar tabela
+    cachedFetchJson(`/api/estoque/hierarquia?no_pagination=true&produto=${encodeURIComponent(produtoId)}`, { ttlMs: 20000 })
+        .then(res => {
+            const items = (res && res.items) ? res.items : [];
+            const normalizeTipo = (t) => String(t || '').toLowerCase().replace(/[-]/g, '_').replace(/^subalmoxarifado$/, 'sub_almoxarifado');
+            const adaptados = items.map(it => ({
+                tipo: normalizeTipo(it.local_tipo || it.tipo),
+                nome_local: it.local_nome,
+                quantidade: it.quantidade,
+                quantidade_disponivel: it.quantidade_disponivel,
+                data_atualizacao: it.data_atualizacao,
+                local_id: it.local_id
+            }));
             try {
-                renderDisponibilidadeProduto(data.estoques || []);
+                renderDisponibilidadeProduto(adaptados);
             } catch (e) { console.warn('Falha ao renderizar disponibilidade:', e); }
         })
         .catch(error => {
-            console.error('Erro ao carregar estoque do produto:', error);
+            console.error('Erro ao carregar estoque (hierarquia):', error);
             if (cont) cont.innerHTML = '<div class="text-danger">Erro ao carregar estoque</div>';
         });
 }

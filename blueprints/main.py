@@ -277,24 +277,140 @@ def estoque():
 @main_bp.route('/movimentacoes')
 @require_level('super_admin', 'admin_central', 'gerente_almox', 'resp_sub_almox', 'secretario')
 def movimentacoes():
-    """Página de movimentações e transferências (placeholders)"""
-    centrais = []
-    almoxarifados = []
-    sub_almoxarifados = []
-    setores = []
-    
-    # Converter objetos para dicionários para serialização JSON
-    centrais_dict = [{'id': c.get('id'), 'nome': c.get('nome')} for c in centrais]
-    almoxarifados_dict = [{'id': a.get('id'), 'nome': a.get('nome'), 'central_id': a.get('central_id')} for a in almoxarifados]
-    sub_almoxarifados_dict = [{'id': s.get('id'), 'nome': s.get('nome'), 'almoxarifado_id': s.get('almoxarifado_id')} for s in sub_almoxarifados]
-    setores_dict = [{'id': s.get('id'), 'nome': s.get('nome')} for s in setores]
-    
-    return render_template('movimentacoes/index.html',
-                         centrais=centrais_dict,
-                         almoxarifados=almoxarifados_dict,
-                         sub_almoxarifados=sub_almoxarifados_dict,
-                         setores=setores_dict,
-                         use_mongo=True)
+    """Página de movimentações e transferências
+    Carrega dados mínimos de hierarquia para fallback no template quando APIs não estiverem disponíveis.
+    """
+    centrais_dict = []
+    almoxarifados_dict = []
+    sub_almoxarifados_dict = []
+    setores_dict = []
+
+    try:
+        db = extensions.mongo_db
+        if db is not None:
+            # Centrais
+            try:
+                for d in db['centrais'].find({}, {'_id': 1, 'id': 1, 'nome': 1}).sort('nome', 1):
+                    cid = d.get('id') if d.get('id') is not None else str(d.get('_id'))
+                    centrais_dict.append({'id': cid, 'nome': d.get('nome')})
+            except Exception:
+                pass
+
+            # Almoxarifados
+            try:
+                for a in db['almoxarifados'].find({}, {'_id': 1, 'id': 1, 'nome': 1, 'central_id': 1}).sort('nome', 1):
+                    aid = a.get('id') if a.get('id') is not None else str(a.get('_id'))
+                    almoxarifados_dict.append({'id': aid, 'nome': a.get('nome'), 'central_id': a.get('central_id')})
+            except Exception:
+                pass
+
+            # Sub‑almoxarifados
+            try:
+                for s in db['sub_almoxarifados'].find({}, {'_id': 1, 'id': 1, 'nome': 1, 'almoxarifado_id': 1}).sort('nome', 1):
+                    sid = s.get('id') if s.get('id') is not None else str(s.get('_id'))
+                    sub_almoxarifados_dict.append({'id': sid, 'nome': s.get('nome'), 'almoxarifado_id': s.get('almoxarifado_id')})
+            except Exception:
+                pass
+
+            # Setores com vínculos normalizados mínimos para filtragem no front
+            try:
+                # Preload para derivar almox/central e nomes
+                sub_by_seq = {x.get('id'): x for x in db['sub_almoxarifados'].find({'id': {'$exists': True}}, {'id': 1, 'nome': 1, 'almoxarifado_id': 1})}
+                sub_by_oid = {str(x.get('_id')): x for x in db['sub_almoxarifados'].find({}, {'_id': 1, 'nome': 1, 'almoxarifado_id': 1})}
+                almox_by_seq = {x.get('id'): x for x in db['almoxarifados'].find({'id': {'$exists': True}}, {'id': 1, 'nome': 1, 'central_id': 1})}
+                almox_by_oid = {str(x.get('_id')): x for x in db['almoxarifados'].find({}, {'_id': 1, 'nome': 1, 'central_id': 1})}
+                for d in db['setores'].find({}, {'_id': 1, 'id': 1, 'nome': 1, 'descricao': 1, 'ativo': 1, 'sub_almoxarifado_id': 1, 'sub_almoxarifado_ids': 1, 'almoxarifado_ids': 1}).sort('nome', 1):
+                    sid = d.get('id') if d.get('id') is not None else str(d.get('_id'))
+                    raw_sid = d.get('sub_almoxarifado_id')
+                    sdoc = None
+                    if isinstance(raw_sid, int):
+                        sdoc = sub_by_seq.get(raw_sid)
+                    elif raw_sid is not None:
+                        sdoc = sub_by_oid.get(str(raw_sid))
+                    # Derivar almoxarifado_id principal
+                    almox_doc = None
+                    almox_id_norm = None
+                    if sdoc is not None:
+                        ra = sdoc.get('almoxarifado_id')
+                        if isinstance(ra, int):
+                            almox_doc = almox_by_seq.get(ra)
+                            almox_id_norm = ra
+                        else:
+                            almox_doc = almox_by_oid.get(str(ra))
+                            almox_id_norm = (almox_doc.get('id') if almox_doc and almox_doc.get('id') is not None else None)
+                    # Derivar central_id principal
+                    central_id_norm = None
+                    if almox_doc is not None:
+                        rv = almox_doc.get('central_id')
+                        central_id_norm = rv if isinstance(rv, int) else (str(rv) if rv is not None else None)
+                    # Normalizar listas
+                    sub_ids_out = []
+                    for v in (d.get('sub_almoxarifado_ids') or []):
+                        if isinstance(v, int):
+                            sub_ids_out.append(v)
+                        else:
+                            sv = sub_by_oid.get(str(v))
+                            if sv and isinstance(sv.get('id'), int):
+                                sub_ids_out.append(sv.get('id'))
+                    almox_ids_out = []
+                    for v in (d.get('almoxarifado_ids') or []):
+                        if isinstance(v, int):
+                            almox_ids_out.append(v)
+                        else:
+                            av = almox_by_oid.get(str(v))
+                            if av and isinstance(av.get('id'), int):
+                                almox_ids_out.append(av.get('id'))
+                    if not almox_ids_out and sub_ids_out:
+                        for sv in sub_ids_out:
+                            s2 = sub_by_seq.get(sv)
+                            aid2 = (s2 or {}).get('almoxarifado_id')
+                            if isinstance(aid2, int):
+                                almox_ids_out.append(aid2)
+                    central_ids_out = []
+                    for aid in almox_ids_out:
+                        ad2 = almox_by_seq.get(aid)
+                        c2 = (ad2 or {}).get('central_id')
+                        if isinstance(c2, int):
+                            central_ids_out.append(c2)
+                    # Nomes
+                    sub_nomes_out = []
+                    if sub_ids_out:
+                        for sv in sub_ids_out:
+                            nm = (sub_by_seq.get(sv) or {}).get('nome')
+                            if nm:
+                                sub_nomes_out.append(nm)
+                    elif sdoc:
+                        nm = sdoc.get('nome')
+                        if nm:
+                            sub_nomes_out.append(nm)
+
+                    setores_dict.append({
+                        'id': sid,
+                        'nome': d.get('nome') or d.get('descricao') or 'Setor',
+                        'ativo': bool(d.get('ativo', True)),
+                        'sub_almoxarifado_id': (sdoc.get('id') if sdoc and sdoc.get('id') is not None else (raw_sid if isinstance(raw_sid, int) else (str(raw_sid) if raw_sid is not None else None))),
+                        'sub_almoxarifado_ids': sub_ids_out,
+                        'almoxarifado_id': almox_id_norm,
+                        'almoxarifado_ids': almox_ids_out,
+                        'central_id': central_id_norm,
+                        'central_ids': list(sorted(set(central_ids_out))),
+                        'sub_almoxarifado_nome': sdoc.get('nome') if sdoc else None,
+                        'almoxarifado_nome': almox_doc.get('nome') if almox_doc else None,
+                        'sub_almoxarifado_nomes': sub_nomes_out
+                    })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return render_template(
+        'movimentacoes/index.html',
+        centrais=centrais_dict,
+        almoxarifados=almoxarifados_dict,
+        sub_almoxarifados=sub_almoxarifados_dict,
+        setores=setores_dict,
+        use_mongo=True
+    )
 
 # ==================== PÁGINAS: OPERADOR SETOR E DEMANDAS ====================
 
@@ -3635,10 +3751,11 @@ def api_sub_almoxarifado_get(id):
             doc = coll.find_one({'_id': ObjectId(id)})
         except Exception:
             doc = None
+    else:
+        doc = coll.find_one({'id': id})
     if not doc:
         return jsonify({'error': 'Sub-almoxarifado não encontrado'}), 404
 
-    # Lookup almoxarifado and central info
     almox_coll = extensions.mongo_db['almoxarifados']
     centrais_coll = extensions.mongo_db['centrais']
     almox_by_seq = {a.get('id'): a for a in almox_coll.find({}, {'id': 1, 'nome': 1, 'central_id': 1}) if 'id' in a}
@@ -3654,10 +3771,13 @@ def api_sub_almoxarifado_get(id):
         normalized_almox_id = raw_aid
     elif isinstance(raw_aid, ObjectId):
         almox_doc = almox_by_oid.get(str(raw_aid))
-        normalized_almox_id = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+        normalized_almox_id = (almox_doc.get('id') if almox_doc and 'id' in almox_doc else None)
     elif isinstance(raw_aid, str) and len(raw_aid) == 24:
         almox_doc = almox_by_oid.get(raw_aid)
-        normalized_almox_id = almox_doc.get('id') if almox_doc and 'id' in almox_doc else None
+        normalized_almox_id = (almox_doc.get('id') if almox_doc and 'id' in almox_doc else None)
+    elif isinstance(raw_aid, str) and raw_aid.isdigit():
+        normalized_almox_id = int(raw_aid)
+        almox_doc = almox_by_seq.get(normalized_almox_id)
 
     central_doc = None
     normalized_central_id = None
@@ -3667,19 +3787,25 @@ def api_sub_almoxarifado_get(id):
         normalized_central_id = raw_cid
     elif isinstance(raw_cid, ObjectId):
         central_doc = centrais_by_oid.get(str(raw_cid))
-        normalized_central_id = central_doc.get('id') if central_doc and 'id' in central_doc else None
+        normalized_central_id = (central_doc.get('id') if central_doc and 'id' in central_doc else None)
     elif isinstance(raw_cid, str) and len(raw_cid) == 24:
         central_doc = centrais_by_oid.get(raw_cid)
-        normalized_central_id = central_doc.get('id') if central_doc and 'id' in central_doc else None
+        normalized_central_id = (central_doc.get('id') if central_doc and 'id' in central_doc else None)
+    elif isinstance(raw_cid, str) and raw_cid.isdigit():
+        normalized_central_id = int(raw_cid)
+        central_doc = centrais_by_seq.get(normalized_central_id)
+
+    normalized_sub_id = doc.get('id') if isinstance(doc.get('id'), int) else None
 
     return jsonify({
         'id': doc.get('id') if doc.get('id') is not None else str(doc.get('_id')),
+        'id_normalized': normalized_sub_id,
         'nome': doc.get('nome'),
         'descricao': doc.get('descricao'),
         'ativo': doc.get('ativo', True),
-        'almoxarifado_id': normalized_almox_id if normalized_almox_id is not None else (raw_aid if isinstance(raw_aid, int) else None),
+        'almoxarifado_id': normalized_almox_id if normalized_almox_id is not None else (raw_aid if isinstance(raw_aid, int) else (int(raw_aid) if isinstance(raw_aid, str) and raw_aid.isdigit() else None)),
         'almoxarifado_nome': almox_doc.get('nome') if almox_doc else None,
-        'central_id': normalized_central_id if normalized_central_id is not None else (raw_cid if isinstance(raw_cid, int) else None),
+        'central_id': normalized_central_id if normalized_central_id is not None else (raw_cid if isinstance(raw_cid, int) else (int(raw_cid) if isinstance(raw_cid, str) and raw_cid.isdigit() else None)),
         'central_nome': central_doc.get('nome') if central_doc else None,
     })
 
