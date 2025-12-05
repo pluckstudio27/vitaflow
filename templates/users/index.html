@@ -604,7 +604,7 @@ async function ensureHierarchyOptionsLoaded() {
     // Carregar Centrais
     if (centralSelect && !hasRealOptions(centralSelect)) {
         try {
-            const resp = await fetchJson('/api/centrais?per_page=1000');
+            const resp = await cachedFetchJson('/api/centrais?per_page=1000', { ttlMs: 300000 });
             const items = (resp && resp.items) ? resp.items : [];
             const prev = centralSelect.value;
             centralSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(c => `
@@ -619,7 +619,7 @@ async function ensureHierarchyOptionsLoaded() {
     // Carregar Almoxarifados
     if (almoxSelect && !hasRealOptions(almoxSelect)) {
         try {
-            const resp = await fetchJson('/api/almoxarifados?per_page=1000');
+            const resp = await cachedFetchJson('/api/almoxarifados?per_page=1000', { ttlMs: 300000 });
             const items = (resp && resp.items) ? resp.items : [];
             const prev = almoxSelect.value;
             almoxSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(a => `
@@ -634,7 +634,7 @@ async function ensureHierarchyOptionsLoaded() {
     // Carregar Sub‑Almoxarifados
     if (subSelect && !hasRealOptions(subSelect)) {
         try {
-            const resp = await fetchJson('/api/sub-almoxarifados?per_page=1000');
+            const resp = await cachedFetchJson('/api/sub-almoxarifados?per_page=1000', { ttlMs: 300000 });
             const items = (resp && resp.items) ? resp.items : [];
             const prev = subSelect.value;
             subSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(s => `
@@ -649,7 +649,7 @@ async function ensureHierarchyOptionsLoaded() {
     // Carregar Setores
     if (setorSelect && !hasRealOptions(setorSelect)) {
         try {
-            const resp = await fetchJson('/api/setores?per_page=1000');
+            const resp = await cachedFetchJson('/api/setores?per_page=1000', { ttlMs: 300000 });
             const items = (resp && resp.items) ? resp.items : [];
             const prev = setorSelect.value;
             setorSelect.innerHTML = '<option value="">Selecione...</option>' + items.map(s => {

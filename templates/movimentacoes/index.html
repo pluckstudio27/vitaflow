@@ -448,11 +448,11 @@ function filtrarMovimentacoes() {
 
 // Carregar produtos para os selects
 function carregarProdutos(searchTerm = '') {
-    const params = new URLSearchParams({ativo: 'true', per_page: '1000'});
+    const params = new URLSearchParams({ativo: 'true', per_page: '100'});
     if (searchTerm && searchTerm.trim() !== '') {
         params.set('search', searchTerm.trim());
     }
-    fetchJson('/api/produtos?' + params.toString())
+    cachedFetchJson('/api/produtos?' + params.toString(), { ttlMs: 300000 })
         .then(data => {
             const produtos = data.items || [];
             const selectTransferencia = document.getElementById('produtoTransferencia');
@@ -498,15 +498,15 @@ function carregarLocaisOrigem() {
             // Em Mongo, buscar via API respeitando a central do produto
             if (!produtoId) {
                 if (tipo === 'almoxarifado') {
-                    const resp = await fetchJson(`/api/almoxarifados?per_page=1000`);
+                    const resp = await cachedFetchJson(`/api/almoxarifados?per_page=1000`, { ttlMs: 300000 });
                     return resp.items || [];
                 }
                 if (tipo === 'sub_almoxarifado') {
-                    const resp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                    const resp = await cachedFetchJson(`/api/sub-almoxarifados?per_page=1000`, { ttlMs: 300000 });
                     return resp.items || [];
                 }
                 if (tipo === 'setor') {
-                    const resp = await fetchJson(`/api/setores?per_page=1000`);
+                    const resp = await cachedFetchJson(`/api/setores?per_page=1000`, { ttlMs: 300000 });
                     return resp.items || [];
                 }
                 return [];
@@ -514,19 +514,19 @@ function carregarLocaisOrigem() {
             const produto = await fetchJson(`/api/produtos/${produtoId}`);
             const produtoCentral = produto.central_id;
             if (tipo === 'almoxarifado') {
-                const resp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produtoCentral)}&per_page=1000`);
+                const resp = await cachedFetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produtoCentral)}&per_page=1000`, { ttlMs: 300000 });
                 return resp.items || [];
             } else if (tipo === 'sub_almoxarifado') {
-                const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produtoCentral)}&per_page=1000`);
+                const almoxResp = await cachedFetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produtoCentral)}&per_page=1000`, { ttlMs: 300000 });
                 const almoxIdsCentral = (almoxResp.items || []).map(a => String(a.id));
-                const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                const subsResp = await cachedFetchJson(`/api/sub-almoxarifados?per_page=1000`, { ttlMs: 300000 });
                 return (subsResp.items || []).filter(sa => almoxIdsCentral.includes(String(sa.almoxarifado_id)));
             } else if (tipo === 'setor') {
-                const almoxResp = await fetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produtoCentral)}&per_page=1000`);
+                const almoxResp = await cachedFetchJson(`/api/almoxarifados?central_id=${encodeURIComponent(produtoCentral)}&per_page=1000`, { ttlMs: 300000 });
                 const almoxIdsCentral = (almoxResp.items || []).map(a => String(a.id));
-                const subsResp = await fetchJson(`/api/sub-almoxarifados?per_page=1000`);
+                const subsResp = await cachedFetchJson(`/api/sub-almoxarifados?per_page=1000`, { ttlMs: 300000 });
                 const subIdsCentral = (subsResp.items || []).filter(sa => almoxIdsCentral.includes(String(sa.almoxarifado_id))).map(sa => String(sa.id));
-                const setoresResp = await fetchJson(`/api/setores?per_page=1000`);
+                const setoresResp = await cachedFetchJson(`/api/setores?per_page=1000`, { ttlMs: 300000 });
                 return (setoresResp.items || []).filter(s => subIdsCentral.includes(String(s.sub_almoxarifado_id)));
             }
             return [];
@@ -1024,10 +1024,10 @@ function carregarLocaisOrigemDistribuicao() {
         if (USE_MONGO) {
             // Em Mongo, buscar via API
             if (tipo === 'almoxarifado') {
-                const resp = await fetchJson('/api/almoxarifados?per_page=1000');
+                const resp = await cachedFetchJson('/api/almoxarifados?per_page=1000', { ttlMs: 300000 });
                 return resp.items || [];
             } else if (tipo === 'sub_almoxarifado') {
-                const resp = await fetchJson('/api/sub-almoxarifados?per_page=1000');
+                const resp = await cachedFetchJson('/api/sub-almoxarifados?per_page=1000', { ttlMs: 300000 });
                 return resp.items || [];
             } else if (tipo === 'central') {
                 // Central não é usada em Mongo (opção removida), manter fallback
@@ -1877,13 +1877,16 @@ function executarDistribuicao() {
 
 // Validação reativa: mostrar/ocultar alerta quando Origem/Destino forem iguais
 function atualizarMensagemTransferencia() {
-    const tipoOrigem = document.getElementById('tipoOrigemTransferencia').value;
-    const localOrigem = document.getElementById('localOrigemTransferencia').value;
-    const tipoDestino = document.getElementById('tipoDestinoTransferencia').value;
-    const localDestino = document.getElementById('localDestinoTransferencia').value;
+    const elTipoOrigem = document.getElementById('tipoOrigemTransferencia');
+    const elLocalOrigem = document.getElementById('localOrigemTransferencia');
+    const elTipoDestino = document.getElementById('tipoDestinoTransferencia');
+    const elLocalDestino = document.getElementById('localDestinoTransferencia');
     const msgEl = document.getElementById('transferenciaMsg');
-    if (!msgEl) return;
-    // Se campos ainda não preenchidos, esconder alerta
+    if (!elTipoOrigem || !elLocalOrigem || !elTipoDestino || !elLocalDestino || !msgEl) return;
+    const tipoOrigem = elTipoOrigem.value;
+    const localOrigem = elLocalOrigem.value;
+    const tipoDestino = elTipoDestino.value;
+    const localDestino = elLocalDestino.value;
     if (!tipoOrigem || !localOrigem || !tipoDestino || !localDestino) {
         msgEl.classList.add('d-none');
         msgEl.textContent = '';

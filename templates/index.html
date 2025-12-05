@@ -37,7 +37,7 @@ async function loadStats() {
 
     // Carregar total de sub-almoxarifados
     try {
-        const response = await fetchJson('/api/sub-almoxarifados?per_page=1000');
+        const response = await fetchJson('/api/sub-almoxarifados?per_page=1');
         const total = response.pagination ? response.pagination.total : 0;
         const el = document.getElementById('total-sub-almoxarifados');
         if (el) el.textContent = String(total);
@@ -48,7 +48,7 @@ async function loadStats() {
 
     // Carregar total de setores
     try {
-        const response = await fetchJson('/api/setores?ativo=true&per_page=1000');
+        const response = await fetchJson('/api/setores?ativo=true&per_page=1');
         const total = response.pagination ? response.pagination.total : 0;
         const el = document.getElementById('total-setores');
         if (el) el.textContent = String(total);
