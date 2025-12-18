@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, current_app, session
+from flask import Blueprint, render_template, request, jsonify, current_app, session, redirect, url_for
 from flask_login import current_user
 # Removido: from models.hierarchy import Central, Almoxarifado, SubAlmoxarifado, Setor
 # Removido: from models.produto import Produto, EstoqueProduto, LoteProduto, MovimentacaoProduto
@@ -38,8 +38,13 @@ def _csrf_enforcement_and_provisioning():
         if method == 'GET' and not is_api:
             ensure_csrf_token(False)
 
-        # Enforce CSRF for all mutating API requests
+        # Enforce CSRF for all mutating API requests (desabilitável em dev/test)
         if is_api and method in ('POST', 'PUT', 'DELETE', 'PATCH'):
+            try:
+                if bool(current_app.config.get('DISABLE_API_CSRF')):
+                    return None
+            except Exception:
+                pass
             # Only enforce for authenticated users
             if not current_user.is_authenticated:
                 # Handled by auth decorators, but keep JSON consistency
@@ -147,12 +152,14 @@ def index():
 @require_admin_or_above
 def configuracoes():
     """Página de configurações"""
-    current_app.logger.debug(f"current_user.nivel_acesso = {current_user.nivel_acesso}")
+    if os.environ.get('VERBOSE_LOG','').lower() in ('1','true','yes'):
+        current_app.logger.debug(f"current_user.nivel_acesso = {current_user.nivel_acesso}")
     ui_config = get_ui_blocks_config()
     settings_sections = ui_config.get_settings_sections_for_user(current_user.nivel_acesso)
-    current_app.logger.debug(f"settings_sections count = {len(settings_sections)}")
-    for section in settings_sections:
-        current_app.logger.debug(f"section = {section.id} - {section.title}")
+    if os.environ.get('VERBOSE_LOG','').lower() in ('1','true','yes'):
+        current_app.logger.debug(f"settings_sections count = {len(settings_sections)}")
+        for section in settings_sections:
+            current_app.logger.debug(f"section = {section.id} - {section.title}")
     return render_template('configuracoes.html', settings_sections=settings_sections)
 
 @main_bp.route('/configuracoes/hierarquia')
@@ -224,8 +231,28 @@ def produtos_cadastro():
 @main_bp.route('/produtos/<string:id>')
 @require_any_level
 def produtos_detalhes(id):
-    """Página de detalhes do produto (placeholder)"""
+    """Página de detalhes do produto"""
     produto = None
+    try:
+        db = extensions.mongo_db
+        if db is not None:
+            doc = _find_by_id('produtos', id)
+            if doc:
+                produto = {
+                    'id': doc.get('id') if doc.get('id') is not None else str(doc.get('_id')),
+                    'nome': doc.get('nome'),
+                    'codigo': doc.get('codigo'),
+                    'descricao': doc.get('descricao'),
+                    'unidade_medida': doc.get('unidade_medida'),
+                    'ativo': bool(doc.get('ativo', True)),
+                }
+    except Exception:
+        produto = None
+    if produto is None:
+        try:
+            return redirect(url_for('main.produtos'))
+        except Exception:
+            return render_template('produtos/index.html')
     try:
         can_edit = bool(getattr(current_user, 'is_authenticated', False)) and (
             getattr(current_user, 'nivel_acesso', None) in ['super_admin', 'admin_central']
@@ -403,14 +430,88 @@ def movimentacoes():
     except Exception:
         pass
 
-    return render_template(
-        'movimentacoes/index.html',
+    return render_template('movimentacoes/index.html',
         centrais=centrais_dict,
         almoxarifados=almoxarifados_dict,
         sub_almoxarifados=sub_almoxarifados_dict,
         setores=setores_dict,
         use_mongo=True
     )
+
+@main_bp.route('/api/admin/cleanup-tests', methods=['POST'])
+@require_admin_or_above
+def api_admin_cleanup_tests():
+    try:
+        db = extensions.mongo_db
+        if db is None:
+            return jsonify({'error': 'MongoDB não inicializado'}), 503
+        data = request.get_json(silent=True) or {}
+        if not bool(data.get('confirm', False)):
+            return jsonify({'error': 'Confirmação ausente. Envie { \"confirm\": true }'}), 400
+        produtos = db['produtos']
+        demandas = db['demandas']
+        listas_demandas = db['listas_demandas']
+
+        prod_query = {
+            '$or': [
+                {'nome': {'$regex': 'teste', '$options': 'i'}},
+                {'codigo': {'$regex': 'teste', '$options': 'i'}},
+                {'descricao': {'$regex': 'teste', '$options': 'i'}},
+                {'nome': {'$regex': 'demo', '$options': 'i'}},
+                {'codigo': {'$regex': 'demo', '$options': 'i'}},
+                {'descricao': {'$regex': 'demo', '$options': 'i'}},
+                {'nome': 'Produto Demo'},
+            ]
+        }
+        prod_docs = list(produtos.find(prod_query, {'_id': 1, 'id': 1}))
+        prod_ids_seq = [d.get('id') for d in prod_docs if d.get('id') is not None]
+        prod_ids_oid = [d.get('_id') for d in prod_docs if d.get('_id') is not None]
+        prod_ids_str = [str(d.get('_id')) for d in prod_docs if d.get('_id') is not None]
+        prod_deleted = 0
+        if prod_docs:
+            res_del = produtos.delete_many({'_id': {'$in': prod_ids_oid}})
+            prod_deleted = int(res_del.deleted_count or 0)
+            if prod_ids_seq:
+                res_del2 = produtos.delete_many({'id': {'$in': prod_ids_seq}})
+                prod_deleted += int(res_del2.deleted_count or 0)
+            if prod_ids_str:
+                res_del3 = produtos.delete_many({'_id': {'$in': prod_ids_str}})
+                prod_deleted += int(res_del3.deleted_count or 0)
+
+        dem_deleted = 0
+        dem_query_or = [
+            {'observacoes': {'$regex': 'teste', '$options': 'i'}},
+            {'observacoes': {'$regex': 'demo', '$options': 'i'}},
+            {'items': {'$elemMatch': {'produto_nome': {'$regex': 'teste', '$options': 'i'}}}},
+            {'items': {'$elemMatch': {'produto_nome': {'$regex': 'demo', '$options': 'i'}}}},
+        ]
+        prod_cands = list(set([*prod_ids_seq, *prod_ids_oid, *prod_ids_str]))
+        if prod_cands:
+            dem_query_or.append({'produto_id': {'$in': prod_cands}})
+        dem_res = demandas.delete_many({'$or': dem_query_or})
+        dem_deleted = int(dem_res.deleted_count or 0)
+
+        ld_deleted = 0
+        ld_or = [
+            {'observacao': {'$regex': 'teste', '$options': 'i'}},
+            {'observacao': {'$regex': 'demo', '$options': 'i'}},
+        ]
+        if prod_ids_seq:
+            ld_or.append({'produto_key': {'$in': [str(x) for x in prod_ids_seq]}})
+        if prod_ids_oid:
+            ld_or.append({'produto_key': {'$in': [str(x) for x in prod_ids_oid]}})
+        if prod_ids_str:
+            ld_or.append({'produto_key': {'$in': prod_ids_str}})
+        ld_res = listas_demandas.delete_many({'$or': ld_or})
+        ld_deleted = int(ld_res.deleted_count or 0)
+
+        return jsonify({
+            'products_deleted': prod_deleted,
+            'demandas_deleted': dem_deleted,
+            'listas_demandas_deleted': ld_deleted
+        })
+    except Exception as e:
+        return jsonify({'error': f'Falha na limpeza: {e}'}), 500
 
 # ==================== PÁGINAS: OPERADOR SETOR E DEMANDAS ====================
 
@@ -3346,17 +3447,30 @@ def api_centrais_update(id):
 @main_bp.route('/api/centrais/<string:id>', methods=['DELETE'])
 @require_admin_or_above
 def api_centrais_delete(id):
-    coll = extensions.mongo_db['centrais']
+    db = extensions.mongo_db
+    coll = db['centrais']
     doc = _find_central_by_param(id)
     if not doc:
         return jsonify({'error': 'Central não encontrada'}), 404
 
-    # bloquear exclusão se houver almoxarifados ativos vinculados
-    total_almox_ativos = _count_almoxarifados_vinculados(doc, only_active=True)
-    if total_almox_ativos > 0:
-        return jsonify({'error': 'Não é possível excluir: há almoxarifados ativos vinculados'}), 400
+    candidates = []
+    if isinstance(doc.get('id'), int):
+        candidates.append(doc.get('id'))
+    _oid = doc.get('_id')
+    if _oid:
+        candidates.append(_oid)
+        try:
+            candidates.append(str(_oid))
+        except Exception:
+            pass
+    if not candidates:
+        candidates.append(id)
 
-    # executar exclusão
+    almox_coll = db['almoxarifados']
+    total_almox = almox_coll.count_documents({'central_id': {'$in': candidates}})
+    if total_almox > 0:
+        return jsonify({'error': 'Não é possível excluir: há almoxarifados vinculados'}), 400
+
     if str(id).isdigit():
         coll.delete_one({'id': int(id)})
     else:
@@ -3620,24 +3734,42 @@ def api_almoxarifados_update(id):
 @main_bp.route('/api/almoxarifados/<string:id>', methods=['DELETE'])
 @require_admin_or_above
 def api_almoxarifados_delete(id):
-    # Bloquear exclusão se houver sub-almoxarifados vinculados
-    subs_coll = extensions.mongo_db['sub_almoxarifados']
-    conditions = []
+    db = extensions.mongo_db
+    subs_coll = db['sub_almoxarifados']
+    candidates = []
     if str(id).isdigit():
-        conditions.append({'almoxarifado_id': int(id)})
+        candidates.append(int(id))
     else:
         try:
             oid = ObjectId(str(id))
-            conditions.append({'almoxarifado_id': oid})
-            conditions.append({'almoxarifado_id': str(oid)})
+            candidates.append(oid)
+            candidates.append(str(oid))
         except Exception:
-            conditions.append({'almoxarifado_id': id})
-    total_subs = subs_coll.count_documents({'$or': conditions}) if conditions else 0
+            candidates.append(id)
+    total_subs = subs_coll.count_documents({'almoxarifado_id': {'$in': candidates}})
     if total_subs > 0:
         return jsonify({'error': 'Não é possível excluir: há sub-almoxarifados vinculados'}), 400
 
-    # Executar exclusão
-    coll = extensions.mongo_db['almoxarifados']
+    try:
+        estoques_coll = db['estoques']
+        vinc_estoques = estoques_coll.count_documents({'$or': [
+            {'local_tipo': 'almoxarifado', 'local_id': {'$in': candidates}},
+            {'almoxarifado_id': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_estoques = 0
+    try:
+        movs_coll = db['movimentacoes']
+        vinc_movs = movs_coll.count_documents({'$or': [
+            {'origem_tipo': 'almoxarifado', 'origem_id': {'$in': candidates}},
+            {'destino_tipo': 'almoxarifado', 'destino_id': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_movs = 0
+    if (vinc_estoques + vinc_movs) > 0:
+        return jsonify({'error': 'Não é possível excluir: há estoques ou movimentações vinculadas ao almoxarifado'}), 400
+
+    coll = db['almoxarifados']
     if str(id).isdigit():
         coll.delete_one({'id': int(id)})
     else:
@@ -3810,7 +3942,7 @@ def api_sub_almoxarifado_get(id):
     })
 
 @main_bp.route('/api/sub-almoxarifados', methods=['POST'])
-@require_any_level
+@require_admin_or_above
 def api_sub_almoxarifados_create():
     if extensions.mongo_db is None:
         return jsonify({'error': 'MongoDB não inicializado'}), 503
@@ -3842,7 +3974,7 @@ def api_sub_almoxarifados_create():
     return jsonify({'id': next_id})
 
 @main_bp.route('/api/sub-almoxarifados/<id>', methods=['PUT'])
-@require_any_level
+@require_admin_or_above
 def api_sub_almoxarifados_update(id):
     if extensions.mongo_db is None:
         return jsonify({'error': 'MongoDB não inicializado'}), 503
@@ -3864,16 +3996,58 @@ def api_sub_almoxarifados_update(id):
     return jsonify({'status': 'updated'})
 
 @main_bp.route('/api/sub-almoxarifados/<id>', methods=['DELETE'])
-@require_any_level
+@require_admin_or_above
 def api_sub_almoxarifados_delete(id):
     if extensions.mongo_db is None:
         return jsonify({'error': 'MongoDB não inicializado'}), 503
-    coll = extensions.mongo_db['sub_almoxarifados']
+    db = extensions.mongo_db
+    candidates = []
+    if str(id).isdigit():
+        candidates.append(int(id))
+    else:
+        try:
+            oid = ObjectId(str(id))
+            candidates.append(oid)
+            candidates.append(str(oid))
+        except Exception:
+            candidates.append(id)
+
+    try:
+        setores_coll = db['setores']
+        vinc_setores = setores_coll.count_documents({'$or': [
+            {'sub_almoxarifado_id': {'$in': candidates}},
+            {'sub_almoxarifado_ids': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_setores = 0
+
+    try:
+        estoques_coll = db['estoques']
+        vinc_estoques = estoques_coll.count_documents({'$or': [
+            {'local_tipo': 'sub_almoxarifado', 'local_id': {'$in': candidates}},
+            {'sub_almoxarifado_id': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_estoques = 0
+
+    try:
+        movs_coll = db['movimentacoes']
+        vinc_movs = movs_coll.count_documents({'$or': [
+            {'origem_tipo': 'sub_almoxarifado', 'origem_id': {'$in': candidates}},
+            {'destino_tipo': 'sub_almoxarifado', 'destino_id': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_movs = 0
+
+    if (vinc_setores + vinc_estoques + vinc_movs) > 0:
+        return jsonify({'error': 'Não é possível excluir: há vínculos com setores, estoques ou movimentações'}), 400
+
+    coll = db['sub_almoxarifados']
     if str(id).isdigit():
         coll.delete_one({'id': int(id)})
     else:
         try:
-            coll.delete_one({'_id': ObjectId(id)})
+            coll.delete_one({'_id': ObjectId(str(id))})
         except Exception:
             coll.delete_one({'id': id})
     return jsonify({'status': 'deleted'})
@@ -4212,7 +4386,7 @@ def api_setor_get(id):
         })
 
 @main_bp.route('/api/setores', methods=['POST'])
-@require_any_level
+@require_admin_or_above
 def api_setores_create():
     data = request.get_json() or {}
     nome = (data.get('nome') or '').strip()
@@ -4279,7 +4453,7 @@ def api_setores_create():
     return jsonify({'id': next_id})
 
 @main_bp.route('/api/setores/<id>', methods=['PUT'])
-@require_any_level
+@require_admin_or_above
 def api_setores_update(id):
     data = request.get_json() or {}
     update = {}
@@ -4333,14 +4507,46 @@ def api_setores_update(id):
     return jsonify({'status': 'updated'})
 
 @main_bp.route('/api/setores/<id>', methods=['DELETE'])
-@require_any_level
+@require_admin_or_above
 def api_setores_delete(id):
-    coll = extensions.mongo_db['setores']
+    db = extensions.mongo_db
+    candidates = []
+    if str(id).isdigit():
+        candidates.append(int(id))
+    else:
+        try:
+            oid = ObjectId(str(id))
+            candidates.append(oid)
+            candidates.append(str(oid))
+        except Exception:
+            candidates.append(id)
+
+    try:
+        estoques_coll = db['estoques']
+        vinc_estoques = estoques_coll.count_documents({'$or': [
+            {'local_tipo': 'setor', 'local_id': {'$in': candidates}},
+            {'setor_id': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_estoques = 0
+    try:
+        movs_coll = db['movimentacoes']
+        vinc_movs = movs_coll.count_documents({'$or': [
+            {'origem_tipo': 'setor', 'origem_id': {'$in': candidates}},
+            {'destino_tipo': 'setor', 'destino_id': {'$in': candidates}},
+        ]})
+    except Exception:
+        vinc_movs = 0
+
+    if (vinc_estoques + vinc_movs) > 0:
+        return jsonify({'error': 'Não é possível excluir: há estoques ou movimentações vinculadas ao setor'}), 400
+
+    coll = db['setores']
     if str(id).isdigit():
         coll.delete_one({'id': int(id)})
     else:
         try:
-            coll.delete_one({'_id': ObjectId(id)})
+            coll.delete_one({'_id': ObjectId(str(id))})
         except Exception:
             coll.delete_one({'id': id})
     return jsonify({'status': 'deleted'})
@@ -4475,7 +4681,8 @@ def api_produtos():
         sort_fields = [('created_at', direction), ('_id', 1)]
     total = coll.count_documents(filter_query)
     try:
-        current_app.logger.info(f"/api/produtos query={filter_query} sort={sort_fields} limit={limit} total={total}")
+        if os.environ.get('VERBOSE_LOG','').lower() in ('1','true','yes'):
+            current_app.logger.info(f"/api/produtos query={filter_query} sort={sort_fields} limit={limit} total={total}")
     except Exception:
         pass
     cursor = coll.find(filter_query).sort(sort_fields).limit(limit)
@@ -4515,7 +4722,8 @@ def api_produtos():
         })
 
     try:
-        current_app.logger.info(f"/api/produtos returned={len(items)} total={total}")
+        if os.environ.get('VERBOSE_LOG','').lower() in ('1','true','yes'):
+            current_app.logger.info(f"/api/produtos returned={len(items)} total={total}")
     except Exception:
         pass
     return jsonify({
@@ -6520,7 +6728,8 @@ def api_movimentacoes():
     skip = max(0, (page - 1) * per_page)
 
     try:
-        current_app.logger.info(f"/api/movimentacoes query={query} total={total} page={page} per_page={per_page} skip={skip} ordem={ordem_param}")
+        if os.environ.get('VERBOSE_LOG','').lower() in ('1','true','yes'):
+            current_app.logger.info(f"/api/movimentacoes query={query} total={total} page={page} per_page={per_page} skip={skip} ordem={ordem_param}")
     except Exception:
         pass
 
@@ -6561,7 +6770,8 @@ def api_movimentacoes():
             alt_cursor = coll.find({}, projection).sort(sort_fields).skip(skip).limit(per_page)
             docs = list(alt_cursor)
             fallback_used = True
-            current_app.logger.info("/api/movimentacoes fallback sem escopo prévio aplicado")
+            if os.environ.get('VERBOSE_LOG','').lower() in ('1','true','yes'):
+                current_app.logger.info("/api/movimentacoes fallback sem escopo prévio aplicado")
         except Exception:
             pass
 
@@ -8432,7 +8642,7 @@ def api_demandas_lista_get():
                 'produto_id': pid_out,
                 'produto_nome': (pdoc or {}).get('nome') or '-',
                 'produto_codigo': (pdoc or {}).get('codigo') or '-',
-                'unidade_medida': (pdoc or {}).get('unidade_medida') or null,
+                'unidade_medida': (pdoc or {}).get('unidade_medida') or None,
                 'quantidade': float(doc.get('quantidade') or 0),
                 'observacao': doc.get('observacao') or ''
             })

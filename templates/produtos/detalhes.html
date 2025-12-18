@@ -265,6 +265,56 @@
 <!-- Permissão embutida no DOM para evitar sintaxe Jinja dentro de JS -->
 <div id="perm-edit-lote" data-can="{{ 1 if can_editar_entrada_lote else 0 }}" style="display:none"></div>
 
+<!-- Modal de Edição de Produto -->
+<div class="modal fade" id="editarProdutoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-edit"></i> Editar Informações do Produto</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formEditarProduto">
+                    <div class="mb-3">
+                        <label class="form-label" for="edit_nome">Nome *</label>
+                        <input type="text" class="form-control" id="edit_nome" name="nome" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="edit_codigo">Código *</label>
+                        <input type="text" class="form-control" id="edit_codigo" name="codigo" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="edit_descricao">Descrição</label>
+                        <textarea class="form-control" id="edit_descricao" name="descricao" rows="3"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label" for="edit_unidade">Unidade de Medida</label>
+                                <input type="text" class="form-control" id="edit_unidade" name="unidade_medida">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="edit_ativo" name="ativo">
+                                <label class="form-check-label" for="edit_ativo">Ativo</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="categoria_id">Categoria Principal</label>
+                        <select class="form-select" id="categoria_id"><option value="">Sem categoria</option></select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="salvarEdicaoProduto"><i class="fas fa-save"></i> Salvar</button>
+            </div>
+        </div>
+    </div>
+ </div>
+
 <script>
 let produtoId = null;
 let produtoDetalhes = null;
@@ -326,7 +376,10 @@ function renderizarProduto(produto) {
     document.getElementById('produtoInfo').innerHTML = `
         <div class="row">
             <div class="col-md-6">
-                <h4>${produto.nome} ${statusBadge}</h4>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4>${produto.nome} ${statusBadge}</h4>
+                    <button class="btn btn-sm btn-outline-primary" onclick="abrirModalEdicao()"><i class="fas fa-edit"></i> Editar</button>
+                </div>
                 <p class="text-muted mb-3">${produto.descricao || 'Sem descrição'}</p>
                 
                 <div class="row">
@@ -1091,6 +1144,79 @@ async function carregarEntradasSemLote() {
     el.innerHTML = `<div class="text-danger">Erro: ${err.message}</div>`;
   }
 }
+</script>
+<script>
+function abrirModalEdicao() {
+  const modal = new bootstrap.Modal(document.getElementById('editarProdutoModal'));
+  const f = document.getElementById('formEditarProduto');
+  f.nome.value = (produtoDetalhes && produtoDetalhes.nome) ? produtoDetalhes.nome : '';
+  f.codigo.value = (produtoDetalhes && produtoDetalhes.codigo) ? produtoDetalhes.codigo : '';
+  f.descricao.value = (produtoDetalhes && produtoDetalhes.descricao) ? produtoDetalhes.descricao : '';
+  f.unidade_medida.value = (produtoDetalhes && produtoDetalhes.unidade_medida) ? produtoDetalhes.unidade_medida : '';
+  f.ativo.checked = !!(produtoDetalhes && produtoDetalhes.ativo);
+  carregarCategoriasEdicao().then(() => {
+    const cur = produtoDetalhes && produtoDetalhes.categoria_id ? String(produtoDetalhes.categoria_id) : '';
+    if (cur) {
+      const sel = document.getElementById('categoria_id');
+      if (sel) sel.value = cur;
+    }
+  }).catch(() => {});
+  modal.show();
+}
+async function carregarCategoriasEdicao() {
+  const sel = document.getElementById('categoria_id');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Sem categoria</option>';
+  try {
+    const resp = await fetchJson('/api/categorias?per_page=1000');
+    const items = resp.items || [];
+    const opts = ['<option value="">Sem categoria</option>'];
+    for (const c of items) {
+      const id = String(c.id || c._id || '');
+      const nome = c.nome || id;
+      const codigo = c.codigo ? String(c.codigo) + ' - ' : '';
+      opts.push(`<option value="${id}">${codigo}${nome}</option>`);
+    }
+    sel.innerHTML = opts.join('');
+  } catch (e) {}
+}
+document.getElementById('salvarEdicaoProduto')?.addEventListener('click', async function() {
+  const f = document.getElementById('formEditarProduto');
+  const btn = this;
+  const payload = {
+    nome: (f.nome.value || '').trim(),
+    codigo: (f.codigo.value || '').trim(),
+    descricao: (f.descricao.value || '').trim() || null,
+    unidade_medida: (f.unidade_medida.value || '').trim() || null,
+    ativo: !!f.ativo.checked
+  };
+  const sel = document.getElementById('categoria_id');
+  const categoriaId = sel ? sel.value : '';
+  if (categoriaId) payload.categoria_id = categoriaId;
+  if (!payload.nome) { alert('Nome é obrigatório'); return; }
+  if (!payload.codigo) { alert('Código é obrigatório'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando...';
+  try {
+    const data = await fetchJson(`/api/produtos/${produtoId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (data.error) throw new Error(data.error);
+    produtoDetalhes = Object.assign({}, produtoDetalhes || {}, {
+      nome: data.nome,
+      codigo: data.codigo,
+      descricao: data.descricao,
+      unidade_medida: data.unidade_medida,
+      ativo: data.ativo
+    });
+    const inst = bootstrap.Modal.getInstance(document.getElementById('editarProdutoModal'));
+    if (inst) inst.hide();
+    renderizarProduto(produtoDetalhes);
+  } catch (err) {
+    alert('Erro ao salvar: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save"></i> Salvar';
+  }
+});
 </script>
 <style>
 .limited-section { max-height: 360px; overflow-y: auto; }

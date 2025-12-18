@@ -3,511 +3,110 @@
 {% block title %}PluckLog - Produtos{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2><i class="fas fa-boxes"></i> Gestão de Produtos</h2>
-                <a href="{{ url_for('main.produtos_cadastro') }}" class="btn btn-primary">
-                    <i class="fas fa-plus"></i> Novo Produto
-                </a>
-            </div>
-
-            <!-- Filtros -->
-            <div class="card mb-4">
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <label for="searchInput" class="form-label">Buscar</label>
-                            <input type="text" class="form-control" id="searchInput" placeholder="Nome, código ou descrição...">
-                        </div>
-                        <div class="col-md-3">
-                            <label for="categoriaFilter" class="form-label">Categoria</label>
-                            <select class="form-select" id="categoriaFilter">
-                                <option value="">Todas as categorias</option>
-                                {% for categoria in categorias %}
-                                <option value="{{ categoria.id }}">{{ categoria.codigo }} - {{ categoria.nome }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="statusFilter" class="form-label">Status</label>
-                            <select class="form-select" id="statusFilter">
-                                <option value="">Todos</option>
-                                <option value="true">Ativo</option>
-                                <option value="false">Inativo</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 d-flex align-items-end">
-                            <button type="button" class="btn btn-outline-secondary w-100" onclick="limparFiltros()">
-                                <i class="fas fa-eraser"></i> Limpar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tabela de Produtos -->
-            <div class="card">
-                <div class="card-body">
-                    <div class="d-flex justify-content-end mb-2">
-                        <div class="input-group" style="max-width: 200px;">
-                            <span class="input-group-text">Itens</span>
-                            <select class="form-select" id="perPageProdutos">
-                                <option value="20">20</option>
-                                <option value="50">50</option>
-                                <option value="100">100</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-hover" id="produtosTable">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Código</th>
-                                    <th>Nome</th>
-                                    <th>Categoria</th>
-                                    <th>Unidade</th>
-                                    <th>Status</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody id="produtosTableBody">
-                                <!-- Dados carregados via JavaScript -->
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Paginação -->
-                    <nav id="navPaginationProdutos" aria-label="Navegação de páginas" class="mt-3" style="display: none;">
-                        <ul class="pagination justify-content-center" id="pagination" style="display:none"></ul>
-                    </nav>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Loading Spinner -->
-<div id="loadingSpinner" class="text-center mt-4" style="display: none;">
-    <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Carregando...</span>
-    </div>
-</div>
-
-<!-- Modal de Edição de Produto -->
-<div class="modal fade" id="editarProdutoModal" tabindex="-1" aria-labelledby="editarProdutoModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="editarProdutoModalLabel">Editar Produto</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <form id="editarProdutoForm">
-                    <input type="hidden" id="editProdutoId">
-                    
-                    <div class="row">
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label for="editNome" class="form-label">Nome *</label>
-                                <input type="text" class="form-control" id="editNome" required maxlength="200">
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="editCodigo" class="form-label">Código *</label>
-                                <input type="text" class="form-control" id="editCodigo" required maxlength="50">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="editDescricao" class="form-label">Descrição</label>
-                        <textarea class="form-control" id="editDescricao" rows="3" maxlength="500"></textarea>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editCategoriaId" class="form-label">Categoria</label>
-                                <select class="form-select" id="editCategoriaId">
-                                    <option value="">Selecione...</option>
-                                    {% for categoria in categorias %}
-                                    <option value="{{ categoria.id }}">{{ categoria.codigo }} - {{ categoria.nome }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editUnidadeMedida" class="form-label">Unidade de Medida</label>
-                                <select class="form-select" id="editUnidadeMedida">
-                                    <option value="">Selecione...</option>
-                                    <option value="UN">Unidade</option>
-                                    <option value="KG">Quilograma</option>
-                                    <option value="L">Litro</option>
-                                    <option value="M">Metro</option>
-                                    <option value="M²">Metro Quadrado</option>
-                                    <option value="M³">Metro Cúbico</option>
-                                    <option value="CX">Caixa</option>
-                                    <option value="PC">Peça</option>
-                                    <option value="PAR">Par</option>
-                                    <option value="DZ">Dúzia</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Removido: seleção múltipla de categorias -->
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="editAtivo">
-                            <label class="form-check-label" for="editAtivo">
-                                Produto ativo
-                            </label>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="salvarEdicaoProduto()">
-                    <i class="fas fa-save"></i> Salvar Alterações
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
+<div id="produtos-root"></div>
+<script>window.__REACT_PRODUTOS__=true;</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script id="categorias-data" type="application/json">{{ categorias|tojson|safe }}</script>
+<script>try{window.CATEGORIAS_INIT=JSON.parse(document.getElementById('categorias-data').textContent||'[]');}catch(_){window.CATEGORIAS_INIT=[];}</script>
 <script>
-// Carregar produtos
-function carregarProdutos() {
-    const search = document.getElementById('searchInput').value;
-    const categoria_id = document.getElementById('categoriaFilter').value;
-    const ativo = document.getElementById('statusFilter').value;
-    const perSel = document.getElementById('perPageProdutos');
-    const perVal = perSel ? parseInt(perSel.value, 10) || 20 : 20;
-    const params = new URLSearchParams({
-        limit: perVal
-    });
-    if (search) params.append('search', search);
-    if (categoria_id) params.append('categoria_id', categoria_id);
-    if (ativo !== '') params.append('ativo', ativo);
-    document.getElementById('loadingSpinner').style.display = 'block';
-    fetchJson(`/api/produtos?${params}`)
-        .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
-            }
-            renderizarProdutos(data.items);
-        })
-        .catch(error => {
-            console.error('Erro ao carregar produtos:', error);
-            document.getElementById('produtosTableBody').innerHTML = 
-                '<tr><td colspan="6" class="text-center text-danger">Erro ao carregar produtos</td></tr>';
-        })
-        .finally(() => {
-            document.getElementById('loadingSpinner').style.display = 'none';
-        });
+const { useState, useEffect } = React;
+const h = React.createElement;
+function formatNum(n){try{return parseFloat(n||0).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2});}catch(_){return String(n||0);}}
+function ProdutosPage(){
+  const [search,setSearch]=useState('');
+  const [categoriaId,setCategoriaId]=useState('');
+  const [ativo,setAtivo]=useState('true');
+  const [perPage,setPerPage]=useState(()=>{try{const p=localStorage.getItem('per_page_produtos');return p?String(p):'20';}catch(_){return '20';}});
+  const [loading,setLoading]=useState(false);
+  const [categorias,setCategorias]=useState(()=>Array.isArray(window.CATEGORIAS_INIT)?window.CATEGORIAS_INIT:[]);
+  const [produtos,setProdutos]=useState([]);
+  const [estoqueResumo,setEstoqueResumo]=useState({});
+  const [editOpen,setEditOpen]=useState(false);
+  const [editData,setEditData]=useState(null);
+  const [editSaving,setEditSaving]=useState(false);
+  const [isMobile,setIsMobile]=useState((window.matchMedia&&window.matchMedia('(max-width: 768px)').matches)?true:false);
+  useEffect(()=>{(async()=>{try{const res=await fetchJson('/api/categorias?ativo=true&per_page=1000');if(Array.isArray(res.items))setCategorias(res.items);}catch(_){}})();},[]);
+  useEffect(()=>{const t=setTimeout(loadProdutos,300);return()=>clearTimeout(t);},[search,categoriaId,ativo,perPage]);
+  useEffect(()=>{const mq=window.matchMedia?window.matchMedia('(max-width: 768px)'):null;const handler=(e)=>setIsMobile(!!(e&&e.matches));if(mq){if(mq.addEventListener)mq.addEventListener('change',handler);else if(mq.addListener)mq.addListener(handler);}return()=>{if(mq){if(mq.removeEventListener)mq.removeEventListener('change',handler);else if(mq.removeListener)mq.removeListener(handler);}};},[]);
+  async function loadProdutos(){
+    setLoading(true);
+    const params=new URLSearchParams({limit:perPage});
+    if(search)params.append('search',search);
+    if(categoriaId)params.append('categoria_id',categoriaId);
+    if(ativo!=='')params.append('ativo',ativo);
+    try{
+      const res=await fetchJson(`/api/produtos?${params.toString()}`);
+      const items=res.items||[];setProdutos(items);
+      const map={};
+      await Promise.all(items.map(async(p)=>{try{const d=await fetchJson(`/api/produtos/${p.id}/estoque`);const itens=Array.isArray(d.estoques)?d.estoques:[];let totalDisp=0,dispAlmox=0,dispSub=0;itens.forEach(it=>{const q=parseFloat(it.quantidade_disponivel||0);const tipo=String(it.tipo||'').toLowerCase();if(tipo!=='setor')totalDisp+=q;if(tipo==='almoxarifado')dispAlmox+=q;if(tipo==='sub_almoxarifado'||tipo==='subalmoxarifado')dispSub+=q;});map[p.id]={totalDisp,dispAlmox,dispSub};}catch(_){map[p.id]={totalDisp:0,dispAlmox:0,dispSub:0};}}));
+      setEstoqueResumo(map);
+    }catch(e){setProdutos([]);setEstoqueResumo({});}finally{setLoading(false);} }
+  async function openEdit(id){try{const produto=await fetchJson(`/api/produtos/${id}`);setEditData({id:produto.id,nome:produto.nome||'',codigo:produto.codigo||'',descricao:produto.descricao||'',categoria_id:produto.categoria_id?String(produto.categoria_id):'',unidade_medida:produto.unidade_medida||'',ativo:!!produto.ativo});setEditOpen(true);setTimeout(()=>{try{const m=new bootstrap.Modal(document.getElementById('editarProdutoModal'));m.show();}catch(_){}} ,0);}catch(e){alert(e.message||'Erro ao carregar produto');}}
+  async function salvarEdicao(){if(!editData)return;const id=editData.id;const payload={nome:(editData.nome||'').trim(),codigo:(editData.codigo||'').trim(),descricao:(editData.descricao||''),unidade_medida:editData.unidade_medida||'',ativo:!!editData.ativo};if(!payload.nome){alert('Nome é obrigatório');return;}if(!payload.codigo){alert('Código é obrigatório');return;}if(editData.categoria_id)payload.categoria_id=editData.categoria_id;setEditSaving(true);try{await fetchJson(`/api/produtos/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});try{const inst=bootstrap.Modal.getInstance(document.getElementById('editarProdutoModal'));if(inst)inst.hide();}catch(_){ }setEditOpen(false);setEditData(null);await loadProdutos();alert('Produto atualizado com sucesso!');}catch(e){alert(e.message||'Erro ao atualizar produto');}finally{setEditSaving(false);} }
+  async function apagarProduto(p){try{const data=await fetchJson(`/api/produtos/${p.id}/estoque`);const temEstoque=Array.isArray(data.estoques)&&data.estoques.some(e=>(e.quantidade||0)>0);const totalQuantidade=(data.resumo&&data.resumo.total_quantidade)?data.resumo.total_quantidade:0;if(temEstoque||totalQuantidade>0){alert(`Não é possível apagar o produto "${p.nome}" porque ele possui estoque.\n\nQuantidade total em estoque: ${totalQuantidade}\n\nPara apagar este produto, primeiro você precisa zerar todo o estoque em todos os almoxarifados.`);return;}if(confirm(`Tem certeza que deseja apagar o produto "${p.nome}"?\n\nEsta ação marcará o produto como inativo e ele não aparecerá mais nas listagens.`)){await fetchJson(`/api/produtos/${p.id}`,{method:'DELETE',headers:{'Content-Type':'application/json'}});await loadProdutos();alert('Produto apagado com sucesso!');}}catch(e){alert(e.message||'Erro ao apagar produto');}}
+  function limpar(){setSearch('');setCategoriaId('');setAtivo('');setTimeout(loadProdutos,0);}  
+  const header=h('div',{className:'d-flex justify-content-between align-items-center mb-4'},h('h2',null,h('i',{className:'fas fa-boxes me-2'}),'Gestão de Produtos'),h('a',{href:'/produtos/cadastro',className:'btn btn-primary'},h('i',{className:'fas fa-plus me-2'}),'Novo Produto'));
+  const filtros = h('div', { className: 'card mb-3' }, [
+    h('div', { className: 'card-body' },
+      h('div', { className: 'row' },
+        h('div', { className: 'col-md-4' }, [
+          h('label', { className: 'form-label', htmlFor: 'searchInput' }, 'Buscar'),
+          h('input', { type: 'text', id: 'searchInput', className: 'form-control', placeholder: 'Nome, código ou descrição...', value: search, onChange: e => setSearch(e.target.value) })
+        ]),
+        h('div', { className: 'col-md-3' }, [
+          h('label', { className: 'form-label', htmlFor: 'categoriaFilter' }, 'Categoria'),
+          h('select', { id: 'categoriaFilter', className: 'form-select', value: categoriaId, onChange: e => setCategoriaId(e.target.value) }, [
+            h('option', { value: '' }, 'Todas as categorias'),
+            ...(categorias || []).map(c => h('option', { key: String(c.id), value: String(c.id) }, `${c.codigo} - ${c.nome}`))
+          ])
+        ]),
+        h('div', { className: 'col-md-3' }, [
+          h('label', { className: 'form-label', htmlFor: 'statusFilter' }, 'Status'),
+          h('select', { id: 'statusFilter', className: 'form-select', value: ativo, onChange: e => setAtivo(e.target.value) }, [
+            h('option', { value: '' }, 'Todos'),
+            h('option', { value: 'true' }, 'Ativo'),
+            h('option', { value: 'false' }, 'Inativo')
+          ])
+        ]),
+        h('div', { className: 'col-md-2 d-flex align-items-end' },
+          h('div', { className: 'd-flex w-100 gap-2' }, [
+            h('button', { type: 'button', className: 'btn btn-primary flex-fill', onClick: loadProdutos }, [h('i', { className: 'fas fa-search me-2' }), 'Filtrar']),
+            h('button', { type: 'button', className: 'btn btn-outline-secondary', onClick: limpar }, [h('i', { className: 'fas fa-times me-2' }), 'Limpar'])
+          ])
+        )
+      )
+    ),
+    h('div', { className: 'px-3 pb-3' }, (function() {
+      const chips = [];
+      if (search) chips.push(h('span', { className: 'badge bg-secondary me-2' }, ['Busca: ', search]));
+      if (categoriaId) chips.push(h('span', { className: 'badge bg-primary me-2' }, ['Categoria: ', String(categoriaId)]));
+      if (ativo !== '') chips.push(h('span', { className: 'badge bg-info me-2' }, ['Status: ', ativo === 'true' ? 'Ativo' : (ativo === 'false' ? 'Inativo' : 'Todos')]));
+      return chips.length ? h('div', { className: 'd-flex flex-wrap align-items-center' }, chips) : null;
+    })())
+  ]);
+  const perSelect=h('div',{className:'d-flex justify-content-end mb-2'},h('div',{className:'input-group',style:{maxWidth:'200px'}},[h('span',{className:'input-group-text'},'Itens'),h('select',{className:'form-select',value:perPage,onChange:e=>{const v=String(e.target.value);setPerPage(v);try{localStorage.setItem('per_page_produtos',v);}catch(_){}}},[h('option',{value:'20'},'20'),h('option',{value:'50'},'50'),h('option',{value:'100'},'100')])]));
+  const rows=produtos.map(p=>{const est=estoqueResumo[p.id]||{totalDisp:0,dispAlmox:0,dispSub:0};const cat=p.categoria_produto;const catCell=cat?h('td',null,[h('span',{className:'badge',style:{backgroundColor:cat.cor,color:'white'}},cat.codigo),h('small',{className:'text-muted d-block'},cat.nome)]):h('td',null,'-');return h('tr',{key:p.id},[h('td',null,h('code',null,p.codigo)),h('td',null,[h('strong',null,p.nome),p.descricao?h('br'):null,p.descricao?h('small',{className:'text-muted'},p.descricao):null]),catCell,h('td',null,[h('span',{className:'text-muted'},p.unidade_medida),h('br'),h('small',null,['Disponível: ',h('strong',null,formatNum(est.totalDisp)),' ',h('span',{className:'text-muted'},`(Almox: ${formatNum(est.dispAlmox)} | Sub: ${formatNum(est.dispSub)})`)])]),h('td',null,h('span',{className:`badge ${p.ativo?'bg-success':'bg-secondary'}`},p.ativo?'Ativo':'Inativo')),h('td',null,h('div',{className:'btn-group btn-group-sm',role:'group'},[h('a',{href:`/produtos/${p.id}`,className:'btn btn-outline-primary',title:'Detalhes'},h('i',{className:'fas fa-eye'})),h('a',{href:`/produtos/${p.id}/recebimento`,className:'btn btn-outline-success',title:'Recebimento'},h('i',{className:'fas fa-plus-circle'})),h('button',{type:'button',className:'btn btn-outline-warning',title:'Editar',onClick:()=>openEdit(p.id)},h('i',{className:'fas fa-edit'})),h('button',{type:'button',className:'btn btn-outline-danger',title:'Apagar',onClick:()=>apagarProduto(p)},h('i',{className:'fas fa-trash'}))]))]);});
+  const mobileCards=(produtos&&produtos.length?produtos.map(p=>{const est=estoqueResumo[p.id]||{totalDisp:0,dispAlmox:0,dispSub:0};return h('div',{className:'card mb-2',key:p.id},h('div',{className:'card-body'},[
+    h('div',{className:'d-flex justify-content-between align-items-center mb-2'},[h('div',null,[h('code',null,p.codigo)]),h('span',{className:`badge ${p.ativo?'bg-success':'bg-secondary'}`},p.ativo?'Ativo':'Inativo')]),
+    h('div',{className:'fw-bold'},p.nome),
+    p.descricao?h('div',{className:'text-muted'},p.descricao):null,
+    h('div',{className:'mt-2'},['Disponível: ',h('strong',null,formatNum(est.totalDisp)),' ',h('span',{className:'text-muted'},`(Almox: ${formatNum(est.dispAlmox)} | Sub: ${formatNum(est.dispSub)})`)]),
+    h('div',{className:'mt-2'},p.unidade_medida),
+    h('div',{className:'d-flex gap-2 mt-2'},[
+      h('a',{href:`/produtos/${p.id}`,className:'btn btn-outline-primary btn-sm'},h('i',{className:'fas fa-eye'})),
+      h('a',{href:`/produtos/${p.id}/recebimento`,className:'btn btn-outline-success btn-sm'},h('i',{className:'fas fa-plus-circle'})),
+      h('button',{type:'button',className:'btn btn-outline-warning btn-sm',onClick:()=>openEdit(p.id)},h('i',{className:'fas fa-edit'})),
+      h('button',{type:'button',className:'btn btn-outline-danger btn-sm',onClick:()=>apagarProduto(p)},h('i',{className:'fas fa-trash'}))
+    ])
+  ]));}):h('div',{className:'text-center text-muted py-3'},[h('i',{className:'fas fa-inbox'}),' ','Nenhum produto encontrado']));
+  const table=h('div',{className:'table-responsive'},h('table',{className:'table table-hover'},[h('thead',{className:'table-light'},h('tr',null,[h('th',null,'Código'),h('th',null,'Nome'),h('th',null,'Categoria'),h('th',null,'Unidade'),h('th',null,'Status'),h('th',null,'Ações')])),h('tbody',null,produtos.length===0?h('tr',null,h('td',{colSpan:6,className:'text-center text-muted'},'Nenhum produto encontrado')):rows)]));
+  const cardTabela=h('div',{className:'card'},h('div',{className:'card-body'},[perSelect,(isMobile?mobileCards:table)]));
+  const spinner=loading?h('div',{className:'px-2'},[h('div',{className:'placeholder-glow mb-2'},h('span',{className:'placeholder col-12'})),h('div',{className:'placeholder-glow mb-2'},h('span',{className:'placeholder col-12'})),h('div',{className:'placeholder-glow mb-2'},h('span',{className:'placeholder col-12'}))]):null;
+  const modal=h('div',{className:'modal fade',id:'editarProdutoModal',tabIndex:-1,'aria-labelledby':'editarProdutoModalLabel','aria-hidden':'true'},h('div',{className:'modal-dialog modal-lg'},h('div',{className:'modal-content'},[h('div',{className:'modal-header'},[h('h5',{className:'modal-title',id:'editarProdutoModalLabel'},'Editar Produto'),h('button',{type:'button',className:'btn-close','data-bs-dismiss':'modal','aria-label':'Close',onClick:()=>{setEditOpen(false);setEditData(null);}})]),h('div',{className:'modal-body'},h('form',{id:'editarProdutoForm'},[h('input',{type:'hidden',value:editData&&editData.id?String(editData.id):''}),h('div',{className:'row'},[h('div',{className:'col-md-8'},h('div',{className:'mb-3'},[h('label',{className:'form-label',htmlFor:'editNome'},'Nome *'),h('input',{type:'text',className:'form-control',id:'editNome',required:true,maxLength:200,value:editData?editData.nome:'',onChange:e=>setEditData(Object.assign({},editData||{},{nome:e.target.value}))})])),h('div',{className:'col-md-4'},h('div',{className:'mb-3'},[h('label',{className:'form-label',htmlFor:'editCodigo'},'Código *'),h('input',{type:'text',className:'form-control',id:'editCodigo',required:true,maxLength:50,value:editData?editData.codigo:'',onChange:e=>setEditData(Object.assign({},editData||{},{codigo:e.target.value}))})]))]),h('div',{className:'mb-3'},[h('label',{className:'form-label',htmlFor:'editDescricao'},'Descrição'),h('textarea',{className:'form-control',id:'editDescricao',rows:3,maxLength:500,value:editData?editData.descricao||'':'',onChange:e=>setEditData(Object.assign({},editData||{},{descricao:e.target.value}))})]),h('div',{className:'row'},[h('div',{className:'col-md-6'},h('div',{className:'mb-3'},[h('label',{className:'form-label',htmlFor:'editCategoriaId'},'Categoria'),h('select',{className:'form-select',id:'editCategoriaId',value:editData&&editData.categoria_id?String(editData.categoria_id):'',onChange:e=>setEditData(Object.assign({},editData||{},{categoria_id:e.target.value}))},[h('option',{value:''},'Selecione...'),...(categorias||[]).map(c=>h('option',{key:String(c.id),value:String(c.id)},`${c.codigo} - ${c.nome}`))])])),h('div',{className:'col-md-6'},h('div',{className:'mb-3'},[h('label',{className:'form-label',htmlFor:'editUnidadeMedida'},'Unidade de Medida'),h('select',{className:'form-select',id:'editUnidadeMedida',value:editData?editData.unidade_medida||'':'',onChange:e=>setEditData(Object.assign({},editData||{},{unidade_medida:e.target.value}))},[h('option',{value:''},'Selecione...'),h('option',{value:'UN'},'Unidade'),h('option',{value:'KG'},'Quilograma'),h('option',{value:'L'},'Litro'),h('option',{value:'M'},'Metro'),h('option',{value:'M²'},'Metro Quadrado'),h('option',{value:'M³'},'Metro Cúbico'),h('option',{value:'CX'},'Caixa'),h('option',{value:'PC'},'Peça'),h('option',{value:'PAR'},'Par'),h('option',{value:'DZ'},'Dúzia')])]))]),h('div',{className:'mb-3'},h('div',{className:'form-check'},[h('input',{className:'form-check-input',type:'checkbox',id:'editAtivo',checked:!!(editData&&editData.ativo),onChange:e=>setEditData(Object.assign({},editData||{},{ativo:e.target.checked}))}),h('label',{className:'form-check-label',htmlFor:'editAtivo'},'Produto ativo')]))])),h('div',{className:'modal-footer'},[h('button',{type:'button',className:'btn btn-secondary','data-bs-dismiss':'modal'},'Cancelar'),h('button',{type:'button',className:'btn btn-primary',onClick:salvarEdicao,disabled:editSaving},[h('i',{className:'fas fa-save me-2'}),editSaving?'Salvando...':'Salvar Alterações'])])])));
+  return h('div',{className:'row'},[h('div',{className:'col-12'},[header,filtros,cardTabela,spinner,modal])]);
 }
-
-// Renderizar produtos na tabela
-function renderizarProdutos(produtos) {
-    const tbody = document.getElementById('produtosTableBody');
-    
-    if (produtos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhum produto encontrado</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = produtos.map(produto => `
-        <tr>
-            <td><code>${produto.codigo}</code></td>
-            <td>
-                <strong>${produto.nome}</strong>
-                ${produto.descricao ? `<br><small class="text-muted">${produto.descricao}</small>` : ''}
-            </td>
-            <td>
-                ${produto.categoria_produto ? 
-                    `<span class="badge" style="background-color: ${produto.categoria_produto.cor}; color: white;">
-                        ${produto.categoria_produto.codigo}
-                    </span>
-                    <small class="text-muted d-block">${produto.categoria_produto.nome}</small>` 
-                    : '-'}
-            </td>
-            <td id="unidade_${produto.id}">
-                <span class="text-muted">${produto.unidade_medida}</span>
-                <br>
-                <small class="text-muted">Carregando estoque...</small>
-            </td>
-            <td>
-                <span class="badge ${produto.ativo ? 'bg-success' : 'bg-secondary'}">
-                    ${produto.ativo ? 'Ativo' : 'Inativo'}
-                </span>
-            </td>
-            <td>
-                <div class="btn-group btn-group-sm" role="group">
-                    <a href="/produtos/${produto.id}" class="btn btn-outline-primary" title="Detalhes">
-                        <i class="fas fa-eye"></i>
-                    </a>
-                    <a href="/produtos/${produto.id}/recebimento" class="btn btn-outline-success" title="Recebimento">
-                        <i class="fas fa-plus-circle"></i>
-                    </a>
-                    <button type="button" class="btn btn-outline-warning" onclick="editarProduto('${produto.id}')" title="Editar">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button type="button" class="btn btn-outline-danger" onclick="apagarProduto('${produto.id}', '${produto.nome}')" title="Apagar">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
-
-    // Após renderizar, carregar estoque disponível e por tipo
-    carregarEstoqueParaProdutos(produtos);
-}
-
-// Paginação removida
-
-// Limpar filtros
-function limparFiltros() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('categoriaFilter').value = '';
-    document.getElementById('statusFilter').value = '';
-    carregarProdutos();
-}
-
-// Editar produto
-function editarProduto(id) {
-    // Buscar dados do produto
-    fetch(`/api/produtos/${id}`)
-        .then(response => response.json())
-        .then(produto => {
-            if (produto.error) {
-                alert('Erro ao carregar produto: ' + produto.error);
-                return;
-            }
-            
-            // Preencher o formulário do modal
-            document.getElementById('editProdutoId').value = produto.id;
-            document.getElementById('editNome').value = produto.nome || '';
-            document.getElementById('editCodigo').value = produto.codigo || '';
-            document.getElementById('editDescricao').value = produto.descricao || '';
-            document.getElementById('editCategoriaId').value = produto.categoria_id ? String(produto.categoria_id) : '';
-            document.getElementById('editUnidadeMedida').value = produto.unidade_medida || '';
-            document.getElementById('editAtivo').checked = produto.ativo;
-
-            // Removido: preenchimento de categorias adicionais
-            
-            // Abrir o modal
-            const modal = new bootstrap.Modal(document.getElementById('editarProdutoModal'));
-            modal.show();
-        })
-        .catch(error => {
-            console.error('Erro ao carregar produto:', error);
-            alert('Erro ao carregar dados do produto');
-        });
-}
-
-// Apagar produto
-function apagarProduto(id, nome) {
-    // Primeiro verificar se o produto tem estoque
-    fetch(`/api/produtos/${id}/estoque`)
-        .then(response => response.json())
-        .then(data => {
-            // Verificar se há estoque usando o formato correto da API
-            const temEstoque = data.estoques && data.estoques.some(estoque => estoque.quantidade > 0);
-            const totalQuantidade = data.resumo ? data.resumo.total_quantidade : 0;
-            
-            if (temEstoque || totalQuantidade > 0) {
-                alert(`Não é possível apagar o produto "${nome}" porque ele possui estoque.\n\nQuantidade total em estoque: ${totalQuantidade}\n\nPara apagar este produto, primeiro você precisa zerar todo o estoque em todos os almoxarifados.`);
-                return;
-            }
-            
-            // Se não tem estoque, pedir confirmação
-            if (confirm(`Tem certeza que deseja apagar o produto "${nome}"?\n\nEsta ação marcará o produto como inativo e ele não aparecerá mais nas listagens.`)) {
-                fetch(`/api/produtos/${id}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                })
-                .then(response => {
-                    if (response.ok) {
-                        alert('Produto apagado com sucesso!');
-                        carregarProdutos(1); // Recarregar a lista
-                    } else {
-                        return response.json().then(data => {
-                            throw new Error(data.error || 'Erro ao apagar produto');
-                        });
-                    }
-                })
-                .catch(error => {
-                    console.error('Erro:', error);
-                    alert('Erro ao apagar produto: ' + error.message);
-                });
-            }
-        })
-        .catch(error => {
-            console.error('Erro ao verificar estoque:', error);
-            alert('Erro ao verificar estoque do produto. Tente novamente.');
-        });
-}
-
-// Salvar edição do produto
-function salvarEdicaoProduto() {
-    const id = document.getElementById('editProdutoId').value;
-    const nome = document.getElementById('editNome').value.trim();
-    const codigo = document.getElementById('editCodigo').value.trim();
-    const descricao = document.getElementById('editDescricao').value.trim();
-    const categoriaId = document.getElementById('editCategoriaId').value;
-    const unidadeMedida = document.getElementById('editUnidadeMedida').value;
-    const ativo = document.getElementById('editAtivo').checked;
-    
-    // Validações básicas
-    if (!nome) {
-        alert('Nome é obrigatório');
-        document.getElementById('editNome').focus();
-        return;
-    }
-    
-    if (!codigo) {
-        alert('Código é obrigatório');
-        document.getElementById('editCodigo').focus();
-        return;
-    }
-    
-    // Preparar dados para envio
-    const dadosProduto = {
-        nome: nome,
-        codigo: codigo,
-        descricao: descricao,
-        unidade_medida: unidadeMedida,
-        ativo: ativo
-    };
-    if (categoriaId) dadosProduto.categoria_id = categoriaId;
-    
-    // Enviar para API
-    fetch(`/api/produtos/${id}`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(dadosProduto)
-    })
-    .then(response => {
-        if (response.ok) {
-            return response.json();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Erro ao atualizar produto');
-            });
-        }
-    })
-    .then(produto => {
-        alert('Produto atualizado com sucesso!');
-        
-        // Fechar modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('editarProdutoModal'));
-        modal.hide();
-        
-        carregarProdutos();
-    })
-    .catch(error => {
-        console.error('Erro:', error);
-        alert('Erro ao atualizar produto: ' + error.message);
-    });
-}
-
-// Carrega e exibe estoque disponível por produto
-function carregarEstoqueParaProdutos(produtos) {
-    const formatNum = (n) => {
-        const val = parseFloat(n || 0);
-        return val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-    };
-
-    produtos.forEach(produto => {
-        const cell = document.getElementById(`unidade_${produto.id}`);
-        if (!cell) return;
-
-        fetchJson(`/api/produtos/${produto.id}/estoque`, { headers: { 'Accept': 'application/json' } })
-            .then(data => {
-                const itens = Array.isArray(data.estoques) ? data.estoques : [];
-                let totalDisp = 0;
-                let dispAlmox = 0;
-                let dispSub = 0;
-
-                itens.forEach(it => {
-                    const q = parseFloat(it.quantidade_disponivel || 0);
-                    const tipo = String(it.tipo || '').toLowerCase();
-                    // Excluir estoque de setores do total disponível
-                    if (tipo !== 'setor') {
-                        totalDisp += q;
-                    }
-                    if (tipo === 'almoxarifado') dispAlmox += q;
-                    // Considerar ambas grafias para compatibilidade
-                    if (tipo === 'sub_almoxarifado' || tipo === 'subalmoxarifado') dispSub += q;
-                });
-
-                cell.innerHTML = `
-                    <span class="text-muted">${produto.unidade_medida}</span>
-                    <br>
-                    <small>
-                        Disponível: <strong>${formatNum(totalDisp)}</strong>
-                        <span class="text-muted">(Almox: ${formatNum(dispAlmox)} | Sub: ${formatNum(dispSub)})</span>
-                    </small>
-                `;
-            })
-            .catch(err => {
-                console.error('Erro ao carregar estoque do produto', produto.id, err);
-                cell.innerHTML = `
-                    <span class="text-muted">${produto.unidade_medida}</span>
-                    <br>
-                    <small class="text-danger">Estoque indisponível</small>
-                `;
-            });
-    });
-}
-
-// Event listeners
-document.getElementById('searchInput').addEventListener('input', 
-    debounce(() => carregarProdutos(), 500)
-);
-
-document.getElementById('categoriaFilter').addEventListener('change', () => carregarProdutos());
-document.getElementById('statusFilter').addEventListener('change', () => carregarProdutos());
-const perSelEl = document.getElementById('perPageProdutos');
-if (perSelEl) perSelEl.addEventListener('change', () => {
-    try { localStorage.setItem('per_page_produtos', String(perSelEl.value)); } catch(_) {}
-    carregarProdutos();
-});
-
-// Função debounce para otimizar busca
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-// Carregar dados iniciais
-document.addEventListener('DOMContentLoaded', () => {
-    const statusSel = document.getElementById('statusFilter');
-    if (statusSel) statusSel.value = 'true';
-    try {
-        const p = localStorage.getItem('per_page_produtos');
-        const el = document.getElementById('perPageProdutos');
-        if (p && el) el.value = String(p);
-    } catch(_) {}
-    carregarProdutos();
-});
+const root=ReactDOM.createRoot(document.getElementById('produtos-root'));
+root.render(h(ProdutosPage));
 </script>
 {% endblock %}

@@ -3,59 +3,7 @@
 {% block title %}PluckLog - Demandas • Gerência{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2><i class="fas fa-tasks"></i> Demandas • Gerência</h2>
-            </div>
-        </div>
-    </div>
-
-    <div class="row">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-clock"></i> Pendentes</h5>
-                    <div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandasGerencia()">
-                            <i class="fas fa-sync-alt"></i> Atualizar
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body" id="listaDemandasGerencia">
-                    <div class="text-center py-3">
-                        <div class="spinner-border spinner-border-sm" role="status">
-                            <span class="visualmente-oculto">Carregando...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row mt-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-check-circle"></i> Resolvidas</h5>
-                    <div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="carregarDemandasResolvidas()">
-                            <i class="fas fa-sync-alt"></i> Atualizar
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body" id="listaDemandasResolvidas">
-                    <div class="text-center py-3">
-                        <div class="spinner-border spinner-border-sm" role="status">
-                            <span class="visualmente-oculto">Carregando...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+<div id="demandas-gerencia-root"></div>
 
 <!-- Modal Atender Demanda -->
 <div class="modal fade" id="atenderDemandaModal" tabindex="-1" aria-labelledby="atenderDemandaModalLabel" aria-hidden="true">
@@ -151,232 +99,9 @@ function htmlEscape(str) {
 let demandaAtual = null;
 let locaisDisponiveisDemanda = {};
 
-async function carregarDemandasGerencia() {
-    const el = document.getElementById('listaDemandasGerencia');
-    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
-    try {
-        const cacheKey = 'cache:/api/demandas?status=pendente&per_page=50';
-        const cached = window.readCacheJson(cacheKey);
-        let base = (cached && Array.isArray(cached.items)) ? cached.items.slice() : [];
-        if (base.length) {
-            const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-            const rows = base.map(d => {
-                const dataAttr = encodeURIComponent(JSON.stringify(d));
-                const isGrupo = Number(d.items_count || 0) > 0 || String(d.produto_nome||'').startsWith('Lista (');
-                const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
-                const unidade = isGrupo ? '' : (d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '');
-                return `
-                <tr>
-                    <td>${htmlEscape(d.display_id || d.id)}</td>
-                    <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
-                    <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
-                    <td class="text-end">${qtdStr}${unidade}</td>
-                    <td>${htmlEscape(d.destino_tipo || '')}</td>
-                    <td>
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button class="btn btn-primary" data-demanda="${dataAttr}" onclick="abrirModalAtenderDemanda(this)"><i class="fas fa-paper-plane"></i> Enviar</button>
-                            <button class="btn btn-outline-danger" onclick="atualizarStatus('${htmlEscape(d.id)}','negado')"><i class="fas fa-ban"></i> Rejeitar</button>
-                        </div>
-                    </td>
-                </tr>`;
-            }).join('');
-            el.innerHTML = `
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Produto</th>
-                                <th>Setor</th>
-                                <th class="text-end">Qtd</th>
-                                <th>Destino</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-            `;
-        }
-        let lastTs = '';
-        try {
-            const parse = v => { try { return v ? Date.parse(v) : 0; } catch(_) { return 0; } };
-            lastTs = base.reduce((acc, it) => {
-                const t = parse(it.updated_at || it.created_at);
-                return t > acc ? t : acc;
-            }, 0);
-            if (lastTs) lastTs = new Date(lastTs).toISOString();
-        } catch (_) {}
-        const url = lastTs ? `/api/demandas?status=pendente&per_page=50&updated_since=${encodeURIComponent(lastTs)}` : '/api/demandas?status=pendente&per_page=50';
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!res.ok) {
-            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(data.error || 'Erro ao listar')}</div>`;
-            return;
-        }
-        window.writeCacheJson(cacheKey, data, 300000);
-        if (!data.items || !data.items.length) {
-            el.innerHTML = '<div class="text-muted">Nenhuma demanda pendente.</div>';
-            return;
-        }
-        const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-        const seen = new Set();
-        const merged = (data.items || []).concat(base || []);
-        const rows = merged.filter(d => {
-            const id = String(d.id || d.display_id || '');
-            if (seen.has(id)) return false; seen.add(id); return true;
-        }).map(d => {
-            const dataAttr = encodeURIComponent(JSON.stringify(d));
-            const isGrupo = Number(d.items_count || 0) > 0 || String(d.produto_nome||'').startsWith('Lista (');
-            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
-            const unidade = isGrupo ? '' : (d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '');
-            return `
-            <tr>
-                <td>${htmlEscape(d.display_id || d.id)}</td>
-                <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
-                <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
-                <td class="text-end">${qtdStr}${unidade}</td>
-                <td>${htmlEscape(d.destino_tipo || '')}</td>
-                <td>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-primary" data-demanda="${dataAttr}" onclick="abrirModalAtenderDemanda(this)"><i class="fas fa-paper-plane"></i> Enviar</button>
-                        <button class="btn btn-outline-danger" onclick="atualizarStatus('${htmlEscape(d.id)}','negado')"><i class="fas fa-ban"></i> Rejeitar</button>
-                    </div>
-                </td>
-            </tr>`;
-        }).join('');
-        el.innerHTML = `
-            <div class="table-responsive">
-                <table class="table table-sm table-striped">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Produto</th>
-                            <th>Setor</th>
-                            <th class="text-end">Qtd</th>
-                            <th>Destino</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>
-        `;
-    } catch (e) {
-        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
-    }
-}
+ 
 
-async function carregarDemandasResolvidas() {
-    const el = document.getElementById('listaDemandasResolvidas');
-    el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div></div>';
-    try {
-        const cacheKey = 'cache:/api/demandas-resolvidas:listas';
-        const cached = window.readCacheJson(cacheKey);
-        if (cached && Array.isArray(cached.items) && cached.items.length) {
-            const parseDate = (v) => { try { return v ? Date.parse(v) : 0; } catch (_) { return 0; } };
-            const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-            const itemsCached = cached.items.slice().sort((a, b) => (parseDate(b.updated_at || b.created_at) - parseDate(a.updated_at || a.created_at)));
-            const rowsCached = itemsCached.map(d => {
-                const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : (d.status === 'parcialmente_atendido' ? 'warning' : 'secondary'));
-                const whenIso = htmlEscape(d.updated_at || d.created_at || '');
-                const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
-                const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
-                return `
-                <tr>
-                    <td>${htmlEscape(d.display_id || d.id)}</td>
-                    <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
-                    <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
-                    <td class="text-end">${qtdStr}${unidade}</td>
-                    <td>${htmlEscape(d.destino_tipo || '')}</td>
-                    <td><span class="badge bg-${badgeClass}">${htmlEscape(d.status || '')}</span></td>
-                    <td class="text-muted"><span data-datetime-iso="${whenIso}">${whenIso}</span></td>
-                </tr>`;
-            }).join('');
-            el.innerHTML = `
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Produto</th>
-                                <th>Setor</th>
-                                <th class="text-end">Qtd</th>
-                                <th>Destino</th>
-                                <th>Status</th>
-                                <th>Atualizado</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rowsCached}</tbody>
-                    </table>
-                </div>
-            `;
-            if (window.applyLocalDateFormatting) window.applyLocalDateFormatting(el);
-        }
-        const [resAtendido, resParcial, resNegado] = await Promise.all([
-            fetch('/api/demandas?status=atendido&per_page=50'),
-            fetch('/api/demandas?status=parcialmente_atendido&per_page=50'),
-            fetch('/api/demandas?status=negado&per_page=50')
-        ]);
-        const dataAt = await resAtendido.json().catch(() => ({ items: [] }));
-        const dataParc = await resParcial.json().catch(() => ({ items: [] }));
-        const dataNeg = await resNegado.json().catch(() => ({ items: [] }));
-        const ok = resAtendido.ok || resParcial.ok || resNegado.ok;
-        if (!ok) {
-            const errMsg = (dataAt.error || dataParc.error || dataNeg.error || 'Erro ao listar resolvidas');
-            el.innerHTML = `<div class="alert alert-danger">${htmlEscape(errMsg)}</div>`;
-            return;
-        }
-        const items = [...(dataAt.items || []), ...(dataParc.items || []), ...(dataNeg.items || [])];
-        window.writeCacheJson(cacheKey, { items }, 300000);
-        if (!items.length) {
-            el.innerHTML = '<div class="text-muted">Nenhuma demanda resolvida.</div>';
-            return;
-        }
-        const parseDate = (v) => {
-            try { return v ? Date.parse(v) : 0; } catch (_) { return 0; }
-        };
-        items.sort((a, b) => (parseDate(b.updated_at || b.created_at) - parseDate(a.updated_at || a.created_at)));
-        const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-        const rows = items.map(d => {
-            const badgeClass = d.status === 'atendido' ? 'primary' : (d.status === 'negado' ? 'danger' : (d.status === 'parcialmente_atendido' ? 'warning' : 'secondary'));
-            const whenIso = htmlEscape(d.updated_at || d.created_at || '');
-            const qtdStr = nf0.format(Number(d.quantidade_solicitada || 0));
-            const unidade = d.unidade_medida ? ` ${htmlEscape(d.unidade_medida)}` : '';
-            return `
-            <tr>
-                <td>${htmlEscape(d.display_id || d.id)}</td>
-                <td>${htmlEscape(d.produto_nome || d.produto_id)}</td>
-                <td>${htmlEscape(d.setor_nome || d.setor_id)}</td>
-                <td class="text-end">${qtdStr}${unidade}</td>
-                <td>${htmlEscape(d.destino_tipo || '')}</td>
-                <td><span class="badge bg-${badgeClass}">${htmlEscape(d.status || '')}</span></td>
-                <td class="text-muted"><span data-datetime-iso="${whenIso}">${whenIso}</span></td>
-            </tr>`;
-        }).join('');
-        el.innerHTML = `
-            <div class="table-responsive">
-                <table class="table table-sm table-striped">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Produto</th>
-                            <th>Setor</th>
-                            <th class="text-end">Qtd</th>
-                            <th>Destino</th>
-                            <th>Status</th>
-                            <th>Atualizado</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>
-        `;
-        if (window.applyLocalDateFormatting) window.applyLocalDateFormatting(el);
-    } catch (e) {
-        el.innerHTML = `<div class="alert alert-danger">Erro: ${htmlEscape(String(e))}</div>`;
-    }
-}
+ 
 
 async function atualizarStatus(id, status, quantidade_autorizada, opts = {}) {
     const silent = !!opts.silent;
@@ -854,9 +579,17 @@ function validateSelecionados() {
     if (btnSel) btnSel.disabled = (!anySelected || invalid);
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-    carregarDemandasGerencia();
-    carregarDemandasResolvidas();
+// Listas agora renderizadas pelo React
+</script>
+<div id="demandas-gerencia-root"></div>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  if (window.PluckApp && window.PluckApp.mountDemandasGerencia){
+    window.PluckApp.mountDemandasGerencia();
+  }
 });
+// Proxies para atualização das listas via React
+function carregarDemandasGerencia(){ try{ if (window.PluckApp && window.PluckApp.refreshDemandasGerencia) window.PluckApp.refreshDemandasGerencia(); } catch(_){} }
+function carregarDemandasResolvidas(){ try{ if (window.PluckApp && window.PluckApp.refreshDemandasGerencia) window.PluckApp.refreshDemandasGerencia(); } catch(_){} }
 </script>
 {% endblock %}

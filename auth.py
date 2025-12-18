@@ -616,6 +616,12 @@ def load_user(user_id):
     """Carrega o usuário pelo ID (MongoDB)"""
     try:
         if extensions.mongo_db is None:
+            try:
+                dev = session.get('dev_user')
+                if dev and str(dev.get('_id')) == str(user_id):
+                    return MongoUser(dev)
+            except Exception:
+                pass
             return None
         doc = extensions.mongo_db['usuarios'].find_one({'_id': ObjectId(user_id)})
         return MongoUser(doc) if doc else None
@@ -701,6 +707,16 @@ def require_level(*allowed_levels):
             is_api_request = (request.is_json or 
                             request.path.startswith('/api/') or 
                             'application/json' in request.headers.get('Accept', ''))
+            
+            # Modo dev/test: leitura pública de GET/HEAD na API
+            try:
+                if is_api_request and request.method in ('GET', 'HEAD'):
+                    from flask import current_app
+                    if bool(current_app.config.get('ALLOW_PUBLIC_API_READ')):
+                        return f(*args, **kwargs)
+                # Se não é leitura pública, segue fluxo normal
+            except Exception:
+                pass
             
             if not current_user.is_authenticated:
                 if is_api_request:

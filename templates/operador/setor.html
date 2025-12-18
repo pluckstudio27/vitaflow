@@ -107,6 +107,7 @@
 </div>
 
 <script>
+if (false) {
 let selectedProduct = null;
 // Formatação de quantidade para pt-BR com até 2 casas decimais, sem zeros desnecessários
 const fmtQtd = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -484,5 +485,19 @@ buscarProdutos();
 function afterProdutoSelecionado() {
   loadResumoDia();
 }
+}
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  try {
+    var ctx = document.getElementById('operador-setor-context');
+    var sid = ctx && ctx.dataset ? (ctx.dataset.setorId||'') : '';
+    var cont = ctx && ctx.parentElement ? ctx.parentElement : null;
+    if (cont){
+      cont.innerHTML = '<div id="operador-setor-context" data-setor-id="'+sid+'" style="display:none;"></div>' + '<div id="operador-setor-root"></div>';
+      if (window.PluckApp && window.PluckApp.mountOperadorSetor){ window.PluckApp.mountOperadorSetor(); }
+    }
+  } catch(_) {}
+});
 </script>
 {% endblock %}

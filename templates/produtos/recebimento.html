@@ -596,4 +596,12 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('buscarProduto').focus();
 });
 </script>
+<div id="recebimento-root"></div>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  if (window.PluckApp && window.PluckApp.mountRecebimento){
+    window.PluckApp.mountRecebimento();
+  }
+});
+</script>
 {% endblock %}

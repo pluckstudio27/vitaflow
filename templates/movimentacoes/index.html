@@ -3,98 +3,6 @@
 {% block title %}PluckLog - Movimentações{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2><i class="fas fa-exchange-alt"></i> Movimentações</h2>
-                <div>
-                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#novaTransferenciaModal">
-                        <i class="fas fa-plus"></i> Nova Transferência
-                    </button>
-                    <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#distribuicaoModal">
-                        <i class="fas fa-arrow-up"></i> Saída
-                    </button>
-                </div>
-            </div>
-
-            <!-- Filtros -->
-            <div class="card mb-4">
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <label for="filtroTipo" class="form-label">Tipo</label>
-                            <select class="form-select" id="filtroTipo">
-                                <option value="">Todos</option>
-                                <option value="ENTRADA">Entrada</option>
-                                <option value="SAIDA">Saída</option>
-                                <option value="TRANSFERENCIA">Transferência</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="filtroProduto" class="form-label">Produto</label>
-                            <input type="text" class="form-control" id="filtroProduto" placeholder="Nome ou código">
-                        </div>
-                        <div class="col-md-2">
-                            <label for="filtroDataInicio" class="form-label">Data Início</label>
-                            <input type="date" class="form-control" id="filtroDataInicio">
-                        </div>
-                        <div class="col-md-2">
-                            <label for="filtroDataFim" class="form-label">Data Fim</label>
-                            <input type="date" class="form-control" id="filtroDataFim">
-                        </div>
-                        <div class="col-md-2 d-flex align-items-end">
-                            <button type="button" class="btn btn-outline-primary w-100" onclick="filtrarMovimentacoes()">
-                                <i class="fas fa-search"></i> Filtrar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Lista de Movimentações -->
-            <div class="card">
-                <div class="card-body">
-                    <div class="d-flex justify-content-end mb-2">
-                        <button type="button" id="btnOrdenacaoMovs" class="btn btn-outline-secondary btn-sm" onclick="toggleOrdenacaoMovs()" title="Mostrar mais antigas primeiro">
-                            <i class="fas fa-sort-amount-down"></i> Mais recentes primeiro
-                        </button>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Data</th>
-                                    <th>Tipo</th>
-                                    <th>Produto</th>
-                                    <th>Quantidade</th>
-                                    <th>Local</th>
-                                    <th>Responsável</th>
-                                    <th>Motivo</th>
-                                </tr>
-                            </thead>
-                            <tbody id="movimentacoesTableBody">
-                                <tr>
-                                    <td colspan="7" class="text-center">
-                                        <div class="spinner-border text-primary" role="status">
-                                            <span class="visually-hidden">Carregando...</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                    <!-- Paginação -->
-                    <nav id="navPaginacaoMovs" aria-label="Paginação" style="display: none;">
-                        <ul class="pagination justify-content-center" id="paginacao">
-                        </ul>
-                    </nav>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
 <!-- Modal Nova Transferência -->
 <div class="modal fade" id="novaTransferenciaModal" tabindex="-1" aria-labelledby="novaTransferenciaModalLabel" aria-hidden="true">
@@ -1948,9 +1856,12 @@ function atualizarMensagemTransferencia() {
 }
 
 // Event listeners
-document.getElementById('filtroProduto').addEventListener('input', 
-    debounce(() => filtrarMovimentacoes(), 500)
-);
+(function(){
+    const el = document.getElementById('filtroProduto');
+    if (el) {
+        el.addEventListener('input', debounce(function(){ filtrarMovimentacoes(); }, 500));
+    }
+})();
 
 // Listeners de busca nos selects de produtos
 const inputBuscaTransf = document.getElementById('buscaProdutoTransferencia');
@@ -1981,26 +1892,29 @@ function debounce(func, wait) {
 
 // Carregar dados iniciais
 document.addEventListener('DOMContentLoaded', () => {
+    if (window.__REACT_MOVS__) return;
     atualizarBotaoOrdenacao();
     carregarMovimentacoes(1);
     carregarProdutos();
-    // Limpa a lista de setores inicialmente
     renderSetoresDistribuicao([]);
-    // Seleção de origem agora é feita via tabela de disponibilidade; listeners de selects removidos.
-    // Conectar validação reativa na modal de transferência
     const tipoOrigemTransf = document.getElementById('tipoOrigemTransferencia');
     const localOrigemTransf = document.getElementById('localOrigemTransferencia');
     const tipoDestinoTransf = document.getElementById('tipoDestinoTransferencia');
     const localDestinoTransf = document.getElementById('localDestinoTransferencia');
     [tipoOrigemTransf, localOrigemTransf, tipoDestinoTransf, localDestinoTransf].forEach(el => {
-        if (el) {
-            el.addEventListener('change', atualizarMensagemTransferencia);
-        }
+        if (el) { el.addEventListener('change', atualizarMensagemTransferencia); }
     });
     const modalTransf = document.getElementById('novaTransferenciaModal');
-    if (modalTransf) {
-        modalTransf.addEventListener('shown.bs.modal', atualizarMensagemTransferencia);
-    }
+    if (modalTransf) { modalTransf.addEventListener('shown.bs.modal', atualizarMensagemTransferencia); }
+});
+</script>
+<div id="movs-root"></div>
+<script>
+window.__REACT_MOVS__ = true;
+document.addEventListener('DOMContentLoaded', function(){
+  if (window.PluckApp && window.PluckApp.mountMovimentacoes){
+    window.PluckApp.mountMovimentacoes();
+  }
 });
 </script>
 {% endblock %}

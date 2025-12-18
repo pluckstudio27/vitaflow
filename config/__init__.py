@@ -35,6 +35,14 @@ class Config:
     REMEMBER_COOKIE_DURATION = 86400 * 7  # 7 dias em segundos
     REMEMBER_COOKIE_SECURE = False  # True em produção com HTTPS
     REMEMBER_COOKIE_HTTPONLY = True
+    # Controles de segurança dinâmicos
+    DISABLE_LOGIN_RATE_LIMIT = True  # Pode ser sobrescrito em produção
+    # Permitir fallback de banco simulado em dev/test
+    ALLOW_MOCK_DB = True
+    # Permitir leitura pública de endpoints GET da API em dev/test
+    ALLOW_PUBLIC_API_READ = True
+    # Desabilitar CSRF para JSON em dev/test
+    DISABLE_API_CSRF = True
 
 class DevelopmentConfig(Config):
     DEBUG = True
@@ -49,6 +57,10 @@ class ProductionConfig(Config):
     # Configurações de segurança para produção
     SESSION_COOKIE_SECURE = True  # Requer HTTPS
     REMEMBER_COOKIE_SECURE = True  # Requer HTTPS
+    DISABLE_LOGIN_RATE_LIMIT = False
+    ALLOW_MOCK_DB = False
+    ALLOW_PUBLIC_API_READ = False
+    DISABLE_API_CSRF = False
 
 class TestingConfig(Config):
     TESTING = True

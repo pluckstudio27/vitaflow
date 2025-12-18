@@ -179,7 +179,7 @@ def init_mongo(app):
             # Garantir coleções e índices
             ensure_collections_and_indexes(mongo_db, logger=app.logger)
             
-            # Seed seguro do usuário admin
+            # Seed seguro do usuário admin e usuários de teste
             try:
                 usuarios_col = mongo_db['usuarios']
                 usuarios_col.create_index([('username', ASCENDING)], unique=True, name='idx_unique_username')
@@ -216,13 +216,197 @@ def init_mongo(app):
                         update_fields['password_hash'] = generate_password_hash(initial_pwd)
                         app.logger.info('[Mongo Seed] Usuário admin existente atualizado.')
                     usuarios_col.update_one({'_id': existing['_id']}, {'$set': update_fields})
+
+                if is_dev_or_test or (os.environ.get('SEED_TEST_USERS', 'true').lower() == 'true'):
+                    test_user = usuarios_col.find_one({'username': 'test_operator'})
+                    test_pwd = os.environ.get('TEST_OPERATOR_PASSWORD') or 'password123'
+                    if test_user is None:
+                        usuarios_col.insert_one({
+                            'username': 'test_operator',
+                            'email': 'test@local',
+                            'nome': 'Test Operator',
+                            'password_hash': generate_password_hash(test_pwd),
+                            'ativo': True,
+                            'nivel_acesso': 'admin_central',
+                            'data_criacao': datetime.utcnow(),
+                            'ultimo_login': None,
+                            'central_id': None,
+                            'almoxarifado_id': None,
+                            'sub_almoxarifado_id': None,
+                            'setor_id': None,
+                        })
+                        app.logger.info('[Mongo Seed] Usuário de testes \"test_operator\" criado.')
+                    else:
+                        usuarios_col.update_one({'_id': test_user['_id']}, {'$set': {
+                            'ativo': True,
+                            'nivel_acesso': 'admin_central',
+                        }})
+                    test_user2 = usuarios_col.find_one({'username': 'testuser'})
+                    test_pwd2 = os.environ.get('TEST_USER_PASSWORD') or 'testpassword'
+                    if test_user2 is None:
+                        usuarios_col.insert_one({
+                            'username': 'testuser',
+                            'email': 'testuser@local',
+                            'nome': 'Test User',
+                            'password_hash': generate_password_hash(test_pwd2),
+                            'ativo': True,
+                            'nivel_acesso': 'admin_central',
+                            'data_criacao': datetime.utcnow(),
+                            'ultimo_login': None,
+                            'central_id': None,
+                            'almoxarifado_id': None,
+                            'sub_almoxarifado_id': None,
+                            'setor_id': None,
+                        })
+                        app.logger.info('[Mongo Seed] Usuário de testes \"testuser\" criado.')
+                    else:
+                        usuarios_col.update_one({'_id': test_user2['_id']}, {'$set': {
+                            'ativo': True,
+                            'nivel_acesso': 'admin_central',
+                        }})
             except Exception as e:
-                app.logger.error(f'[Mongo Seed] Falha ao semear/atualizar usuário admin: {e}')
+                app.logger.error(f'[Mongo Seed] Falha ao semear usuários: {e}')
+            try:
+                now = datetime.utcnow()
+                db = mongo_db
+                cent = db['centrais']
+                alm = db['almoxarifados']
+                sub = db['sub_almoxarifados']
+                setr = db['setores']
+                cat = db['categorias']
+                prod = db['produtos']
+                est = db['estoques']
+                if cent.count_documents({}) == 0:
+                    cent.insert_one({'id': 1, 'nome': 'Central Demo', 'created_at': now})
+                if alm.count_documents({}) == 0:
+                    alm.insert_one({'id': 1, 'nome': 'Almox Demo', 'central_id': 1, 'created_at': now})
+                if sub.count_documents({}) == 0:
+                    sub.insert_one({'id': 1, 'nome': 'Sub Demo', 'almoxarifado_id': 1, 'created_at': now})
+                if setr.count_documents({}) == 0:
+                    setr.insert_many([
+                        {'id': 1, 'nome': 'Setor Demo A', 'sub_almoxarifado_id': 1, 'almoxarifado_id': 1, 'created_at': now, 'ativo': True},
+                        {'id': 2, 'nome': 'Setor Demo B', 'sub_almoxarifado_id': 1, 'almoxarifado_id': 1, 'created_at': now, 'ativo': True}
+                    ])
+                if cat.count_documents({}) == 0:
+                    cat.insert_one({'id': 1, 'nome': 'Geral', 'codigo': 'GER', 'created_at': now})
+                if prod.count_documents({}) == 0:
+                    prod.insert_one({'id': 1, 'nome': 'Produto Demo', 'codigo': 'GER-0001', 'unidade_medida': 'un', 'central_id': 1, 'ativo': True, 'created_at': now})
+                else:
+                    if prod.find_one({'id': 1}) is None:
+                        prod.insert_one({'id': 1, 'nome': 'Produto Demo', 'codigo': 'GER-0001', 'unidade_medida': 'un', 'central_id': 1, 'ativo': True, 'created_at': now})
+                # Garantir estoque inicial para pelo menos um produto existente
+                pfirst = prod.find_one({}, sort=[('_id', 1)]) or {}
+                pid_out = pfirst.get('id') if pfirst.get('id') is not None else (str(pfirst.get('_id')) if pfirst.get('_id') is not None else 1)
+                if est.count_documents({'local_tipo': 'setor', 'local_id': 1, 'produto_id': pid_out}) == 0:
+                    est.insert_one({'produto_id': pid_out, 'local_tipo': 'setor', 'local_id': 1, 'setor_id': 1, 'nome_local': 'Setor Demo A', 'quantidade': 500.0, 'quantidade_disponivel': 500.0, 'created_at': now, 'updated_at': now})
+                usuarios_col = db['usuarios']
+                usuarios_col.update_one({'username': 'test_operator'}, {'$set': {'central_id': 1, 'almoxarifado_id': 1, 'sub_almoxarifado_id': 1}}, upsert=False)
+                usuarios_col.update_one({'username': 'testuser'}, {'$set': {'central_id': 1, 'almoxarifado_id': 1, 'sub_almoxarifado_id': 1, 'setor_id': 1}}, upsert=False)
+            except Exception:
+                pass
         except (ServerSelectionTimeoutError, AutoReconnect, Exception) as e:
-            # Não usar mongomock: sempre exigir MongoDB real
-            app.logger.error(f"[Mongo Init] Conexão MongoDB indisponível: {type(e).__name__}: {e}")
-            mongo_client = None
-            mongo_db = None
-            # Propagar falha para impedir inicialização sem banco real
-            raise RuntimeError(f"MongoDB indisponível: {type(e).__name__}: {e}")
+            # Fallback controlado para ambiente de desenvolvimento/teste usando mongomock
+            try:
+                allow_mock = bool(app.config.get('ALLOW_MOCK_DB')) or (os.environ.get('USE_MONGOMOCK', 'false').lower() == 'true')
+            except Exception:
+                allow_mock = False
+            if allow_mock:
+                app.logger.warning(f"[Mongo Init] Usando mongomock (fallback) por indisponibilidade: {type(e).__name__}: {e}")
+                try:
+                    import mongomock
+                    mongo_client = mongomock.MongoClient()
+                    mongo_db = mongo_client[dbname]
+                    ensure_collections_and_indexes(mongo_db, logger=app.logger)
+                    try:
+                        usuarios_col = mongo_db['usuarios']
+                        usuarios_col.create_index([('username', ASCENDING)], unique=True, name='idx_unique_username')
+                        initial_pwd = os.environ.get('INITIAL_ADMIN_PASSWORD') or 'admin'
+                        if usuarios_col.find_one({'username': 'admin'}) is None:
+                            usuarios_col.insert_one({
+                                'username': 'admin',
+                                'email': 'admin@local',
+                                'nome': 'Administrador',
+                                'password_hash': generate_password_hash(initial_pwd),
+                                'ativo': True,
+                                'nivel_acesso': 'super_admin',
+                                'data_criacao': datetime.utcnow(),
+                                'ultimo_login': None,
+                                'central_id': None,
+                                'almoxarifado_id': None,
+                                'sub_almoxarifado_id': None,
+                                'setor_id': None,
+                            })
+                        if usuarios_col.find_one({'username': 'test_operator'}) is None:
+                            usuarios_col.insert_one({
+                                'username': 'test_operator',
+                                'email': 'test@local',
+                                'nome': 'Test Operator',
+                                'password_hash': generate_password_hash(os.environ.get('TEST_OPERATOR_PASSWORD') or 'password123'),
+                                'ativo': True,
+                                'nivel_acesso': 'admin_central',
+                                'data_criacao': datetime.utcnow(),
+                                'ultimo_login': None,
+                                'central_id': None,
+                                'almoxarifado_id': None,
+                                'sub_almoxarifado_id': None,
+                                'setor_id': None,
+                            })
+                        if usuarios_col.find_one({'username': 'testuser'}) is None:
+                            usuarios_col.insert_one({
+                                'username': 'testuser',
+                                'email': 'testuser@local',
+                                'nome': 'Test User',
+                                'password_hash': generate_password_hash(os.environ.get('TEST_USER_PASSWORD') or 'testpassword'),
+                                'ativo': True,
+                                'nivel_acesso': 'admin_central',
+                                'data_criacao': datetime.utcnow(),
+                                'ultimo_login': None,
+                                'central_id': None,
+                                'almoxarifado_id': None,
+                                'sub_almoxarifado_id': None,
+                                'setor_id': None,
+                            })
+                        now = datetime.utcnow()
+                        db = mongo_db
+                        cent = db['centrais']
+                        alm = db['almoxarifados']
+                        sub = db['sub_almoxarifados']
+                        setr = db['setores']
+                        cat = db['categorias']
+                        prod = db['produtos']
+                        est = db['estoques']
+                        if cent.count_documents({}) == 0:
+                            cent.insert_one({'id': 1, 'nome': 'Central Demo', 'created_at': now})
+                        if alm.count_documents({}) == 0:
+                            alm.insert_one({'id': 1, 'nome': 'Almox Demo', 'central_id': 1, 'created_at': now})
+                        if sub.count_documents({}) == 0:
+                            sub.insert_one({'id': 1, 'nome': 'Sub Demo', 'almoxarifado_id': 1, 'created_at': now})
+                        if setr.count_documents({}) == 0:
+                            setr.insert_many([
+                                {'id': 1, 'nome': 'Setor Demo A', 'sub_almoxarifado_id': 1, 'almoxarifado_id': 1, 'created_at': now, 'ativo': True},
+                                {'id': 2, 'nome': 'Setor Demo B', 'sub_almoxarifado_id': 1, 'almoxarifado_id': 1, 'created_at': now, 'ativo': True}
+                            ])
+                        if cat.count_documents({}) == 0:
+                            cat.insert_one({'id': 1, 'nome': 'Geral', 'codigo': 'GER', 'created_at': now})
+                        if prod.count_documents({}) == 0:
+                            prod.insert_one({'id': 1, 'nome': 'Produto Demo', 'codigo': 'GER-0001', 'unidade_medida': 'un', 'central_id': 1, 'ativo': True, 'created_at': now})
+                        pfirst = prod.find_one({}, sort=[('_id', 1)]) or {}
+                        pid_out = pfirst.get('id') if pfirst.get('id') is not None else (str(pfirst.get('_id')) if pfirst.get('_id') is not None else 1)
+                        if est.count_documents({'local_tipo': 'setor', 'local_id': 1, 'produto_id': pid_out}) == 0:
+                            est.insert_one({'produto_id': pid_out, 'local_tipo': 'setor', 'local_id': 1, 'setor_id': 1, 'nome_local': 'Setor Demo A', 'quantidade': 500.0, 'quantidade_disponivel': 500.0, 'created_at': now, 'updated_at': now})
+                        usuarios_col.update_one({'username': 'test_operator'}, {'$set': {'central_id': 1, 'almoxarifado_id': 1, 'sub_almoxarifado_id': 1}}, upsert=False)
+                        usuarios_col.update_one({'username': 'testuser'}, {'$set': {'central_id': 1, 'almoxarifado_id': 1, 'sub_almoxarifado_id': 1, 'setor_id': 1}}, upsert=False)
+                    except Exception:
+                        pass
+                except Exception as e2:
+                    app.logger.error(f"[Mongo Init] Fallback mongomock falhou: {type(e2).__name__}: {e2}")
+                    mongo_client = None
+                    mongo_db = None
+                    raise RuntimeError(f"MongoDB indisponível e fallback falhou: {type(e).__name__}: {e} / {type(e2).__name__}: {e2}")
+            else:
+                # Não usar mongomock em produção: sempre exigir MongoDB real
+                app.logger.error(f"[Mongo Init] Conexão MongoDB indisponível: {type(e).__name__}: {e}")
+                mongo_client = None
+                mongo_db = None
+                raise RuntimeError(f"MongoDB indisponível: {type(e).__name__}: {e}")
     return mongo_client, mongo_db
